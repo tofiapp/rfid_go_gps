@@ -60,6 +60,7 @@ public class LocationCache implements LocationListener {
     private final LocationManager locationManager;
     private Listener listener;
     private Snapshot snapshot = Snapshot.empty();
+    private Snapshot testOverride = Snapshot.empty();
     private boolean running;
 
     public LocationCache(Context context) {
@@ -71,16 +72,40 @@ public class LocationCache implements LocationListener {
     }
 
     public synchronized Snapshot getSnapshot() {
+        if (testOverride.valid) return testOverride;
         return snapshot;
     }
 
     public boolean hasFix() {
-        return snapshot.valid;
+        return testOverride.valid || snapshot.valid;
+    }
+
+    public boolean hasTestOverride() {
+        return testOverride.valid;
+    }
+
+    public void setTestOverride(double latitude, double longitude) {
+        synchronized (this) {
+            testOverride = new Snapshot(
+                    latitude, longitude, 5f, System.currentTimeMillis(), true, "test");
+        }
+        if (listener != null) listener.onLocationUpdated();
+    }
+
+    public void clearTestOverride() {
+        boolean hadOverride;
+        synchronized (this) {
+            hadOverride = testOverride.valid;
+            testOverride = Snapshot.empty();
+        }
+        if (hadOverride && listener != null) listener.onLocationUpdated();
     }
 
     public boolean isStale() {
-        if (!snapshot.valid) return false;
-        return System.currentTimeMillis() - snapshot.gpsTimeMs > STALE_AFTER_MS;
+        Snapshot active = getSnapshot();
+        if (!active.valid) return false;
+        if (testOverride.valid) return false;
+        return System.currentTimeMillis() - active.gpsTimeMs > STALE_AFTER_MS;
     }
 
     public void start(Context context) {
@@ -213,6 +238,9 @@ public class LocationCache implements LocationListener {
     public String formatStatusText() {
         Snapshot s = getSnapshot();
         if (!s.valid) return "GPS čekám…";
+        if (testOverride.valid) {
+            return String.format(Locale.getDefault(), "TEST %.4f° %.4f°", s.latitude, s.longitude);
+        }
         if (isStale()) {
             return String.format(Locale.getDefault(), "GPS ⚠ %.4f° %.4f°", s.latitude, s.longitude);
         }

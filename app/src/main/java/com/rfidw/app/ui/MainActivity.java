@@ -101,6 +101,9 @@ public class MainActivity extends AppCompatActivity {
     private long lastGpsLookupTimeMs;
     private static final double GPS_LOOKUP_MIN_MOVE_M = 5.0;
     private static final long GPS_LOOKUP_MIN_INTERVAL_MS = 1000;
+    private static final String PREF_GPS_TEST_MODE = "gpsTestMode";
+    private static final String PREF_TEST_LAT = "testLat";
+    private static final String PREF_TEST_LON = "testLon";
 
     private CsvStore csvStore;
     private CsvAdapter csvAdapter;
@@ -128,7 +131,10 @@ public class MainActivity extends AppCompatActivity {
     private NestedScrollView mainScroll;
     private BottomSheetBehavior<View> workflowBehavior;
     private EditText etAccessPwd, etPower, etPwdAccess, etPwdNew, etLockAccessPwd;
-    private CheckBox cbAutoCsv;
+    private CheckBox cbAutoCsv, cbGpsTestMode;
+    private View btnPickTestLocation;
+    private TextView tvGpsTestModeHint;
+    private boolean gpsTestMode;
     private MaterialButtonToggleGroup powerPresetGroup;
     private Boolean powerPresetInKoleji;
     private boolean showGpsStatus;
@@ -153,6 +159,7 @@ public class MainActivity extends AppCompatActivity {
         setupTemplateRows();
         setupCsv();
         setupListeners();
+        setupGpsTestMode();
         tryAutoLoadDefaultDatabase();
 
         etPower.setText("");
@@ -209,6 +216,9 @@ public class MainActivity extends AppCompatActivity {
         etPwdNew = findViewById(R.id.etPwdNew);
         etLockAccessPwd = findViewById(R.id.etLockAccessPwd);
         cbAutoCsv = findViewById(R.id.cbAutoCsv);
+        cbGpsTestMode = findViewById(R.id.cbGpsTestMode);
+        btnPickTestLocation = findViewById(R.id.btnPickTestLocation);
+        tvGpsTestModeHint = findViewById(R.id.tvGpsTestModeHint);
         powerPresetGroup = findViewById(R.id.powerPresetGroup);
 
         rows[0] = findViewById(R.id.row1);
@@ -861,8 +871,13 @@ public class MainActivity extends AppCompatActivity {
         if (!step1Done) {
             if (gpsAutoSelection) {
                 showGpsStatus = true;
-                tvReaderStatus.setText(getString(R.string.gps_tudu_wait));
-                tvReaderStatus.setTextColor(COLOR_STATUS_GPS_WAIT);
+                if (gpsTestMode && locationCache != null && locationCache.hasTestOverride()) {
+                    tvReaderStatus.setText(getString(R.string.gps_test_status));
+                    tvReaderStatus.setTextColor(COLOR_STATUS_READY);
+                } else {
+                    tvReaderStatus.setText(getString(R.string.gps_tudu_wait));
+                    tvReaderStatus.setTextColor(COLOR_STATUS_GPS_WAIT);
+                }
                 refreshGpsStatus(false);
             } else {
                 setActionStatus(getString(R.string.tudu_select_status), COLOR_STATUS_ERROR);
@@ -918,7 +933,11 @@ public class MainActivity extends AppCompatActivity {
     private void ensureGpsForTuduLookup() {
         ensureLocationPermission();
         if (locationCache != null) {
-            locationCache.refresh(this);
+            if (gpsTestMode) {
+                restoreTestLocationFromPrefs();
+            } else {
+                locationCache.refresh(this);
+            }
             scheduleGpsTuduLookup();
             if (!workflowRunning) {
                 setActionStatusReady();
@@ -1172,6 +1191,159 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.btnDeleteConfirmNo).setOnClickListener(v -> onDeleteConfirmNo());
     }
 
+    private void setupGpsTestMode() {
+        gpsTestMode = prefs.getBoolean(PREF_GPS_TEST_MODE, false);
+        cbGpsTestMode.setChecked(gpsTestMode);
+        updateGpsTestModeUi();
+        cbGpsTestMode.setOnCheckedChangeListener((buttonView, isChecked) -> onGpsTestModeChanged(isChecked));
+        btnPickTestLocation.setOnClickListener(v -> showTestLocationPicker());
+        if (gpsTestMode) {
+            restoreTestLocationFromPrefs();
+        }
+    }
+
+    private void updateGpsTestModeUi() {
+        int visibility = gpsTestMode ? View.VISIBLE : View.GONE;
+        tvGpsTestModeHint.setVisibility(visibility);
+        btnPickTestLocation.setVisibility(visibility);
+    }
+
+    private void onGpsTestModeChanged(boolean enabled) {
+        gpsTestMode = enabled;
+        prefs.edit().putBoolean(PREF_GPS_TEST_MODE, enabled).apply();
+        updateGpsTestModeUi();
+        if (locationCache == null) return;
+        if (enabled) {
+            gpsAutoSelection = true;
+            lastGpsLookupLat = null;
+            lastGpsLookupLon = null;
+            lastGpsLookupTimeMs = 0;
+            toast(getString(R.string.gps_test_enabled_toast));
+            if (restoreTestLocationFromPrefs()) {
+                scheduleGpsTuduLookup();
+            }
+        } else {
+            clearSavedTestLocation();
+            locationCache.clearTestOverride();
+            locationCache.refresh(this);
+            lastGpsLookupLat = null;
+            lastGpsLookupLon = null;
+            lastGpsLookupTimeMs = 0;
+            scheduleGpsTuduLookup();
+        }
+        if (!workflowRunning) {
+            setActionStatusReady();
+        }
+    }
+
+    private void saveTestLocationToPrefs(double lat, double lon) {
+        prefs.edit()
+                .putLong(PREF_TEST_LAT, Double.doubleToRawLongBits(lat))
+                .putLong(PREF_TEST_LON, Double.doubleToRawLongBits(lon))
+                .apply();
+    }
+
+    private void clearSavedTestLocation() {
+        prefs.edit()
+                .remove(PREF_TEST_LAT)
+                .remove(PREF_TEST_LON)
+                .apply();
+    }
+
+    private boolean restoreTestLocationFromPrefs() {
+        if (!gpsTestMode || locationCache == null) return false;
+        if (!prefs.contains(PREF_TEST_LAT) || !prefs.contains(PREF_TEST_LON)) return false;
+        double lat = Double.longBitsToDouble(prefs.getLong(PREF_TEST_LAT, 0));
+        double lon = Double.longBitsToDouble(prefs.getLong(PREF_TEST_LON, 0));
+        locationCache.setTestOverride(lat, lon);
+        return true;
+    }
+
+    private void showTestLocationPicker() {
+        if (dzsDatabase == null) {
+            toast(getString(R.string.db_select_required));
+            expandCard1Body();
+            return;
+        }
+        io.execute(() -> {
+            List<DzsDatabase.GpsPoint> points = dzsDatabase.listGpsPoints();
+            ui.post(() -> {
+                if (points.isEmpty()) {
+                    toast(getString(R.string.gps_test_no_gps_point));
+                    return;
+                }
+                showTestLocationPickerDialog(points);
+            });
+        });
+    }
+
+    private void showTestLocationPickerDialog(List<DzsDatabase.GpsPoint> points) {
+        ListView listView = new ListView(this);
+        listView.setChoiceMode(ListView.CHOICE_MODE_SINGLE);
+        ArrayAdapter<DzsDatabase.GpsPoint> adapter = new ArrayAdapter<DzsDatabase.GpsPoint>(this,
+                android.R.layout.simple_list_item_single_choice, points) {
+            @NonNull
+            @Override
+            public View getView(int position, View convertView, @NonNull ViewGroup parent) {
+                TextView tv = (TextView) super.getView(position, convertView, parent);
+                DzsDatabase.GpsPoint point = points.get(position);
+                String coords = String.format(Locale.getDefault(), "%.4f° %.4f°", point.latitude, point.longitude);
+                if (point.label.isEmpty()) {
+                    tv.setText(coords);
+                } else {
+                    tv.setText(coords + " → " + point.label);
+                }
+                return tv;
+            }
+        };
+        listView.setAdapter(adapter);
+
+        double savedLat = prefs.contains(PREF_TEST_LAT)
+                ? Double.longBitsToDouble(prefs.getLong(PREF_TEST_LAT, 0)) : Double.NaN;
+        double savedLon = prefs.contains(PREF_TEST_LON)
+                ? Double.longBitsToDouble(prefs.getLong(PREF_TEST_LON, 0)) : Double.NaN;
+        for (int i = 0; i < points.size(); i++) {
+            DzsDatabase.GpsPoint point = points.get(i);
+            if (Math.abs(point.latitude - savedLat) < 1e-6
+                    && Math.abs(point.longitude - savedLon) < 1e-6) {
+                listView.setItemChecked(i, true);
+                break;
+            }
+        }
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.gps_test_pick_title)
+                .setView(listView)
+                .setNegativeButton("Zrušit", null)
+                .create();
+
+        listView.setOnItemClickListener((parent, view, position, id) -> {
+            DzsDatabase.GpsPoint point = points.get(position);
+            applyTestCoordinates(point.latitude, point.longitude);
+            dialog.dismiss();
+        });
+        dialog.show();
+    }
+
+    private void applyTestCoordinates(double lat, double lon) {
+        gpsAutoSelection = true;
+        gpsTestMode = true;
+        cbGpsTestMode.setChecked(true);
+        updateGpsTestModeUi();
+        prefs.edit().putBoolean(PREF_GPS_TEST_MODE, true).apply();
+        saveTestLocationToPrefs(lat, lon);
+        if (locationCache != null) {
+            locationCache.setTestOverride(lat, lon);
+        }
+        lastGpsLookupLat = null;
+        lastGpsLookupLon = null;
+        lastGpsLookupTimeMs = 0;
+        scheduleGpsTuduLookup();
+        if (!workflowRunning) {
+            setActionStatusReady();
+        }
+    }
+
     // ---------- výběr souboru / TUDU ----------
 
     private final androidx.activity.result.ActivityResultLauncher<Intent> picker =
@@ -1351,7 +1523,13 @@ public class MainActivity extends AppCompatActivity {
         }
         ensureGpsForTuduLookup();
         if (!step1Done) {
-            toast(getString(R.string.gps_tudu_wait));
+            if (gpsTestMode) {
+                if (locationCache == null || !locationCache.hasTestOverride()) {
+                    toast(getString(R.string.gps_test_enabled_toast));
+                }
+            } else {
+                toast(getString(R.string.gps_tudu_wait));
+            }
         }
     }
 

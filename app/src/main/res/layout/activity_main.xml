@@ -165,6 +165,32 @@
                         android:text="@string/db_none"
                         android:textColor="@color/text_muted"
                         android:textSize="12sp"/>
+
+                    <CheckBox
+                        android:id="@+id/cbGpsTestMode"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/gps_test_mode_label"/>
+
+                    <TextView
+                        android:id="@+id/tvGpsTestModeHint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:paddingStart="4dp"
+                        android:text="@string/gps_test_mode_hint"
+                        android:textColor="@color/text_muted"
+                        android:textSize="11sp"
+                        android:visibility="gone"/>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnPickTestLocation"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/gps_test_pick_location"
+                        android:visibility="gone"/>
                 </LinearLayout>
             </LinearLayout>
 
