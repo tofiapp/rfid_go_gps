@@ -155,14 +155,14 @@
                         android:id="@+id/btnPickSource"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Vybrat soubor (.csv / .sql)"/>
+                        android:text="@string/btn_pick_db"/>
 
                     <TextView
                         android:id="@+id/tvSourceFile"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:paddingTop="4dp"
-                        android:text="Žádný soubor"
+                        android:text="Žádná databáze"
                         android:textColor="@color/text_muted"
                         android:textSize="12sp"/>
                 </LinearLayout>

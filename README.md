@@ -1,6 +1,6 @@
 # RFID Go GPS
 
-Android aplikace (verze **3.1**) pro čtečku **Chainway C5** (vestavěný UHF UART modul, RSCJA/Chainway SDK).
+Android aplikace (verze **3.2**) pro čtečku **Chainway C5** (vestavěný UHF UART modul, RSCJA/Chainway SDK).
 Slouží k **přepisu EPC** UHF tagů podle definované šablony, **zaheslování** a **zamčení** tagů, k **zápisu údajů o tagu do tabulky CSV** a k **záznamu GPS polohy čtečky** při každém tagu.
 
 ---
@@ -13,28 +13,25 @@ Hlavní obrazovka vede operátora třemi kroky (**TUDU → Načtení → Hotovo*
 
 | Krok | Název | Popis |
 |------|-------|-------|
-| 1 | TUDU | Vybrán zdrojový soubor, TUDU a výhybka |
+| 1 | TUDU | Vybrána databáze SQLite, TUDU a výhybka (z GPS nebo ručně) |
 | 2 | Načtení | Probíhá zápis EPC, hesla a zamčení tagu |
 | 3 | Hotovo | Tag úspěšně zpracován – potvrzení nebo opakování |
 
-### 1. Zdroj dat – výběr TUDU
-- Načte úseky **TUDU** ze souboru `.CSV` nebo `.SQL`.
-- Po načtení souboru se automaticky otevře dialog s **vyhledáváním TUDU**.
-- TUDU a výhybku lze kdykoli změnit klepnutím na náhledový panel (TUDU / Výhybka).
+### 1. Zdroj dat – SQLite databáze a GPS
+- Načte databázi **SQLite** (`.db` / `.sqlite`) s tabulkami `DZS_SUPERTRA_GPS_KM` a `DZS_SUPER_RO_TPI`.
+- Podle **aktuální GPS polohy** najde nejbližší bod v `DZS_SUPERTRA_GPS_KM`, z něj vezme `SUPER_Z_ID` a `SUPER_D_ID` a v `DZS_SUPER_RO_TPI` dohledá **TUDU** a **číslo výhybky**.
+- Hodnoty se automaticky doplní do **náhledového panelu** nahoře (TUDU / Výhybka / čip).
+- TUDU a výhybku lze kdykoli **ručně změnit** klepnutím na náhledový panel – tím se vypne automatická aktualizace z GPS.
 - Výběr výhybky zohledňuje **již zapsané části v CSV** – dokončené výhybky jsou v seznamu zašedlé a nevybíratelné.
 - Při výběru výhybky se automaticky nastaví **první chybějící část** podle CSV.
 
-Formát vstupního souboru (oddělovač `;` nebo `,`, hlavička volitelná):
+**Očekávané sloupce**
 
-```
-TUDU;VYHYBKA;CAST_MIN;CAST_MAX
-1501J1;1;1;3
-1501J1;10;1;4
-1501A;5;1;3
-```
+`DZS_SUPERTRA_GPS_KM`: `SUPER_Z_ID`, `SUPER_D_ID`, souřadnice (`LATITUDE`/`LONGITUDE` nebo `LAT`/`LON`, …)
 
-Stačí i jen `TUDU;VYHYBKA` – části se doplní na `1–3`.
-Vzorové soubory jsou ve složce [`sample_data/`](sample_data).
+`DZS_SUPER_RO_TPI`: `SUPER_Z_ID`, `SUPER_D_ID`, `TUDU`, `VYHYBKA` (volitelně `CAST_MIN`, `CAST_MAX`)
+
+Vzorová databáze je ve složce [`sample_data/`](sample_data).
 
 **Nápověda k části výhybky** – u výhybek se třemi částmi (1–3) se pod výběrem zobrazí textová nápověda:
 - část 1 → *jazyk*
@@ -159,7 +156,8 @@ Výsledné APK je k dispozici jako artefakt **rfid-go-gps-debug-apk**.
 app/src/main/java/com/rfidw/app/
 ├─ epc/EpcModel.java       – sestavení a rozklad EPC (jádro logiky)
 ├─ data/Tudu.java          – model TUDU + výhybky
-├─ data/TuduLoader.java    – načítání z .csv / .sql
+├─ data/DzsDatabase.java   – SQLite: GPS → TUDU / výhybka
+├─ data/TuduLoader.java    – (legacy) načítání z .csv / .sql
 ├─ csv/CsvStore.java       – výstupní CSV s přepisem podle ID_RFID
 ├─ location/LocationCache.java – cache GPS polohy (satelitní fix, aktualizace 500 ms)
 ├─ rfid/UhfManager.java    – obal nad RFIDWithUHFUART (EPC, heslo, zamčení)
