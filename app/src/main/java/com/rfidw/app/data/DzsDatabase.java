@@ -156,6 +156,44 @@ public class DzsDatabase implements Closeable {
         }
     }
 
+    /**
+     * GPS bod pro konkrétní TUDU a výhybku – pro testovací režim bez fyzické polohy u koleje.
+     */
+    public GpsMatch findMatchForTuduVyhybka(String tudu, int vyhybka) {
+        if (tudu == null || tudu.isEmpty()) return null;
+
+        String lookupSql = "SELECT " + roColumns.superZId + ", " + roColumns.superDId
+                + " FROM " + TABLE_RO_TPI
+                + " WHERE " + roColumns.tudu + " = ? AND " + roColumns.vyhybka + " = ?"
+                + " LIMIT 1";
+
+        String superZId = null;
+        String superDId = null;
+        try (Cursor c = db.rawQuery(lookupSql, new String[]{tudu, String.valueOf(vyhybka)})) {
+            if (!c.moveToFirst()) return null;
+            superZId = c.getString(0);
+            superDId = c.getString(1);
+        }
+        if (superZId == null || superDId == null) return null;
+
+        String gpsSql = "SELECT " + gpsColumns.latitude + ", " + gpsColumns.longitude
+                + " FROM " + TABLE_GPS_KM
+                + " WHERE " + gpsColumns.superZId + " = ? AND " + gpsColumns.superDId + " = ?"
+                + " AND " + gpsColumns.latitude + " IS NOT NULL"
+                + " AND " + gpsColumns.longitude + " IS NOT NULL"
+                + " LIMIT 1";
+
+        double lat;
+        double lon;
+        try (Cursor c = db.rawQuery(gpsSql, new String[]{superZId, superDId})) {
+            if (!c.moveToFirst()) return null;
+            lat = c.getDouble(0);
+            lon = c.getDouble(1);
+        }
+
+        return new GpsMatch(superZId, superDId, tudu, vyhybka, lat, lon, 0);
+    }
+
     @Override
     public void close() {
         db.close();
