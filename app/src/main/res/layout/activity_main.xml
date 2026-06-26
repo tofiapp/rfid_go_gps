@@ -379,6 +379,16 @@
                 app:layout_constraintTop_toTopOf="parent"/>
         </androidx.constraintlayout.widget.ConstraintLayout>
 
+        <TextView
+            android:id="@+id/tvGpsStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:paddingBottom="6dp"
+            android:textColor="@color/text_muted"
+            android:textSize="13sp"
+            android:visibility="gone"/>
+
         <LinearLayout
             android:id="@+id/stepIndicator"
             android:layout_width="match_parent"
