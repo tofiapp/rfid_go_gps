@@ -1,6 +1,7 @@
 package com.rfidw.app.ui;
 
 import android.Manifest;
+import android.content.ContentUris;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -12,6 +13,7 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.graphics.Typeface;
+import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.text.Editable;
 import android.text.SpannableString;
@@ -107,8 +109,8 @@ public class MainActivity extends AppCompatActivity {
     private boolean workflowRunning, chainWorkflow, scanDoneAwaitingConfirm, lastRecordUnlocked;
     /** CSV obnoveno dřív než zdrojový soubor – posun na další čip/výhybku až po načtení TUDU. */
     private boolean pendingAdvanceFromCsv;
-    /** Po obnově z CSV vyžadovat ruční výběr TUDU (bez auto-výběru podle posledního záznamu). */
-    private boolean requireManualTuduSelection;
+    /** Po obnově z CSV neobnovovat TUDU z posledního řádku – určit podle GPS. */
+    private boolean skipCsvTuduRestore;
     private int activeStep;
 
     // view reference
@@ -403,12 +405,9 @@ public class MainActivity extends AppCompatActivity {
                 android.R.layout.simple_list_item_single_choice, filteredCodes);
         listView.setAdapter(adapter);
 
-        int checked = -1;
-        if (!requireManualTuduSelection) {
-            String preselect = currentTudu != null ? currentTudu.code
-                    : (epc.tudu != null ? epc.tudu : "");
-            checked = filteredCodes.indexOf(preselect);
-        }
+        String preselect = currentTudu != null ? currentTudu.code
+                : (epc.tudu != null ? epc.tudu : "");
+        int checked = filteredCodes.indexOf(preselect);
         if (checked >= 0) listView.setItemChecked(checked, true);
 
         AlertDialog dialog = new AlertDialog.Builder(this)
@@ -421,7 +420,7 @@ public class MainActivity extends AppCompatActivity {
             String code = filteredCodes.get(position);
             for (Tudu t : tuduList) {
                 if (t.code.equals(code)) {
-                    requireManualTuduSelection = false;
+                    skipCsvTuduRestore = false;
                     if (pendingAdvanceFromCsv) {
                         selectTuduPreservingEpc(t);
                     } else {
@@ -442,12 +441,10 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
             adapter.notifyDataSetChanged();
-            if (!requireManualTuduSelection) {
-                String selected = currentTudu != null ? currentTudu.code
-                        : (epc.tudu != null ? epc.tudu : "");
-                int pos = filteredCodes.indexOf(selected);
-                if (pos >= 0) listView.setItemChecked(pos, true);
-            }
+            String selected = currentTudu != null ? currentTudu.code
+                    : (epc.tudu != null ? epc.tudu : "");
+            int pos = filteredCodes.indexOf(selected);
+            if (pos >= 0) listView.setItemChecked(pos, true);
         }));
 
         dialog.show();
@@ -860,7 +857,11 @@ public class MainActivity extends AppCompatActivity {
 
     private void setActionStatusReady() {
         if (!step1Done) {
-            setActionStatus(getString(R.string.tudu_select_status), COLOR_STATUS_ERROR);
+            if (gpsAutoSelection && locationCache != null && !locationCache.hasFix()) {
+                setActionStatus(getString(R.string.gps_tudu_wait), COLOR_STATUS_GPS_WAIT);
+            } else {
+                setActionStatus(getString(R.string.tudu_select_status), COLOR_STATUS_ERROR);
+            }
             return;
         }
         if (!isPowerPresetSelected()) {
@@ -1103,7 +1104,7 @@ public class MainActivity extends AppCompatActivity {
         resetTagWorkflow();
 
         lastRecordUnlocked = true;
-        requireManualTuduSelection = true;
+        skipCsvTuduRestore = true;
         updateLastRecordPreview();
     }
 
@@ -1168,7 +1169,7 @@ public class MainActivity extends AppCompatActivity {
     private void tryAutoLoadDefaultDatabase() {
         tvSourceFile.setText(getString(R.string.db_auto_loading));
         io.execute(() -> {
-            File found = findDefaultDatabaseFile(false);
+            File found = findDefaultDatabaseFile();
             if (found != null) {
                 loadDatabaseFromPath(found.getAbsolutePath(), DEFAULT_DB_NAME, false);
                 return;
@@ -1178,12 +1179,7 @@ public class MainActivity extends AppCompatActivity {
                 ui.post(this::requestStoragePermissionIfNeeded);
                 return;
             }
-            found = findDefaultDatabaseFile(true);
-            if (found != null) {
-                loadDatabaseFromPath(found.getAbsolutePath(), DEFAULT_DB_NAME, false);
-            } else {
-                ui.post(() -> tvSourceFile.setText(R.string.db_none));
-            }
+            ui.post(() -> tvSourceFile.setText(R.string.db_none));
         });
     }
 
@@ -1202,31 +1198,62 @@ public class MainActivity extends AppCompatActivity {
                 REQUEST_STORAGE_PERMISSION);
     }
 
-    private File findDefaultDatabaseFile(boolean includeSharedStorage) {
+    private File findDefaultDatabaseFile() {
         List<File> dirs = new ArrayList<>();
         File ext = getExternalFilesDir(null);
         if (ext != null) dirs.add(ext);
         File appDownloads = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
         if (appDownloads != null) dirs.add(appDownloads);
         dirs.add(getFilesDir());
-        if (includeSharedStorage && canReadSharedStorage()) {
+        if (canReadSharedStorage()) {
             File pubDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
             if (pubDownloads != null) dirs.add(pubDownloads);
             File root = Environment.getExternalStorageDirectory();
             if (root != null) dirs.add(root);
             dirs.add(new File("/storage/emulated/0"));
+            dirs.add(new File("/storage/emulated/0/Download"));
         }
         for (File dir : dirs) {
             if (dir == null || !dir.isDirectory()) continue;
             File candidate = new File(dir, DEFAULT_DB_NAME);
             if (candidate.isFile() && candidate.canRead()) return candidate;
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            File fromMediaStore = copyDefaultDatabaseFromMediaStore();
+            if (fromMediaStore != null) return fromMediaStore;
+        }
+        return null;
+    }
+
+    /** Android 10+ – hledání v Stažených souborech přes MediaStore (funguje i bez READ_EXTERNAL_STORAGE). */
+    private File copyDefaultDatabaseFromMediaStore() {
+        Uri uri = findDefaultDatabaseUriViaMediaStore();
+        if (uri == null) return null;
+        try {
+            return copyUriToCache(uri, "dzs_auto_source.db");
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private Uri findDefaultDatabaseUriViaMediaStore() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null;
+        Uri collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI;
+        String[] projection = { MediaStore.Downloads._ID };
+        String selection = MediaStore.Downloads.DISPLAY_NAME + "=?";
+        String[] args = { DEFAULT_DB_NAME };
+        try (Cursor c = getContentResolver().query(collection, projection, selection, args, null)) {
+            if (c != null && c.moveToFirst()) {
+                long id = c.getLong(0);
+                return ContentUris.withAppendedId(collection, id);
+            }
+        } catch (Exception ignored) { }
         return null;
     }
 
     private boolean canReadSharedStorage() {
-        if (Build.VERSION.SDK_INT >= 33) return false;
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true;
+        if (Build.VERSION.SDK_INT >= 33) return false;
         return ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
                 == PackageManager.PERMISSION_GRANTED;
     }
@@ -1281,8 +1308,12 @@ public class MainActivity extends AppCompatActivity {
             toast("Databáze neobsahuje žádné TUDU");
             return;
         }
-        if (requireManualTuduSelection) {
-            showTuduPicker();
+        if (skipCsvTuduRestore) {
+            skipCsvTuduRestore = false;
+            scheduleGpsTuduLookup();
+            if (!step1Done) {
+                toast(getString(R.string.gps_tudu_wait));
+            }
             return;
         }
         if (epc.tudu != null && !epc.tudu.isEmpty()) {
@@ -1326,6 +1357,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void applyGpsMatch(DzsDatabase.GpsMatch match) {
+        pendingAdvanceFromCsv = false;
         Tudu tudu = null;
         for (Tudu t : tuduList) {
             if (t.code.equals(match.tudu)) {
