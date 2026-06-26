@@ -143,13 +143,13 @@ public class MainActivity extends AppCompatActivity {
         prefs = getSharedPreferences("rfidgogps", MODE_PRIVATE);
 
         bindViews();
+        setupLocation();
         setupTopBarInsets();
         setupWorkflowSheet();
         setupCollapsibles();
         collapseWorkflowCards();
         setupTemplateRows();
         setupCsv();
-        setupLocation();
         setupListeners();
         tryAutoLoadDefaultDatabase();
 
@@ -895,9 +895,24 @@ public class MainActivity extends AppCompatActivity {
         locationCache = new LocationCache(this);
         locationCache.setListener(() -> {
             scheduleGpsTuduLookup();
-            refreshGpsStatus();
+            if (!workflowRunning) {
+                setActionStatusReady();
+            } else if (showGpsStatus) {
+                refreshGpsStatus();
+            }
         });
         ensureLocationPermission();
+    }
+
+    private void ensureGpsForTuduLookup() {
+        ensureLocationPermission();
+        if (locationCache != null) {
+            locationCache.refresh(this);
+            scheduleGpsTuduLookup();
+            if (!workflowRunning) {
+                setActionStatusReady();
+            }
+        }
     }
 
     private void ensureLocationPermission() {
@@ -923,8 +938,10 @@ public class MainActivity extends AppCompatActivity {
         if (requestCode == REQUEST_LOCATION_PERMISSION) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 locationCache.start(this);
+                ensureGpsForTuduLookup();
+            } else if (!workflowRunning) {
+                setActionStatusReady();
             }
-            if (showGpsStatus) refreshGpsStatus();
             return;
         }
         if (requestCode != REQUEST_STORAGE_PERMISSION) return;
@@ -940,10 +957,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (locationCache != null) {
-            ensureLocationPermission();
-            if (showGpsStatus) refreshGpsStatus();
-        }
+        ensureGpsForTuduLookup();
     }
 
     private void onWorkflowFailed(String status) {
@@ -1310,7 +1324,7 @@ public class MainActivity extends AppCompatActivity {
         }
         if (skipCsvTuduRestore) {
             skipCsvTuduRestore = false;
-            scheduleGpsTuduLookup();
+            ensureGpsForTuduLookup();
             if (!step1Done) {
                 toast(getString(R.string.gps_tudu_wait));
             }
@@ -1320,12 +1334,12 @@ public class MainActivity extends AppCompatActivity {
             for (Tudu t : tuduList) {
                 if (t.code.equals(epc.tudu)) {
                     selectTuduPreservingEpc(t);
-                    scheduleGpsTuduLookup();
+                    ensureGpsForTuduLookup();
                     return;
                 }
             }
         }
-        scheduleGpsTuduLookup();
+        ensureGpsForTuduLookup();
         if (!step1Done) {
             toast(getString(R.string.gps_tudu_wait));
         }
