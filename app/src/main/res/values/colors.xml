@@ -1,0 +1,18 @@
+<resources>
+    <color name="primary">#006494</color>
+    <color name="primary_dark">#004B71</color>
+    <color name="primary_container">#C8E6FF</color>
+    <color name="accent">#E65100</color>
+    <color name="accent_container">#FFDBCC</color>
+    <color name="vyhybka_accent">#1565C0</color>
+    <color name="vyhybka_accent_container">#BBDEFB</color>
+    <color name="bg">#F4F6F8</color>
+    <color name="card">#FFFFFF</color>
+    <color name="text">#1B1B1F</color>
+    <color name="text_muted">#5C6670</color>
+    <color name="ok">#1B5E20</color>
+    <color name="err">#B71C1C</color>
+    <color name="lock">#4A148C</color>
+    <color name="last_record_bg">#EDF1ED</color>
+    <color name="last_record_stroke">#C5CEC5</color>
+</resources>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:background="#E8EEF6"
+    android:orientation="horizontal"
+    android:paddingTop="6dp" android:paddingBottom="6dp">
+    <TextView android:layout_width="90dp" android:layout_height="wrap_content" android:text="ID_RFID" android:textStyle="bold" android:textSize="12sp" android:paddingStart="6dp" android:paddingEnd="6dp"/>
+    <TextView android:layout_width="220dp" android:layout_height="wrap_content" android:text="EPC" android:textStyle="bold" android:textSize="12sp" android:paddingStart="6dp" android:paddingEnd="6dp"/>
+    <TextView android:layout_width="170dp" android:layout_height="wrap_content" android:text="TID" android:textStyle="bold" android:textSize="12sp" android:paddingStart="6dp" android:paddingEnd="6dp"/>
+    <TextView android:layout_width="60dp" android:layout_height="wrap_content" android:text="rok" android:textStyle="bold" android:textSize="12sp" android:paddingStart="6dp" android:paddingEnd="6dp"/>
+    <TextView android:layout_width="90dp" android:layout_height="wrap_content" android:text="TUDU" android:textStyle="bold" android:textSize="12sp" android:paddingStart="6dp" android:paddingEnd="6dp"/>
+    <TextView android:layout_width="70dp" android:layout_height="wrap_content" android:text="vyhybka" android:textStyle="bold" android:textSize="12sp" android:paddingStart="6dp" android:paddingEnd="6dp"/>
+    <TextView android:layout_width="50dp" android:layout_height="wrap_content" android:text="cip" android:textStyle="bold" android:textSize="12sp" android:paddingStart="6dp" android:paddingEnd="6dp"/>
+</LinearLayout>

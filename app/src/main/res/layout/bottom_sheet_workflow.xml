@@ -1,0 +1,415 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:paddingStart="12dp"
+    android:paddingEnd="12dp"
+    android:paddingBottom="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <!-- ============ EPC NÁHLED ============ -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="6dp"
+            android:text="@string/epc_preview_label"
+            android:textColor="@color/text_muted"
+            android:textSize="12sp"
+            android:textStyle="bold"/>
+
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="4dp"
+            android:fillViewport="true"
+            android:scrollbars="none">
+
+            <TextView
+                android:id="@+id/tvEpcPreview"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/epc_bg"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:maxLines="1"
+                android:paddingStart="10dp"
+                android:paddingTop="8dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="8dp"
+                android:text="----–----–----–----–----–----"
+                android:textColor="#7FE0FF"
+                android:textSize="15sp"
+                android:textStyle="bold"/>
+        </HorizontalScrollView>
+
+        <TextView
+            android:id="@+id/tvEpcValid"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:paddingBottom="12dp"
+            android:text=""
+            android:textSize="12sp"/>
+
+        <!-- ============ KARTA 2: Šablona EPC + zápis ============ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/card_bg"
+            android:orientation="vertical"
+            android:padding="14dp"
+            android:layout_marginBottom="12dp">
+
+            <TextView
+                android:id="@+id/header2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="▸ 2. Šablona EPC a zápis"
+                android:textColor="@color/primary_dark"
+                android:textSize="16sp"
+                android:textStyle="bold"/>
+
+            <LinearLayout
+                android:id="@+id/body2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingTop="10dp"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+                    <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="0.6" android:text="#" android:textStyle="bold"
+                        android:textColor="@color/text_muted" android:textSize="12sp"/>
+                    <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="2.4" android:text="Kategorie (název)" android:textStyle="bold"
+                        android:textColor="@color/text_muted" android:textSize="12sp"/>
+                    <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="2" android:text="Hodnota" android:textStyle="bold"
+                        android:textColor="@color/text_muted" android:textSize="12sp"/>
+                    <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1.4" android:text="HEX" android:textStyle="bold"
+                        android:gravity="end"
+                        android:textColor="@color/text_muted" android:textSize="12sp"/>
+                </LinearLayout>
+
+                <include layout="@layout/row_template" android:id="@+id/row1"/>
+                <include layout="@layout/row_template" android:id="@+id/row2"/>
+                <include layout="@layout/row_template" android:id="@+id/row3"/>
+                <include layout="@layout/row_template" android:id="@+id/row4"/>
+                <include layout="@layout/row_template" android:id="@+id/row5"/>
+                <include layout="@layout/row_template" android:id="@+id/row6"/>
+                <include layout="@layout/row_template" android:id="@+id/row7"/>
+
+                <View android:layout_width="match_parent" android:layout_height="1dp"
+                    android:background="#E2E6EB" android:layout_marginTop="12dp"
+                    android:layout_marginBottom="10dp"/>
+
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="Rozhraní zápisu" android:textStyle="bold"
+                    android:textColor="@color/text"/>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:paddingTop="6dp">
+                    <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:text="bank: EPC"
+                        android:textColor="@color/text" android:fontFamily="monospace"/>
+                    <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:text="ptr: 2"
+                        android:textColor="@color/text" android:fontFamily="monospace"/>
+                    <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:text="Len: 6"
+                        android:textColor="@color/text" android:fontFamily="monospace"/>
+                </LinearLayout>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:gravity="center_vertical" android:paddingTop="8dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="Access pwd: " android:textColor="@color/text"/>
+                    <EditText android:id="@+id/etAccessPwd"
+                        android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:text="00000000"
+                        android:fontFamily="monospace" android:maxLength="8"
+                        android:inputType="textCapCharacters"/>
+                </LinearLayout>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:gravity="center_vertical" android:paddingTop="4dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="Výkon (dBm): " android:textColor="@color/text"/>
+                    <EditText android:id="@+id/etPower"
+                        android:layout_width="60dp" android:layout_height="wrap_content"
+                        android:text="14" android:inputType="number" android:maxLength="2"/>
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnApplyPower"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Nastavit"
+                        android:textSize="12sp"/>
+                </LinearLayout>
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnWrite"
+                style="@style/Widget.RfidGo.ActionButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:backgroundTint="@color/accent"
+                android:text="@string/btn_write_epc"
+                android:textColor="#FFFFFF"/>
+
+            <TextView
+                android:id="@+id/tvWriteResult"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="8dp"
+                android:text=""
+                android:textSize="13sp"/>
+        </LinearLayout>
+
+        <!-- ============ KARTA 4: Zaheslování ============ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/card_bg"
+            android:orientation="vertical"
+            android:padding="14dp"
+            android:layout_marginBottom="12dp">
+
+            <TextView
+                android:id="@+id/header4"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="▸ 4. Zaheslování – zápis access hesla"
+                android:textColor="@color/primary_dark"
+                android:textSize="16sp"
+                android:textStyle="bold"/>
+
+            <LinearLayout
+                android:id="@+id/body4"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingTop="10dp"
+                android:visibility="gone">
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content">
+                    <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:text="bank: RESERVED"
+                        android:textColor="@color/text" android:fontFamily="monospace"/>
+                    <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:text="ptr: 2"
+                        android:textColor="@color/text" android:fontFamily="monospace"/>
+                    <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:text="len: 2"
+                        android:textColor="@color/text" android:fontFamily="monospace"/>
+                </LinearLayout>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:gravity="center_vertical" android:paddingTop="10dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="ACCESS PWD: " android:textColor="@color/text"
+                        android:textStyle="bold"/>
+                    <EditText android:id="@+id/etPwdAccess"
+                        android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:text="00000000"
+                        android:fontFamily="monospace" android:maxLength="8"
+                        android:inputType="textCapCharacters"/>
+                </LinearLayout>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:gravity="center_vertical" android:paddingTop="6dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="NEW PWD: " android:textColor="@color/text"
+                        android:textStyle="bold"/>
+                    <EditText android:id="@+id/etPwdNew"
+                        android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:hint="12345678"
+                        android:fontFamily="monospace" android:maxLength="8"
+                        android:inputType="textCapCharacters"/>
+                </LinearLayout>
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnWritePwd"
+                style="@style/Widget.RfidGo.ActionButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:backgroundTint="@color/primary"
+                android:text="@string/btn_write_pwd"
+                android:textColor="#FFFFFF"/>
+
+            <TextView
+                android:id="@+id/tvPwdWriteResult"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="8dp"
+                android:text=""
+                android:textSize="13sp"/>
+        </LinearLayout>
+
+        <!-- ============ KARTA 5: Zamčení tagu ============ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/card_bg"
+            android:orientation="vertical"
+            android:padding="14dp"
+            android:layout_marginBottom="12dp">
+
+            <TextView
+                android:id="@+id/header5"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="▸ 5. Zamčení tagu"
+                android:textColor="@color/primary_dark"
+                android:textSize="16sp"
+                android:textStyle="bold"/>
+
+            <LinearLayout
+                android:id="@+id/body5"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingTop="10dp"
+                android:visibility="gone">
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:gravity="center_vertical">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="NEW ACCESS PWD: " android:textColor="@color/text"
+                        android:textStyle="bold"/>
+                    <EditText android:id="@+id/etLockAccessPwd"
+                        android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:text="00000000"
+                        android:fontFamily="monospace" android:maxLength="8"
+                        android:inputType="textCapCharacters"/>
+                </LinearLayout>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:gravity="center_vertical" android:paddingTop="8dp">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="Lock code: " android:textColor="@color/text"
+                        android:textStyle="bold"/>
+                    <TextView android:id="@+id/tvLockCode"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="@string/lock_code_value"
+                        android:textColor="@color/primary_dark"
+                        android:fontFamily="monospace"
+                        android:textSize="16sp"
+                        android:textStyle="bold"/>
+                </LinearLayout>
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnLock"
+                style="@style/Widget.RfidGo.ActionButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:backgroundTint="@color/lock"
+                android:text="@string/btn_lock"
+                android:textColor="#FFFFFF"/>
+
+            <TextView
+                android:id="@+id/tvLockResult"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="8dp"
+                android:text=""
+                android:textSize="13sp"/>
+        </LinearLayout>
+
+        <!-- ============ KARTA 3: Zápis do CSV ============ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/card_bg"
+            android:orientation="vertical"
+            android:padding="14dp"
+            android:layout_marginBottom="20dp">
+
+            <TextView
+                android:id="@+id/header3"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="▸ 3. Tabulka CSV"
+                android:textColor="@color/primary_dark"
+                android:textSize="16sp"
+                android:textStyle="bold"/>
+
+            <LinearLayout
+                android:id="@+id/body3"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingTop="10dp"
+                android:visibility="gone">
+
+                <CheckBox
+                    android:id="@+id/cbAutoCsv"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:checked="true"
+                    android:text="Po zápisu EPC automaticky uložit řádek do CSV"/>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:paddingTop="4dp">
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnExportCsv"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="4dp"
+                        android:text="Sdílet / Export"/>
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnClearCsv"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="4dp"
+                        android:text="@string/btn_delete_last_csv"/>
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tvCsvPath"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingTop="4dp"
+                    android:text=""
+                    android:textColor="@color/text_muted"
+                    android:textSize="11sp"/>
+
+                <HorizontalScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingTop="8dp">
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+                        <include layout="@layout/row_csv_header"/>
+                        <androidx.recyclerview.widget.RecyclerView
+                            android:id="@+id/rvCsv"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:nestedScrollingEnabled="false"/>
+                    </LinearLayout>
+                </HorizontalScrollView>
+            </LinearLayout>
+        </LinearLayout>
+
+    </LinearLayout>
+</androidx.core.widget.NestedScrollView>

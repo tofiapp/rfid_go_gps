@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Bezpečná zóna adaptive ikony: 72dp uvnitř 108dp vrstvy -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_launcher_foreground_img"
+    android:insetBottom="14dp"
+    android:insetLeft="14dp"
+    android:insetRight="14dp"
+    android:insetTop="14dp" />

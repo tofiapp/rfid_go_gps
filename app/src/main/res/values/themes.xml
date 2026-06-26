@@ -1,0 +1,33 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.RfidGo" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorPrimaryDark">@color/primary_dark</item>
+        <item name="colorPrimaryContainer">@color/primary_container</item>
+        <item name="colorSecondary">@color/accent</item>
+        <item name="colorSecondaryContainer">@color/accent_container</item>
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="materialButtonStyle">@style/Widget.RfidGo.Button</item>
+    </style>
+
+    <style name="Widget.RfidGo.Button" parent="Widget.Material3.Button">
+        <item name="cornerRadius">12dp</item>
+    </style>
+
+    <style name="Widget.RfidGo.ActionButton" parent="Widget.Material3.Button">
+        <item name="cornerRadius">12dp</item>
+        <item name="android:minHeight">56dp</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="Widget.RfidGo.DeleteButtonCompact" parent="Widget.Material3.Button">
+        <item name="cornerRadius">8dp</item>
+        <item name="android:minHeight">0dp</item>
+        <item name="android:minWidth">0dp</item>
+        <item name="android:paddingStart">8dp</item>
+        <item name="android:paddingEnd">8dp</item>
+        <item name="android:textSize">12sp</item>
+        <item name="backgroundTint">@color/err</item>
+        <item name="android:textColor">#FFFFFF</item>
+    </style>
+</resources>
