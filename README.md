@@ -29,7 +29,7 @@ Hlavní obrazovka vede operátora třemi kroky (**TUDU → Načtení → Hotovo*
 
 `DZS_SUPERTRA_GPS_KM`: `SUPER_Z_ID`, `SUPER_D_ID`, souřadnice (`LATITUDE`/`LONGITUDE` nebo `LAT`/`LON`, …)
 
-`DZS_SUPER_RO_TPI`: `SUPER_Z_ID`, `SUPER_D_ID`, `TUDU`, `VYHYBKA` (volitelně `CAST_MIN`, `CAST_MAX`)
+`DZS_SUPER_RO_TPI`: `SUPER_Z_ID`, `SUPER_D_ID`, `TUDU`, `COBJEKT` (číslo výhybky; alternativně `VYHYBKA`, …) (volitelně `CAST_MIN`, `CAST_MAX`)
 
 Vzorová databáze je ve složce [`sample_data/`](sample_data).
 

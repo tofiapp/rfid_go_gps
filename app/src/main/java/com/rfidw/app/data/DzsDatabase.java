@@ -17,7 +17,7 @@ import java.util.Map;
  * Postup:
  * 1) V DZS_SUPERTRA_GPS_KM najít bod nejblíže aktuální GPS poloze.
  * 2) Z něj vzít SUPER_Z_ID a SUPER_D_ID.
- * 3) V DZS_SUPER_RO_TPI podle těchto ID dohledat TUDU a číslo výhybky.
+ * 3) V DZS_SUPER_RO_TPI podle těchto ID dohledat TUDU a číslo výhybky (sloupec COBJEKT).
  */
 public class DzsDatabase implements Closeable {
 
@@ -233,7 +233,7 @@ public class DzsDatabase implements Closeable {
             if (cols.isEmpty()) {
                 throw new Exception("Tabulka " + table + " neexistuje");
             }
-            String vyhybka = findRequiredColumn(cols, "VYHYBKA", "VYH_CISLO", "CISLO_VYHYBKY",
+            String vyhybka = findRequiredColumn(cols, "COBJEKT", "VYHYBKA", "VYH_CISLO", "CISLO_VYHYBKY",
                     "CIS_VYHYBKY", "VYHYBKA_CISLO");
             return new RoColumns(
                     requireColumn(cols, "SUPER_Z_ID"),
