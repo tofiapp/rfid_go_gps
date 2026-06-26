@@ -103,6 +103,7 @@ public class MainActivity extends AppCompatActivity {
     private SharedPreferences prefs;
 
     private boolean pendingAutoLoadAfterStorage;
+    private boolean step1Done, step2Done, step3Done, step2Failed;
     private boolean workflowRunning, chainWorkflow, scanDoneAwaitingConfirm, lastRecordUnlocked;
     /** CSV obnoveno dřív než zdrojový soubor – posun na další čip/výhybku až po načtení TUDU. */
     private boolean pendingAdvanceFromCsv;
