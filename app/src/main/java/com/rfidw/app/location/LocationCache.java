@@ -124,6 +124,10 @@ public class LocationCache implements LocationListener {
                 != PackageManager.PERMISSION_GRANTED) {
             return;
         }
+        try {
+            locationManager.removeUpdates(this);
+        } catch (SecurityException ignored) {
+        }
         seedLastKnown(context, true);
         requestUpdates(LocationManager.GPS_PROVIDER, GPS_UPDATE_INTERVAL_MS);
         requestUpdates(LocationManager.NETWORK_PROVIDER, NETWORK_UPDATE_INTERVAL_MS);

@@ -71,15 +71,16 @@ public class DzsDatabase implements Closeable {
     /** Všechny TUDU a výhybky z DZS_SUPER_RO_TPI (pro ruční výběr). */
     public List<Tudu> loadAllTudu() {
         Map<String, Tudu> map = new LinkedHashMap<>();
+        String vyhybkaExpr = roColumns.vyhybkaSelectExpr(null);
         StringBuilder sql = new StringBuilder("SELECT ")
-                .append(roColumns.tudu).append(", ").append(roColumns.vyhybka);
+                .append(roColumns.tudu).append(", ").append(vyhybkaExpr);
         if (roColumns.castMin != null) sql.append(", ").append(roColumns.castMin);
         if (roColumns.castMax != null) sql.append(", ").append(roColumns.castMax);
         sql.append(" FROM ").append(TABLE_RO_TPI)
                 .append(" WHERE ").append(roColumns.tudu).append(" IS NOT NULL AND ")
                 .append(roColumns.tudu).append(" <> ''")
-                .append(" AND ").append(roColumns.vyhybka).append(" IS NOT NULL")
-                .append(" ORDER BY ").append(roColumns.tudu).append(", ").append(roColumns.vyhybka);
+                .append(" AND ").append(vyhybkaExpr).append(" IS NOT NULL")
+                .append(" ORDER BY ").append(roColumns.tudu).append(", ").append(vyhybkaExpr);
 
         try (Cursor c = db.rawQuery(sql.toString(), null)) {
             while (c.moveToNext()) {
@@ -109,16 +110,29 @@ public class DzsDatabase implements Closeable {
     }
 
     /**
-     * Najde nejbližší bod v DZS_SUPERTRA_GPS_KM a dohledá TUDU / výhybku v DZS_SUPER_RO_TPI.
+     * Najde nejbližší bod v DZS_SUPERTRA_GPS_KM, který má odpovídající TUDU v DZS_SUPER_RO_TPI.
+     * JOIN zajišťuje, že se nevybere GPS bod bez mapování (dřív lookup po nejbližším bodu často selhal).
      */
     public GpsMatch findNearest(double latitude, double longitude) {
-        String nearestSql = "SELECT " + gpsColumns.superZId + ", " + gpsColumns.superDId + ", "
-                + gpsColumns.latitude + ", " + gpsColumns.longitude
-                + " FROM " + TABLE_GPS_KM
-                + " WHERE " + gpsColumns.latitude + " IS NOT NULL"
-                + " AND " + gpsColumns.longitude + " IS NOT NULL"
-                + " ORDER BY ((" + gpsColumns.latitude + " - ?) * (" + gpsColumns.latitude + " - ?)"
-                + " + (" + gpsColumns.longitude + " - ?) * (" + gpsColumns.longitude + " - ?))"
+        String gpsAlias = "gps";
+        String roAlias = "ro";
+        String vyhybkaExpr = roColumns.vyhybkaSelectExpr(roAlias);
+        String joinOn = idJoinCondition(gpsAlias, roAlias);
+
+        String nearestSql = "SELECT " + roAlias + "." + roColumns.tudu + ", " + vyhybkaExpr + ", "
+                + gpsAlias + "." + gpsColumns.superZId + ", " + gpsAlias + "." + gpsColumns.superDId + ", "
+                + gpsAlias + "." + gpsColumns.latitude + ", " + gpsAlias + "." + gpsColumns.longitude
+                + " FROM " + TABLE_GPS_KM + " " + gpsAlias
+                + " INNER JOIN " + TABLE_RO_TPI + " " + roAlias + " ON " + joinOn
+                + " WHERE " + gpsAlias + "." + gpsColumns.latitude + " IS NOT NULL"
+                + " AND " + gpsAlias + "." + gpsColumns.longitude + " IS NOT NULL"
+                + " AND " + roAlias + "." + roColumns.tudu + " IS NOT NULL"
+                + " AND " + roAlias + "." + roColumns.tudu + " <> ''"
+                + " AND " + vyhybkaExpr + " IS NOT NULL"
+                + " ORDER BY ((" + gpsAlias + "." + gpsColumns.latitude + " - ?) * ("
+                + gpsAlias + "." + gpsColumns.latitude + " - ?)"
+                + " + (" + gpsAlias + "." + gpsColumns.longitude + " - ?) * ("
+                + gpsAlias + "." + gpsColumns.longitude + " - ?))"
                 + " LIMIT 1";
 
         String[] args = {
@@ -126,34 +140,31 @@ public class DzsDatabase implements Closeable {
                 String.valueOf(longitude), String.valueOf(longitude)
         };
 
-        String superZId = null;
-        String superDId = null;
-        double bestLat = 0;
-        double bestLon = 0;
-
         try (Cursor c = db.rawQuery(nearestSql, args)) {
-            if (!c.moveToFirst()) return null;
-            superZId = c.getString(0);
-            superDId = c.getString(1);
-            bestLat = c.getDouble(2);
-            bestLon = c.getDouble(3);
-        }
-
-        if (superZId == null || superDId == null) return null;
-
-        String lookupSql = "SELECT " + roColumns.tudu + ", " + roColumns.vyhybka
-                + " FROM " + TABLE_RO_TPI
-                + " WHERE " + roColumns.superZId + " = ? AND " + roColumns.superDId + " = ?"
-                + " LIMIT 1";
-
-        try (Cursor c = db.rawQuery(lookupSql, new String[]{superZId, superDId})) {
             if (!c.moveToFirst()) return null;
             String tudu = c.getString(0);
             Integer vyhybka = readInt(c, 1);
-            if (tudu == null || tudu.isEmpty() || vyhybka == null) return null;
+            String superZId = readId(c, 2);
+            String superDId = readId(c, 3);
+            double bestLat = c.getDouble(4);
+            double bestLon = c.getDouble(5);
+            if (tudu == null || tudu.isEmpty() || vyhybka == null
+                    || superZId == null || superDId == null) {
+                return null;
+            }
             double dist = haversineM(latitude, longitude, bestLat, bestLon);
             return new GpsMatch(superZId, superDId, tudu, vyhybka, bestLat, bestLon, dist);
         }
+    }
+
+    private String idJoinCondition(String gpsAlias, String roAlias) {
+        return idExpr(gpsAlias, gpsColumns.superZId) + " = " + idExpr(roAlias, roColumns.superZId)
+                + " AND " + idExpr(gpsAlias, gpsColumns.superDId) + " = "
+                + idExpr(roAlias, roColumns.superDId);
+    }
+
+    private static String idExpr(String tableAlias, String column) {
+        return "TRIM(CAST(" + tableAlias + "." + column + " AS TEXT))";
     }
 
     /**
@@ -194,11 +205,16 @@ public class DzsDatabase implements Closeable {
     }
 
     private String lookupTuduVyhybkaLabel(String superZId, String superDId) {
-        String lookupSql = "SELECT " + roColumns.tudu + ", " + roColumns.vyhybka
-                + " FROM " + TABLE_RO_TPI
-                + " WHERE " + roColumns.superZId + " = ? AND " + roColumns.superDId + " = ?"
+        String vyhybkaExpr = roColumns.vyhybkaSelectExpr("ro");
+        String lookupSql = "SELECT ro." + roColumns.tudu + ", " + vyhybkaExpr
+                + " FROM " + TABLE_RO_TPI + " ro"
+                + " WHERE " + idExpr("ro", roColumns.superZId) + " = ?"
+                + " AND " + idExpr("ro", roColumns.superDId) + " = ?"
+                + " AND ro." + roColumns.tudu + " IS NOT NULL AND ro." + roColumns.tudu + " <> ''"
+                + " AND " + vyhybkaExpr + " IS NOT NULL"
                 + " LIMIT 1";
-        try (Cursor c = db.rawQuery(lookupSql, new String[]{superZId, superDId})) {
+        try (Cursor c = db.rawQuery(lookupSql, new String[]{
+                normalizeId(superZId), normalizeId(superDId)})) {
             if (!c.moveToFirst()) return "";
             String tudu = c.getString(0);
             Integer vyhybka = readInt(c, 1);
@@ -210,6 +226,25 @@ public class DzsDatabase implements Closeable {
     @Override
     public void close() {
         db.close();
+    }
+
+    private static String readId(Cursor c, int index) {
+        if (c.isNull(index)) return null;
+        try {
+            return normalizeId(c.getString(index));
+        } catch (Exception e) {
+            try {
+                return normalizeId(String.valueOf(c.getLong(index)));
+            } catch (Exception ignored) {
+                return null;
+            }
+        }
+    }
+
+    private static String normalizeId(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private static Integer readInt(Cursor c, int index) {
@@ -266,17 +301,28 @@ public class DzsDatabase implements Closeable {
         final String superDId;
         final String tudu;
         final String vyhybka;
+        final String vyhybkaFallback;
         final String castMin;
         final String castMax;
 
         RoColumns(String superZId, String superDId, String tudu, String vyhybka,
-                  String castMin, String castMax) {
+                  String vyhybkaFallback, String castMin, String castMax) {
             this.superZId = superZId;
             this.superDId = superDId;
             this.tudu = tudu;
             this.vyhybka = vyhybka;
+            this.vyhybkaFallback = vyhybkaFallback;
             this.castMin = castMin;
             this.castMax = castMax;
+        }
+
+        String vyhybkaSelectExpr(String tableAlias) {
+            String prefix = tableAlias == null || tableAlias.isEmpty()
+                    ? "" : tableAlias + ".";
+            if (vyhybkaFallback == null) {
+                return prefix + vyhybka;
+            }
+            return "COALESCE(" + prefix + vyhybka + ", " + prefix + vyhybkaFallback + ")";
         }
 
         static RoColumns resolve(SQLiteDatabase db, String table) throws Exception {
@@ -286,11 +332,17 @@ public class DzsDatabase implements Closeable {
             }
             String vyhybka = findRequiredColumn(cols, "COBJEKT", "VYHYBKA", "VYH_CISLO", "CISLO_VYHYBKY",
                     "CIS_VYHYBKY", "VYHYBKA_CISLO");
+            String vyhybkaFallback = null;
+            if (!vyhybka.equalsIgnoreCase("VYHYBKA")) {
+                vyhybkaFallback = findOptionalColumn(cols, "VYHYBKA", "VYH_CISLO", "CISLO_VYHYBKY",
+                        "CIS_VYHYBKY", "VYHYBKA_CISLO");
+            }
             return new RoColumns(
                     requireColumn(cols, "SUPER_Z_ID"),
                     requireColumn(cols, "SUPER_D_ID"),
                     findRequiredColumn(cols, "TUDU", "TUDU_KOD", "TUDU_CODE"),
                     vyhybka,
+                    vyhybkaFallback,
                     findOptionalColumn(cols, "CAST_MIN", "CASTMIN"),
                     findOptionalColumn(cols, "CAST_MAX", "CASTMAX")
             );
