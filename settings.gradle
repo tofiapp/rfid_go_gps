@@ -13,5 +13,5 @@ dependencyResolutionManagement {
         flatDir { dirs 'app/libs' }
     }
 }
-rootProject.name = "RFID Go"
+rootProject.name = "RFID Go GPS"
 include ':app'

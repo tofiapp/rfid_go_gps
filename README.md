@@ -1,7 +1,7 @@
-# RFID Go
+# RFID Go GPS
 
-Android aplikace (verze **2.0**) pro čtečku **Chainway C5** (vestavěný UHF UART modul, RSCJA/Chainway SDK).
-Slouží k **přepisu EPC** UHF tagů podle definované šablony, **zaheslování** a **zamčení** tagů a k **zápisu údajů o tagu do tabulky CSV**.
+Android aplikace (verze **3.0**) pro čtečku **Chainway C5** (vestavěný UHF UART modul, RSCJA/Chainway SDK).
+Slouží k **přepisu EPC** UHF tagů podle definované šablony, **zaheslování** a **zamčení** tagů, k **zápisu údajů o tagu do tabulky CSV** a k **záznamu GPS polohy čtečky** při každém tagu.
 
 ---
 
@@ -68,7 +68,7 @@ Příklad: `1501J1`, výhybka `10`, část `1`, ID `30001` →
   - posune **část výhybky** o 1; po překročení maxima se přepne na **další nedokončenou výhybku** v pořadí daného TUDU.
 
 ### 3. Tabulka CSV
-Po každém zápisu EPC (lze vypnout zaškrtávátkem) se uloží řádek do `rfid_go_output.csv`:
+Po každém zápisu EPC (lze vypnout zaškrtávátkem) se uloží řádek do `rfid_go_gps_output.csv`:
 
 | Sloupec | Zdroj |
 |---------|-------|
@@ -79,21 +79,34 @@ Po každém zápisu EPC (lze vypnout zaškrtávátkem) se uloží řádek do `rf
 | TUDU | řádek 2 + dekódovaný 3 (`4A`→`J`) + dekódovaný 4 (`01`→`1`) |
 | Vyhybka | řádek 5 (`010` → `10`) |
 | CastVyhybky | řádek 6 |
+| latitude | GPS šířka čtečky v okamžiku zápisu |
+| longitude | GPS délka čtečky v okamžiku zápisu |
+| accuracy_m | přesnost GPS v metrech |
+| gps_time | čas měření GPS (`yyyy-MM-dd HH:mm:ss`) |
 
 Při zápisu stejného `ID_RFID` se daný řádek **přepíše**.
 Tabulku lze sdílet tlačítkem **Sdílet / Export** nebo **vymazat poslední záznam** (obnoví se předchozí stav šablony).
 Nad spodním panelem se zobrazuje náhled **posledního záznamu** (výhybka a část).
 
-Soubor je uložen v `Android/data/com.rfidw.app/files/rfid_go_output.csv`.
+Soubor je uložen v `Android/data/com.rfidw.app/files/rfid_go_gps_output.csv`.
 
-### 4. Zaheslování – zápis access hesla
+Starší CSV soubory bez GPS sloupců lze načíst – GPS pole zůstanou prázdná.
+
+### 4. GPS poloha čtečky
+- Aplikace po spuštění žádá o oprávnění k poloze a **aktualizuje GPS cache každou 1 s**.
+- Ve stavu **připraveno** se v horním řádku akcí zobrazuje aktuální poloha, např. `připraveno · 49.1951° 16.6084° ±6m`.
+- Při zápisu tagu se do CSV uloží poslední známá poloha (bez čekání na nový fix).
+- Pokud GPS není dostupná, tag se uloží bez souřadnic a operátor dostane jednorázové upozornění.
+- Během zápisu EPC / hesla / zamčení zůstává v řádku akcí text průběhu operace.
+
+### 5. Zaheslování – zápis access hesla
 - **bank RESERVED**, `ptr 2`, `len 2` (access password, 8 hex znaků)
 - Pole **ACCESS PWD** – aktuální heslo tagu (default `00000000`)
 - Pole **NEW PWD** – nové heslo (8 hex znaků)
 - Tlačítko **ZAPSAT HESLO** zapíše nové access heslo na tag v dosahu
 - Stejný fallback na preset hesla jako u zápisu EPC
 
-### 5. Zamčení tagu
+### 6. Zamčení tagu
 - Pole **NEW ACCESS PWD** – heslo pro zamčení (po zápisu hesla se doplní automaticky)
 - **Lock code** – pevná hodnota `008020`
 - Tlačítko **ZAMKNOUT** zamkne tag v dosahu
@@ -121,7 +134,7 @@ Projekt je standardní Android (Gradle). Otevřete v **Android Studiu** nebo př
 ./gradlew assembleDebug
 ```
 
-APK: `app/build/outputs/apk/debug/rfid_go.apk`
+APK: `app/build/outputs/apk/debug/rfid_go_gps.apk`
 
 - `compileSdk 34`, `minSdk 21`, `targetSdk 34`, Java 17, Material 3
 - Android Gradle Plugin **8.5.2**, Gradle **8.7**
@@ -134,7 +147,7 @@ APK: `app/build/outputs/apk/debug/rfid_go.apk`
 ### CI (GitHub Actions)
 
 Při pushi nebo PR na `main` se automaticky sestaví debug APK (workflow [`.github/workflows/android.yml`](.github/workflows/android.yml)).
-Výsledné APK je k dispozici jako artefakt **rfid-go-debug-apk**.
+Výsledné APK je k dispozici jako artefakt **rfid-go-gps-debug-apk**.
 
 ---
 
@@ -146,6 +159,7 @@ app/src/main/java/com/rfidw/app/
 ├─ data/Tudu.java          – model TUDU + výhybky
 ├─ data/TuduLoader.java    – načítání z .csv / .sql
 ├─ csv/CsvStore.java       – výstupní CSV s přepisem podle ID_RFID
+├─ location/LocationCache.java – cache GPS polohy (aktualizace 1×/s)
 ├─ rfid/UhfManager.java    – obal nad RFIDWithUHFUART (EPC, heslo, zamčení)
 └─ ui/
    ├─ MainActivity.java    – obrazovka, workflow a propojení všeho

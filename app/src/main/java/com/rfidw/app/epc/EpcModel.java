@@ -5,7 +5,7 @@ import androidx.annotation.NonNull;
 import java.util.Locale;
 
 /**
- * Sestavení a rozklad EPC kódu podle šablony RFID Go.
+ * Sestavení a rozklad EPC kódu podle šablony RFID Go GPS.
  *
  * EPC = 24 hex znaků (6 wordů, bank EPC, ptr 2, Len 6):
  *  řádek 1 | 4 znaky | rok            (např. 2026)

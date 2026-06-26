@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">RFID Go</string>
+    <string name="app_name">RFID Go GPS</string>
     <string name="btn_write_epc">ZAPSAT EPC</string>
     <string name="btn_write_pwd">ZAPSAT HESLO</string>
     <string name="btn_lock">ZAMKNOUT</string>
@@ -38,4 +38,6 @@
     <string name="power_preset_select_status">vyberte režim</string>
     <string name="tudu_select_status">vyberte TUDU</string>
     <string name="epc_retry_status">načtěte znovu</string>
+    <string name="status_ready_with_gps">připraveno · %1$s</string>
+    <string name="gps_unavailable_toast">GPS nedostupná — tag uložen bez souřadnic</string>
 </resources>

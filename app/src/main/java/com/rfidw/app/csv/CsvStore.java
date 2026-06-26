@@ -20,14 +20,15 @@ import java.util.Set;
  * Výstupní tabulka .CSV.
  *
  * Sloupce:
- *   ID_RFID ; EPC ; TID ; rok ; TUDU ; vyhybka ; cip
+ *   ID_RFID ; EPC ; TID ; rok ; TUDU ; vyhybka ; cip ; latitude ; longitude ; accuracy_m ; gps_time
  *
  * Klíčem je ID_RFID – při zápisu stejného ID_RFID se daný řádek přepíše.
  */
 public class CsvStore {
 
     public static final String[] HEADER = {
-            "ID_RFID", "EPC", "TID", "rok", "TUDU", "vyhybka", "cip"
+            "ID_RFID", "EPC", "TID", "rok", "TUDU", "vyhybka", "cip",
+            "latitude", "longitude", "accuracy_m", "gps_time"
     };
     private static final String SEP = ";";
 
@@ -39,9 +40,16 @@ public class CsvStore {
         public String tudu;
         public String vyhybka;
         public String cast;
+        public String latitude;
+        public String longitude;
+        public String accuracyM;
+        public String gpsTime;
 
         public String[] toArray() {
-            return new String[]{ idRfid, epc, tid, rok, tudu, vyhybka, cast };
+            return new String[]{
+                    idRfid, epc, tid, rok, tudu, vyhybka, cast,
+                    latitude, longitude, accuracyM, gpsTime
+            };
         }
     }
 
@@ -150,6 +158,10 @@ public class CsvStore {
                 r.tudu    = get(c, 4);
                 r.vyhybka = get(c, 5);
                 r.cast    = get(c, 6);
+                r.latitude = get(c, 7);
+                r.longitude = get(c, 8);
+                r.accuracyM = get(c, 9);
+                r.gpsTime = get(c, 10);
                 if (r.idRfid != null && !r.idRfid.isEmpty()) {
                     rows.put(r.idRfid, r);
                     addToCastIndex(r);
