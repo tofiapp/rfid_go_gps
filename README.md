@@ -29,7 +29,7 @@ Hlavní obrazovka vede operátora třemi kroky (**TUDU → Načtení → Hotovo*
 
 **Očekávané sloupce**
 
-`DZS_SUPERTRA_GPS_KM`: `SUPER_Z_ID`, `SUPER_D_ID`, souřadnice (`LATITUDE`/`LONGITUDE` nebo `LAT`/`LON`, …)
+`DZS_SUPERTRA_GPS_KM`: `SUPER_Z_ID`, `SUPER_D_ID`, souřadnice (`LAT`/`LON` primárně, alternativně `LATITUDE`/`LONGITUDE`, …)
 
 `DZS_SUPER_RO_TPI`: `SUPER_Z_ID`, `SUPER_D_ID`, `TUDU`, `COBJEKT` (číslo výhybky; alternativně `VYHYBKA`, …) (volitelně `CAST_MIN`, `CAST_MAX`)
 

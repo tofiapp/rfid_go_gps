@@ -1161,6 +1161,9 @@ public class MainActivity extends AppCompatActivity {
         lastRecordUnlocked = true;
         skipCsvTuduRestore = true;
         updateLastRecordPreview();
+        if (dzsDatabase != null && gpsAutoSelection) {
+            ensureGpsForTuduLookup();
+        }
     }
 
     private void persistCsvAsync() {
