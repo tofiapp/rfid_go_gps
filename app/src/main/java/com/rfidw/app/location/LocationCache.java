@@ -84,13 +84,22 @@ public class LocationCache implements LocationListener {
     }
 
     public void start(Context context) {
-        if (running) return;
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
                 != PackageManager.PERMISSION_GRANTED) {
             return;
         }
         running = true;
-        seedLastKnown(context);
+        refresh(context);
+    }
+
+    /** Znovu načte poslední polohu a obnoví odběr – nutné po návratu z výběru souboru / dialogu oprávnění. */
+    public void refresh(Context context) {
+        if (!running) return;
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
+                != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        seedLastKnown(context, true);
         requestUpdates(LocationManager.GPS_PROVIDER, GPS_UPDATE_INTERVAL_MS);
         requestUpdates(LocationManager.NETWORK_PROVIDER, NETWORK_UPDATE_INTERVAL_MS);
     }
@@ -113,7 +122,7 @@ public class LocationCache implements LocationListener {
         }
     }
 
-    private void seedLastKnown(Context context) {
+    private void seedLastKnown(Context context, boolean notify) {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
                 != PackageManager.PERMISSION_GRANTED) {
             return;
@@ -128,7 +137,7 @@ public class LocationCache implements LocationListener {
             } catch (SecurityException ignored) {
             }
         }
-        if (best != null) updateFrom(best, false);
+        if (best != null) updateFrom(best, notify);
     }
 
     @Override
@@ -138,14 +147,15 @@ public class LocationCache implements LocationListener {
     }
 
     private synchronized void updateFrom(Location location, boolean notify) {
-        if (!location.hasAccuracy()) return;
         if (snapshot.valid && !shouldReplace(snapshot, location)) return;
 
+        float accuracy = location.hasAccuracy() ? location.getAccuracy() : 100f;
+        long timeMs = location.getTime() > 0 ? location.getTime() : System.currentTimeMillis();
         snapshot = new Snapshot(
                 location.getLatitude(),
                 location.getLongitude(),
-                location.getAccuracy(),
-                location.getTime(),
+                accuracy,
+                timeMs,
                 true,
                 location.getProvider());
         if (notify && listener != null) listener.onLocationUpdated();
