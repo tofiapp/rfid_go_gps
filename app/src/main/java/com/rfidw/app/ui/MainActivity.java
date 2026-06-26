@@ -98,7 +98,9 @@ public class MainActivity extends AppCompatActivity {
     private volatile boolean gpsLookupInFlight;
     private Double lastGpsLookupLat;
     private Double lastGpsLookupLon;
-    private static final double GPS_LOOKUP_MIN_MOVE_M = 15.0;
+    private long lastGpsLookupTimeMs;
+    private static final double GPS_LOOKUP_MIN_MOVE_M = 5.0;
+    private static final long GPS_LOOKUP_MIN_INTERVAL_MS = 1000;
 
     private CsvStore csvStore;
     private CsvAdapter csvAdapter;
@@ -857,8 +859,11 @@ public class MainActivity extends AppCompatActivity {
 
     private void setActionStatusReady() {
         if (!step1Done) {
-            if (gpsAutoSelection && locationCache != null && !locationCache.hasFix()) {
-                setActionStatus(getString(R.string.gps_tudu_wait), COLOR_STATUS_GPS_WAIT);
+            if (gpsAutoSelection) {
+                showGpsStatus = true;
+                tvReaderStatus.setText(getString(R.string.gps_tudu_wait));
+                tvReaderStatus.setTextColor(COLOR_STATUS_GPS_WAIT);
+                refreshGpsStatus(false);
             } else {
                 setActionStatus(getString(R.string.tudu_select_status), COLOR_STATUS_ERROR);
             }
@@ -875,6 +880,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void refreshGpsStatus() {
+        refreshGpsStatus(true);
+    }
+
+    private void refreshGpsStatus(boolean setReadyStatus) {
         if (!showGpsStatus || locationCache == null) return;
         tvGpsStatus.setVisibility(View.VISIBLE);
         int color;
@@ -887,8 +896,10 @@ public class MainActivity extends AppCompatActivity {
         }
         tvGpsStatus.setText(locationCache.formatStatusText());
         tvGpsStatus.setTextColor(color);
-        tvReaderStatus.setText(getString(R.string.status_ready));
-        tvReaderStatus.setTextColor(COLOR_STATUS_READY);
+        if (setReadyStatus) {
+            tvReaderStatus.setText(getString(R.string.status_ready));
+            tvReaderStatus.setTextColor(COLOR_STATUS_READY);
+        }
     }
 
     private void setupLocation() {
@@ -1303,6 +1314,7 @@ public class MainActivity extends AppCompatActivity {
                 gpsAutoSelection = true;
                 lastGpsLookupLat = null;
                 lastGpsLookupLon = null;
+                lastGpsLookupTimeMs = 0;
                 tuduList = loaded;
                 tvSourceFile.setText(displayName + "  •  TUDU: " + loaded.size());
                 collapseCard1Body();
@@ -1324,20 +1336,18 @@ public class MainActivity extends AppCompatActivity {
         }
         if (skipCsvTuduRestore) {
             skipCsvTuduRestore = false;
-            ensureGpsForTuduLookup();
-            if (!step1Done) {
-                toast(getString(R.string.gps_tudu_wait));
-            }
-            return;
         }
-        if (epc.tudu != null && !epc.tudu.isEmpty()) {
-            for (Tudu t : tuduList) {
-                if (t.code.equals(epc.tudu)) {
-                    selectTuduPreservingEpc(t);
-                    ensureGpsForTuduLookup();
-                    return;
+        if (!gpsAutoSelection) {
+            if (epc.tudu != null && !epc.tudu.isEmpty()) {
+                for (Tudu t : tuduList) {
+                    if (t.code.equals(epc.tudu)) {
+                        selectTuduPreservingEpc(t);
+                        return;
+                    }
                 }
             }
+            ensureGpsForTuduLookup();
+            return;
         }
         ensureGpsForTuduLookup();
         if (!step1Done) {
@@ -1349,11 +1359,17 @@ public class MainActivity extends AppCompatActivity {
         if (!gpsAutoSelection || dzsDatabase == null || locationCache == null || gpsLookupInFlight) {
             return;
         }
+        if (workflowRunning || scanDoneAwaitingConfirm) {
+            return;
+        }
         LocationCache.Snapshot snap = locationCache.getSnapshot();
         if (!snap.valid) return;
-        if (lastGpsLookupLat != null && lastGpsLookupLon != null && step1Done) {
+        long now = System.currentTimeMillis();
+        if (lastGpsLookupLat != null && lastGpsLookupLon != null) {
             double moved = haversineM(lastGpsLookupLat, lastGpsLookupLon, snap.latitude, snap.longitude);
-            if (moved < GPS_LOOKUP_MIN_MOVE_M) return;
+            if (moved < GPS_LOOKUP_MIN_MOVE_M && now - lastGpsLookupTimeMs < GPS_LOOKUP_MIN_INTERVAL_MS) {
+                return;
+            }
         }
         gpsLookupInFlight = true;
         final double lat = snap.latitude;
@@ -1365,13 +1381,18 @@ public class MainActivity extends AppCompatActivity {
                 if (!gpsAutoSelection || match == null) return;
                 lastGpsLookupLat = lat;
                 lastGpsLookupLon = lon;
+                lastGpsLookupTimeMs = System.currentTimeMillis();
                 applyGpsMatch(match);
+                scheduleGpsTuduLookup();
             });
         });
     }
 
     private void applyGpsMatch(DzsDatabase.GpsMatch match) {
         pendingAdvanceFromCsv = false;
+        boolean tuduChanged = epc.tudu == null || !match.tudu.equals(epc.tudu);
+        boolean vyhybkaChanged = epc.vyhybka != match.vyhybka;
+
         Tudu tudu = null;
         for (Tudu t : tuduList) {
             if (t.code.equals(match.tudu)) {
@@ -1387,10 +1408,10 @@ public class MainActivity extends AppCompatActivity {
         currentTudu = tudu;
         epc.tudu = match.tudu;
         Tudu.Vyhybka v = tudu.findOrCreate(match.vyhybka);
-        boolean vyhybkaChanged = currentVyhybka == null || currentVyhybka.cislo != match.vyhybka;
         currentVyhybka = v;
         epc.vyhybka = match.vyhybka;
-        if (vyhybkaChanged || epc.cast <= 0 || epc.cast < v.castMin || epc.cast > v.castMax) {
+        if (tuduChanged || vyhybkaChanged || epc.cast <= 0
+                || epc.cast < v.castMin || epc.cast > v.castMax) {
             epc.cast = firstMissingCast(tudu.code, v);
         }
         refreshTemplate();
