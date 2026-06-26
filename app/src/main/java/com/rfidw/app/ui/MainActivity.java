@@ -6,7 +6,9 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.graphics.Typeface;
@@ -67,6 +69,8 @@ public class MainActivity extends AppCompatActivity {
     private static final int[] TRIGGER_KEYS = {139, 280, 293, 311, 312, 522, 523, 0x3E8};
 
     private static final int REQUEST_LOCATION_PERMISSION = 1001;
+    private static final int REQUEST_STORAGE_PERMISSION = 1002;
+    private static final String DEFAULT_DB_NAME = "DZS_PASPORT_TPI.sqlite";
 
     private static final int COLOR_STATUS_READY = 0xFF2E7D32;
     private static final int COLOR_STATUS_BUSY = 0xFF5F6A76;
@@ -98,7 +102,7 @@ public class MainActivity extends AppCompatActivity {
     private CsvAdapter csvAdapter;
     private SharedPreferences prefs;
 
-    private boolean step1Done, step2Done, step3Done, step2Failed;
+    private boolean pendingAutoLoadAfterStorage;
     private boolean workflowRunning, chainWorkflow, scanDoneAwaitingConfirm, lastRecordUnlocked;
     /** CSV obnoveno dřív než zdrojový soubor – posun na další čip/výhybku až po načtení TUDU. */
     private boolean pendingAdvanceFromCsv;
@@ -144,6 +148,7 @@ public class MainActivity extends AppCompatActivity {
         setupCsv();
         setupLocation();
         setupListeners();
+        tryAutoLoadDefaultDatabase();
 
         etPower.setText("");
 
@@ -913,11 +918,21 @@ public class MainActivity extends AppCompatActivity {
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
                                            @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode != REQUEST_LOCATION_PERMISSION) return;
-        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            locationCache.start(this);
+        if (requestCode == REQUEST_LOCATION_PERMISSION) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                locationCache.start(this);
+            }
+            if (showGpsStatus) refreshGpsStatus();
+            return;
         }
-        if (showGpsStatus) refreshGpsStatus();
+        if (requestCode != REQUEST_STORAGE_PERMISSION) return;
+        if (!pendingAutoLoadAfterStorage) return;
+        pendingAutoLoadAfterStorage = false;
+        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            tryAutoLoadDefaultDatabase();
+        } else {
+            tvSourceFile.setText(R.string.db_none);
+        }
     }
 
     @Override
@@ -1149,6 +1164,72 @@ public class MainActivity extends AppCompatActivity {
         picker.launch(i);
     }
 
+    private void tryAutoLoadDefaultDatabase() {
+        tvSourceFile.setText(getString(R.string.db_auto_loading));
+        io.execute(() -> {
+            File found = findDefaultDatabaseFile(false);
+            if (found != null) {
+                loadDatabaseFromPath(found.getAbsolutePath(), DEFAULT_DB_NAME, false);
+                return;
+            }
+            if (needsStoragePermission()) {
+                pendingAutoLoadAfterStorage = true;
+                ui.post(this::requestStoragePermissionIfNeeded);
+                return;
+            }
+            found = findDefaultDatabaseFile(true);
+            if (found != null) {
+                loadDatabaseFromPath(found.getAbsolutePath(), DEFAULT_DB_NAME, false);
+            } else {
+                ui.post(() -> tvSourceFile.setText(R.string.db_none));
+            }
+        });
+    }
+
+    private boolean needsStoragePermission() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                && Build.VERSION.SDK_INT < 33
+                && ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void requestStoragePermissionIfNeeded() {
+        if (!needsStoragePermission()) return;
+        ActivityCompat.requestPermissions(
+                this,
+                new String[]{Manifest.permission.READ_EXTERNAL_STORAGE},
+                REQUEST_STORAGE_PERMISSION);
+    }
+
+    private File findDefaultDatabaseFile(boolean includeSharedStorage) {
+        List<File> dirs = new ArrayList<>();
+        File ext = getExternalFilesDir(null);
+        if (ext != null) dirs.add(ext);
+        File appDownloads = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+        if (appDownloads != null) dirs.add(appDownloads);
+        dirs.add(getFilesDir());
+        if (includeSharedStorage && canReadSharedStorage()) {
+            File pubDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+            if (pubDownloads != null) dirs.add(pubDownloads);
+            File root = Environment.getExternalStorageDirectory();
+            if (root != null) dirs.add(root);
+            dirs.add(new File("/storage/emulated/0"));
+        }
+        for (File dir : dirs) {
+            if (dir == null || !dir.isDirectory()) continue;
+            File candidate = new File(dir, DEFAULT_DB_NAME);
+            if (candidate.isFile() && candidate.canRead()) return candidate;
+        }
+        return null;
+    }
+
+    private boolean canReadSharedStorage() {
+        if (Build.VERSION.SDK_INT >= 33) return false;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true;
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
     private void loadSource(Uri uri) {
         String name = queryName(uri);
         final String fileTypeError = getString(R.string.db_file_type_error);
@@ -1160,20 +1241,7 @@ public class MainActivity extends AppCompatActivity {
                     throw new Exception(fileTypeError);
                 }
                 File dbFile = copyUriToCache(uri, "dzs_source.db");
-                DzsDatabase opened = DzsDatabase.open(dbFile.getAbsolutePath());
-                List<Tudu> loaded = opened.loadAllTudu();
-                ui.post(() -> {
-                    closeDzsDatabase();
-                    dzsDatabase = opened;
-                    gpsAutoSelection = true;
-                    lastGpsLookupLat = null;
-                    lastGpsLookupLon = null;
-                    tuduList = loaded;
-                    tvSourceFile.setText(name + "  •  TUDU: " + loaded.size());
-                    collapseCard1Body();
-                    scrollToCard1();
-                    onDatabaseLoaded();
-                });
+                loadDatabaseFromPath(dbFile.getAbsolutePath(), name, true);
             } catch (Exception e) {
                 ui.post(() -> {
                     tvSourceFile.setText("Chyba načtení: " + e.getMessage());
@@ -1181,6 +1249,30 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
         });
+    }
+
+    private void loadDatabaseFromPath(String path, String displayName, boolean showErrorToast) {
+        try {
+            DzsDatabase opened = DzsDatabase.open(path);
+            List<Tudu> loaded = opened.loadAllTudu();
+            ui.post(() -> {
+                closeDzsDatabase();
+                dzsDatabase = opened;
+                gpsAutoSelection = true;
+                lastGpsLookupLat = null;
+                lastGpsLookupLon = null;
+                tuduList = loaded;
+                tvSourceFile.setText(displayName + "  •  TUDU: " + loaded.size());
+                collapseCard1Body();
+                scrollToCard1();
+                onDatabaseLoaded();
+            });
+        } catch (Exception e) {
+            ui.post(() -> {
+                tvSourceFile.setText("Chyba načtení: " + e.getMessage());
+                if (showErrorToast) toast("Chyba načtení databáze");
+            });
+        }
     }
 
     private void onDatabaseLoaded() {

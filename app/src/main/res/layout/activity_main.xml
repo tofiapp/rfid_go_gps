@@ -162,7 +162,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:paddingTop="4dp"
-                        android:text="Žádná databáze"
+                        android:text="@string/db_none"
                         android:textColor="@color/text_muted"
                         android:textSize="12sp"/>
                 </LinearLayout>

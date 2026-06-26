@@ -19,6 +19,7 @@ Hlavní obrazovka vede operátora třemi kroky (**TUDU → Načtení → Hotovo*
 
 ### 1. Zdroj dat – SQLite databáze a GPS
 - Načte databázi **SQLite** (`.db` / `.sqlite`) s tabulkami `DZS_SUPERTRA_GPS_KM` a `DZS_SUPER_RO_TPI`.
+- Po spuštění automaticky hledá a načte soubor **`DZS_PASPORT_TPI.sqlite`** (kořen úložiště, Stažené soubory, složka aplikace). Ruční výběr zůstává k dispozici.
 - Podle **aktuální GPS polohy** najde nejbližší bod v `DZS_SUPERTRA_GPS_KM`, z něj vezme `SUPER_Z_ID` a `SUPER_D_ID` a v `DZS_SUPER_RO_TPI` dohledá **TUDU** a **číslo výhybky**.
 - Hodnoty se automaticky doplní do **náhledového panelu** nahoře (TUDU / Výhybka / čip).
 - TUDU a výhybku lze kdykoli **ručně změnit** klepnutím na náhledový panel – tím se vypne automatická aktualizace z GPS.
