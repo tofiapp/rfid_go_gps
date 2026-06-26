@@ -44,13 +44,14 @@ import com.google.android.material.button.MaterialButtonToggleGroup;
 
 import com.rfidw.app.R;
 import com.rfidw.app.csv.CsvStore;
+import com.rfidw.app.data.DzsDatabase;
 import com.rfidw.app.data.Tudu;
-import com.rfidw.app.data.TuduLoader;
 import com.rfidw.app.epc.EpcModel;
 import com.rfidw.app.location.LocationCache;
 import com.rfidw.app.rfid.UhfManager;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.util.Collections;
 import java.util.Locale;
@@ -85,6 +86,13 @@ public class MainActivity extends AppCompatActivity {
     private List<Tudu> tuduList = new ArrayList<>();
     private Tudu currentTudu;
     private Tudu.Vyhybka currentVyhybka;
+    private DzsDatabase dzsDatabase;
+    /** Po ručním výběru TUDU/výhybky neaktualizovat z GPS. */
+    private boolean gpsAutoSelection = true;
+    private volatile boolean gpsLookupInFlight;
+    private Double lastGpsLookupLat;
+    private Double lastGpsLookupLon;
+    private static final double GPS_LOOKUP_MIN_MOVE_M = 15.0;
 
     private CsvStore csvStore;
     private CsvAdapter csvAdapter;
@@ -372,10 +380,11 @@ public class MainActivity extends AppCompatActivity {
 
     private void showTuduPicker() {
         if (tuduList.isEmpty()) {
-            toast("Nejdříve vyberte soubor se zdrojem dat");
+            toast(getString(R.string.db_select_required));
             expandCard1Body();
             return;
         }
+        gpsAutoSelection = false;
 
         View dialogView = getLayoutInflater().inflate(R.layout.dialog_tudu_picker, null);
         EditText etSearch = dialogView.findViewById(R.id.etTuduSearch);
@@ -441,10 +450,11 @@ public class MainActivity extends AppCompatActivity {
 
     private void showVyhybkaPicker() {
         if (currentTudu == null || currentTudu.vyhybky.isEmpty()) {
-            toast("TUDU nemá výhybky – vyberte soubor nebo TUDU");
+            toast(getString(R.string.db_select_required));
             expandCard1Body();
             return;
         }
+        gpsAutoSelection = false;
         final String tuduCode = currentTudu.code;
         final List<Tudu.Vyhybka> vyhybky = currentTudu.vyhybky;
 
@@ -876,7 +886,10 @@ public class MainActivity extends AppCompatActivity {
 
     private void setupLocation() {
         locationCache = new LocationCache(this);
-        locationCache.setListener(this::refreshGpsStatus);
+        locationCache.setListener(() -> {
+            scheduleGpsTuduLookup();
+            refreshGpsStatus();
+        });
         ensureLocationPermission();
     }
 
@@ -1138,29 +1151,43 @@ public class MainActivity extends AppCompatActivity {
 
     private void loadSource(Uri uri) {
         String name = queryName(uri);
+        final String fileTypeError = getString(R.string.db_file_type_error);
         tvSourceFile.setText("Načítám: " + name);
         io.execute(() -> {
             try {
-                InputStream in = getContentResolver().openInputStream(uri);
-                List<Tudu> loaded = TuduLoader.load(in, name);
+                String lower = name.toLowerCase(Locale.ROOT);
+                if (!lower.endsWith(".db") && !lower.endsWith(".sqlite") && !lower.endsWith(".sqlite3")) {
+                    throw new Exception(fileTypeError);
+                }
+                File dbFile = copyUriToCache(uri, "dzs_source.db");
+                DzsDatabase opened = DzsDatabase.open(dbFile.getAbsolutePath());
+                List<Tudu> loaded = opened.loadAllTudu();
                 ui.post(() -> {
+                    closeDzsDatabase();
+                    dzsDatabase = opened;
+                    gpsAutoSelection = true;
+                    lastGpsLookupLat = null;
+                    lastGpsLookupLon = null;
                     tuduList = loaded;
                     tvSourceFile.setText(name + "  •  TUDU: " + loaded.size());
                     collapseCard1Body();
                     scrollToCard1();
-                    onTuduListLoaded();
+                    onDatabaseLoaded();
                 });
             } catch (Exception e) {
                 ui.post(() -> {
                     tvSourceFile.setText("Chyba načtení: " + e.getMessage());
-                    toast("Chyba načtení souboru");
+                    toast("Chyba načtení databáze");
                 });
             }
         });
     }
 
-    private void onTuduListLoaded() {
-        if (tuduList.isEmpty()) return;
+    private void onDatabaseLoaded() {
+        if (tuduList.isEmpty()) {
+            toast("Databáze neobsahuje žádné TUDU");
+            return;
+        }
         if (requireManualTuduSelection) {
             showTuduPicker();
             return;
@@ -1169,11 +1196,98 @@ public class MainActivity extends AppCompatActivity {
             for (Tudu t : tuduList) {
                 if (t.code.equals(epc.tudu)) {
                     selectTuduPreservingEpc(t);
+                    scheduleGpsTuduLookup();
                     return;
                 }
             }
         }
-        showTuduPicker();
+        scheduleGpsTuduLookup();
+        if (!step1Done) {
+            toast(getString(R.string.gps_tudu_wait));
+        }
+    }
+
+    private void scheduleGpsTuduLookup() {
+        if (!gpsAutoSelection || dzsDatabase == null || locationCache == null || gpsLookupInFlight) {
+            return;
+        }
+        LocationCache.Snapshot snap = locationCache.getSnapshot();
+        if (!snap.valid) return;
+        if (lastGpsLookupLat != null && lastGpsLookupLon != null && step1Done) {
+            double moved = haversineM(lastGpsLookupLat, lastGpsLookupLon, snap.latitude, snap.longitude);
+            if (moved < GPS_LOOKUP_MIN_MOVE_M) return;
+        }
+        gpsLookupInFlight = true;
+        final double lat = snap.latitude;
+        final double lon = snap.longitude;
+        io.execute(() -> {
+            DzsDatabase.GpsMatch match = dzsDatabase.findNearest(lat, lon);
+            ui.post(() -> {
+                gpsLookupInFlight = false;
+                if (!gpsAutoSelection || match == null) return;
+                lastGpsLookupLat = lat;
+                lastGpsLookupLon = lon;
+                applyGpsMatch(match);
+            });
+        });
+    }
+
+    private void applyGpsMatch(DzsDatabase.GpsMatch match) {
+        Tudu tudu = null;
+        for (Tudu t : tuduList) {
+            if (t.code.equals(match.tudu)) {
+                tudu = t;
+                break;
+            }
+        }
+        if (tudu == null) {
+            tudu = new Tudu(match.tudu);
+            tudu.findOrCreate(match.vyhybka);
+            tuduList.add(tudu);
+        }
+        currentTudu = tudu;
+        epc.tudu = match.tudu;
+        Tudu.Vyhybka v = tudu.findOrCreate(match.vyhybka);
+        boolean vyhybkaChanged = currentVyhybka == null || currentVyhybka.cislo != match.vyhybka;
+        currentVyhybka = v;
+        epc.vyhybka = match.vyhybka;
+        if (vyhybkaChanged || epc.cast <= 0 || epc.cast < v.castMin || epc.cast > v.castMax) {
+            epc.cast = firstMissingCast(tudu.code, v);
+        }
+        refreshTemplate();
+        updateStep1();
+        updateSummary1();
+    }
+
+    private void closeDzsDatabase() {
+        if (dzsDatabase != null) {
+            try {
+                dzsDatabase.close();
+            } catch (Exception ignored) { }
+            dzsDatabase = null;
+        }
+    }
+
+    private File copyUriToCache(Uri uri, String fileName) throws Exception {
+        File out = new File(getCacheDir(), fileName);
+        try (InputStream in = getContentResolver().openInputStream(uri);
+             FileOutputStream fos = new FileOutputStream(out, false)) {
+            if (in == null) throw new Exception("Soubor nelze otevřít");
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) fos.write(buf, 0, n);
+        }
+        return out;
+    }
+
+    private static double haversineM(double lat1, double lon1, double lat2, double lon2) {
+        double r = 6_371_000.0;
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLon = Math.toRadians(lon2 - lon1);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
+                * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        return 2 * r * Math.asin(Math.sqrt(a));
     }
 
     private void selectTuduPreservingEpc(Tudu t) {
@@ -1768,6 +1882,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         if (locationCache != null) locationCache.stop();
+        closeDzsDatabase();
         super.onDestroy();
         io.execute(uhf::free);
         io.shutdown();
