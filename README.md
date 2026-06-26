@@ -1,6 +1,6 @@
 # RFID Go GPS
 
-Android aplikace (verze **3.0**) pro čtečku **Chainway C5** (vestavěný UHF UART modul, RSCJA/Chainway SDK).
+Android aplikace (verze **3.1**) pro čtečku **Chainway C5** (vestavěný UHF UART modul, RSCJA/Chainway SDK).
 Slouží k **přepisu EPC** UHF tagů podle definované šablony, **zaheslování** a **zamčení** tagů, k **zápisu údajů o tagu do tabulky CSV** a k **záznamu GPS polohy čtečky** při každém tagu.
 
 ---
@@ -88,7 +88,9 @@ Při zápisu stejného `ID_RFID` se daný řádek **přepíše**.
 Tabulku lze sdílet tlačítkem **Sdílet / Export** nebo **vymazat poslední záznam** (obnoví se předchozí stav šablony).
 Nad spodním panelem se zobrazuje náhled **posledního záznamu** (výhybka a část).
 
-Soubor je uložen v `Android/data/com.rfidw.app/files/rfid_go_gps_output.csv`.
+Soubor je uložen v `Android/data/com.rfidw.app.gps/files/rfid_go_gps_output.csv`.
+
+> **Souběžná instalace:** GPS verze má `applicationId` `com.rfidw.app.gps`, takže ji lze mít nainstalovanou vedle původní **RFID Go** (`com.rfidw.app`) bez vzájemného přepisování.
 
 Starší CSV soubory bez GPS sloupců lze načíst – GPS pole zůstanou prázdná.
 
