@@ -96,6 +96,7 @@ public class MainActivity extends AppCompatActivity {
     /** Po ručním výběru TUDU/výhybky neaktualizovat z GPS. */
     private boolean gpsAutoSelection = true;
     private volatile boolean gpsLookupInFlight;
+    private boolean gpsLookupNoMatch;
     private Double lastGpsLookupLat;
     private Double lastGpsLookupLon;
     private long lastGpsLookupTimeMs;
@@ -874,6 +875,14 @@ public class MainActivity extends AppCompatActivity {
                 if (gpsTestMode && locationCache != null && locationCache.hasTestOverride()) {
                     tvReaderStatus.setText(getString(R.string.gps_test_status));
                     tvReaderStatus.setTextColor(COLOR_STATUS_READY);
+                } else if (locationCache != null && locationCache.hasFix()) {
+                    if (gpsLookupNoMatch) {
+                        tvReaderStatus.setText(getString(R.string.gps_tudu_not_found));
+                        tvReaderStatus.setTextColor(COLOR_STATUS_ERROR);
+                    } else {
+                        tvReaderStatus.setText(getString(R.string.gps_tudu_lookup));
+                        tvReaderStatus.setTextColor(COLOR_STATUS_GPS_WAIT);
+                    }
                 } else {
                     tvReaderStatus.setText(getString(R.string.gps_tudu_wait));
                     tvReaderStatus.setTextColor(COLOR_STATUS_GPS_WAIT);
@@ -933,11 +942,13 @@ public class MainActivity extends AppCompatActivity {
     private void ensureGpsForTuduLookup() {
         ensureLocationPermission();
         if (locationCache != null) {
+            locationCache.start(this);
             if (gpsTestMode) {
                 restoreTestLocationFromPrefs();
             } else {
                 locationCache.refresh(this);
             }
+            gpsLookupNoMatch = false;
             scheduleGpsTuduLookup();
             if (!workflowRunning) {
                 setActionStatusReady();
@@ -1215,6 +1226,7 @@ public class MainActivity extends AppCompatActivity {
         if (locationCache == null) return;
         if (enabled) {
             gpsAutoSelection = true;
+            gpsLookupNoMatch = false;
             lastGpsLookupLat = null;
             lastGpsLookupLon = null;
             lastGpsLookupTimeMs = 0;
@@ -1226,6 +1238,7 @@ public class MainActivity extends AppCompatActivity {
             clearSavedTestLocation();
             locationCache.clearTestOverride();
             locationCache.refresh(this);
+            gpsLookupNoMatch = false;
             lastGpsLookupLat = null;
             lastGpsLookupLon = null;
             lastGpsLookupTimeMs = 0;
@@ -1338,6 +1351,7 @@ public class MainActivity extends AppCompatActivity {
         lastGpsLookupLat = null;
         lastGpsLookupLon = null;
         lastGpsLookupTimeMs = 0;
+        gpsLookupNoMatch = false;
         scheduleGpsTuduLookup();
         if (!workflowRunning) {
             setActionStatusReady();
@@ -1484,6 +1498,7 @@ public class MainActivity extends AppCompatActivity {
                 closeDzsDatabase();
                 dzsDatabase = opened;
                 gpsAutoSelection = true;
+                gpsLookupNoMatch = false;
                 lastGpsLookupLat = null;
                 lastGpsLookupLon = null;
                 lastGpsLookupTimeMs = 0;
@@ -1550,17 +1565,34 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         gpsLookupInFlight = true;
+        gpsLookupNoMatch = false;
         final double lat = snap.latitude;
         final double lon = snap.longitude;
         io.execute(() -> {
-            DzsDatabase.GpsMatch match = dzsDatabase.findNearest(lat, lon);
+            DzsDatabase.GpsMatch match = null;
+            try {
+                if (dzsDatabase != null) {
+                    match = dzsDatabase.findNearest(lat, lon);
+                }
+            } catch (Exception ignored) {
+                match = null;
+            }
+            final DzsDatabase.GpsMatch result = match;
             ui.post(() -> {
                 gpsLookupInFlight = false;
-                if (!gpsAutoSelection || match == null) return;
+                if (!gpsAutoSelection || dzsDatabase == null) return;
+                if (result == null) {
+                    gpsLookupNoMatch = locationCache != null && locationCache.hasFix();
+                    if (!workflowRunning) {
+                        setActionStatusReady();
+                    }
+                    return;
+                }
+                gpsLookupNoMatch = false;
                 lastGpsLookupLat = lat;
                 lastGpsLookupLon = lon;
                 lastGpsLookupTimeMs = System.currentTimeMillis();
-                applyGpsMatch(match);
+                applyGpsMatch(result);
                 scheduleGpsTuduLookup();
             });
         });
