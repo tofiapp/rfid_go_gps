@@ -98,7 +98,7 @@ public class MainActivity extends AppCompatActivity {
     private int activeStep;
 
     // view reference
-    private TextView tvReaderStatus, tvEpcPreview, tvEpcValid, tvSourceFile,
+    private TextView tvReaderStatus, tvGpsStatus, tvEpcPreview, tvEpcValid, tvSourceFile,
             tvWriteResult, tvCsvPath, tvPwdWriteResult, tvLockResult,
             tvSummaryTudu, tvSummaryVyhybka, tvSummaryCast,
             tvCastHintAction, tvCastHintPart,
@@ -113,7 +113,7 @@ public class MainActivity extends AppCompatActivity {
     private CheckBox cbAutoCsv;
     private MaterialButtonToggleGroup powerPresetGroup;
     private Boolean powerPresetInKoleji;
-    private boolean showGpsInStatus;
+    private boolean showGpsStatus;
     private boolean gpsUnavailableToastShown;
 
     // řádky šablony (kontejnery z include)
@@ -150,6 +150,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void bindViews() {
         tvReaderStatus = findViewById(R.id.tvReaderStatus);
+        tvGpsStatus = findViewById(R.id.tvGpsStatus);
         tvEpcPreview = findViewById(R.id.tvEpcPreview);
         tvEpcValid = findViewById(R.id.tvEpcValid);
         tvSourceFile = findViewById(R.id.tvSourceFile);
@@ -205,7 +206,7 @@ public class MainActivity extends AppCompatActivity {
             String[] statusTexts = {
                     getString(R.string.tudu_select_status),
                     getString(R.string.power_preset_select_status),
-                    "připraveno",
+                    getString(R.string.status_ready),
                     "zapisuji EPC…",
                     "zapisuji heslo…",
                     "zamykám…",
@@ -213,9 +214,7 @@ public class MainActivity extends AppCompatActivity {
                     "chyba hesla",
                     "chyba zamčení",
                     "nedostupná",
-                    "inicializuji…",
-                    "připraveno · GPS čekám…",
-                    "připraveno · 49.1951° 16.6084° ±6m"
+                    "inicializuji…"
             };
             for (String text : statusTexts) {
                 maxWidth = Math.max(maxWidth, tvReaderStatus.getPaint().measureText(text));
@@ -826,7 +825,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setActionStatus(String text, int color) {
-        showGpsInStatus = false;
+        showGpsStatus = false;
+        tvGpsStatus.setVisibility(View.GONE);
         tvReaderStatus.setText(text);
         tvReaderStatus.setTextColor(color);
     }
@@ -841,12 +841,14 @@ public class MainActivity extends AppCompatActivity {
             updateStepIndicators();
             return;
         }
-        showGpsInStatus = true;
-        refreshReadyStatusWithGps();
+        showGpsStatus = true;
+        tvReaderStatus.setText(getString(R.string.status_ready));
+        refreshGpsStatus();
     }
 
-    private void refreshReadyStatusWithGps() {
-        if (!showGpsInStatus || locationCache == null) return;
+    private void refreshGpsStatus() {
+        if (!showGpsStatus || locationCache == null) return;
+        tvGpsStatus.setVisibility(View.VISIBLE);
         int color;
         if (!locationCache.hasFix()) {
             color = COLOR_STATUS_GPS_WAIT;
@@ -855,14 +857,15 @@ public class MainActivity extends AppCompatActivity {
         } else {
             color = COLOR_STATUS_READY;
         }
-        tvReaderStatus.setText(getString(
-                R.string.status_ready_with_gps, locationCache.formatStatusSuffix()));
-        tvReaderStatus.setTextColor(color);
+        tvGpsStatus.setText(locationCache.formatStatusText());
+        tvGpsStatus.setTextColor(color);
+        tvReaderStatus.setText(getString(R.string.status_ready));
+        tvReaderStatus.setTextColor(COLOR_STATUS_READY);
     }
 
     private void setupLocation() {
         locationCache = new LocationCache(this);
-        locationCache.setListener(this::refreshReadyStatusWithGps);
+        locationCache.setListener(this::refreshGpsStatus);
         ensureLocationPermission();
     }
 
@@ -890,7 +893,7 @@ public class MainActivity extends AppCompatActivity {
         if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             locationCache.start(this);
         }
-        if (showGpsInStatus) refreshReadyStatusWithGps();
+        if (showGpsStatus) refreshGpsStatus();
     }
 
     @Override
@@ -898,7 +901,7 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         if (locationCache != null) {
             ensureLocationPermission();
-            if (showGpsInStatus) refreshReadyStatusWithGps();
+            if (showGpsStatus) refreshGpsStatus();
         }
     }
 

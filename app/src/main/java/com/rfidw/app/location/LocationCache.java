@@ -16,12 +16,15 @@ import java.util.Date;
 import java.util.Locale;
 
 /**
- * Cache poslední známé GPS polohy – aktualizace cca každou sekundu na pozadí.
+ * Cache nejlepší známé GPS polohy – preferuje satelitní fix, aktualizace cca každých 500 ms.
  */
 public class LocationCache implements LocationListener {
 
-    public static final long UPDATE_INTERVAL_MS = 1000;
+    public static final long GPS_UPDATE_INTERVAL_MS = 500;
+    public static final long NETWORK_UPDATE_INTERVAL_MS = 2000;
     public static final long STALE_AFTER_MS = 30_000;
+    /** Fix starší než toto se při výběru nepreferuje oproti čerstvějšímu. */
+    private static final long RECENT_FIX_MS = 15_000;
 
     public static class Snapshot {
         public final double latitude;
@@ -29,17 +32,24 @@ public class LocationCache implements LocationListener {
         public final float accuracyM;
         public final long gpsTimeMs;
         public final boolean valid;
+        public final String provider;
 
-        private Snapshot(double latitude, double longitude, float accuracyM, long gpsTimeMs, boolean valid) {
+        private Snapshot(double latitude, double longitude, float accuracyM, long gpsTimeMs,
+                         boolean valid, String provider) {
             this.latitude = latitude;
             this.longitude = longitude;
             this.accuracyM = accuracyM;
             this.gpsTimeMs = gpsTimeMs;
             this.valid = valid;
+            this.provider = provider != null ? provider : "";
         }
 
         public static Snapshot empty() {
-            return new Snapshot(0, 0, 0, 0, false);
+            return new Snapshot(0, 0, 0, 0, false, "");
+        }
+
+        public boolean isGpsProvider() {
+            return LocationManager.GPS_PROVIDER.equals(provider);
         }
     }
 
@@ -81,8 +91,8 @@ public class LocationCache implements LocationListener {
         }
         running = true;
         seedLastKnown(context);
-        requestUpdates(LocationManager.GPS_PROVIDER);
-        requestUpdates(LocationManager.NETWORK_PROVIDER);
+        requestUpdates(LocationManager.GPS_PROVIDER, GPS_UPDATE_INTERVAL_MS);
+        requestUpdates(LocationManager.NETWORK_PROVIDER, NETWORK_UPDATE_INTERVAL_MS);
     }
 
     public void stop() {
@@ -94,11 +104,11 @@ public class LocationCache implements LocationListener {
         }
     }
 
-    private void requestUpdates(String provider) {
+    private void requestUpdates(String provider, long intervalMs) {
         try {
             if (!locationManager.isProviderEnabled(provider)) return;
             locationManager.requestLocationUpdates(
-                    provider, UPDATE_INTERVAL_MS, 0, this, Looper.getMainLooper());
+                    provider, intervalMs, 0, this, Looper.getMainLooper());
         } catch (SecurityException ignored) {
         }
     }
@@ -114,7 +124,7 @@ public class LocationCache implements LocationListener {
                 if (!locationManager.isProviderEnabled(provider)) continue;
                 Location location = locationManager.getLastKnownLocation(provider);
                 if (location == null) continue;
-                if (best == null || location.getTime() > best.getTime()) best = location;
+                best = pickBetterLocation(best, location);
             } catch (SecurityException ignored) {
             }
         }
@@ -128,16 +138,69 @@ public class LocationCache implements LocationListener {
     }
 
     private synchronized void updateFrom(Location location, boolean notify) {
+        if (!location.hasAccuracy()) return;
+        if (snapshot.valid && !shouldReplace(snapshot, location)) return;
+
         snapshot = new Snapshot(
                 location.getLatitude(),
                 location.getLongitude(),
                 location.getAccuracy(),
                 location.getTime(),
-                true);
+                true,
+                location.getProvider());
         if (notify && listener != null) listener.onLocationUpdated();
     }
 
-    public String formatStatusSuffix() {
+    /**
+     * Vybere lepší fix: satelitní má přednost, pak nižší přesnost (accuracy), pak čerstvější čas.
+     */
+    static Location pickBetterLocation(Location current, Location candidate) {
+        if (current == null) return candidate;
+        if (candidate == null) return current;
+
+        boolean currentGps = LocationManager.GPS_PROVIDER.equals(current.getProvider());
+        boolean candidateGps = LocationManager.GPS_PROVIDER.equals(candidate.getProvider());
+        long now = System.currentTimeMillis();
+        boolean currentRecent = now - current.getTime() <= RECENT_FIX_MS;
+        boolean candidateRecent = now - candidate.getTime() <= RECENT_FIX_MS;
+
+        if (candidateGps && !currentGps && candidateRecent) return candidate;
+        if (currentGps && !candidateGps && currentRecent) return current;
+
+        if (currentGps == candidateGps) {
+            float accuracyDiff = candidate.getAccuracy() - current.getAccuracy();
+            if (accuracyDiff < -3f) return candidate;
+            if (accuracyDiff > 3f) return current;
+            return candidate.getTime() >= current.getTime() ? candidate : current;
+        }
+
+        if (candidateGps) return candidate;
+        if (currentGps) return current;
+        return candidate.getAccuracy() < current.getAccuracy() ? candidate : current;
+    }
+
+    static boolean shouldReplace(Snapshot current, Location candidate) {
+        if (!current.valid) return true;
+
+        long ageMs = System.currentTimeMillis() - current.gpsTimeMs;
+        boolean currentStale = ageMs > STALE_AFTER_MS;
+        if (currentStale) return true;
+
+        boolean candidateGps = LocationManager.GPS_PROVIDER.equals(candidate.getProvider());
+        if (candidateGps && !current.isGpsProvider()) return true;
+
+        if (current.isGpsProvider() && !candidateGps) {
+            return ageMs > RECENT_FIX_MS;
+        }
+
+        float accuracyGain = current.accuracyM - candidate.getAccuracy();
+        if (accuracyGain >= 3f) return true;
+        if (accuracyGain <= -5f) return false;
+
+        return candidate.getTime() > current.gpsTimeMs + 1000;
+    }
+
+    public String formatStatusText() {
         Snapshot s = getSnapshot();
         if (!s.valid) return "GPS čekám…";
         if (isStale()) {

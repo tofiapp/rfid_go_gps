@@ -95,11 +95,11 @@ Soubor je uložen v `Android/data/com.rfidw.app.gps/files/rfid_go_gps_output.csv
 Starší CSV soubory bez GPS sloupců lze načíst – GPS pole zůstanou prázdná.
 
 ### 4. GPS poloha čtečky
-- Aplikace po spuštění žádá o oprávnění k poloze a **aktualizuje GPS cache každou 1 s**.
-- Ve stavu **připraveno** se v horním řádku akcí zobrazuje aktuální poloha, např. `připraveno · 49.1951° 16.6084° ±6m`.
-- Při zápisu tagu se do CSV uloží poslední známá poloha (bez čekání na nový fix).
+- Aplikace po spuštění žádá o oprávnění k poloze a **aktualizuje GPS cache každých 500 ms** (satelitní fix má přednost před síťovou polohou).
+- Ve stavu **připraveno** se poloha zobrazuje **mezi horním řádkem (logo, režim, stav) a indikátorem 3 kroků**, např. `49.1951° 16.6084° ±6m`. Horní řádek zobrazuje pouze `připraveno`.
+- Při zápisu tagu se do CSV uloží nejlepší známá poloha (bez čekání na nový fix).
 - Pokud GPS není dostupná, tag se uloží bez souřadnic a operátor dostane jednorázové upozornění.
-- Během zápisu EPC / hesla / zamčení zůstává v řádku akcí text průběhu operace.
+- Během zápisu EPC / hesla / zamčení zůstává v horním řádku text průběhu operace a řádek GPS je skrytý.
 
 ### 5. Zaheslování – zápis access hesla
 - **bank RESERVED**, `ptr 2`, `len 2` (access password, 8 hex znaků)
@@ -161,7 +161,7 @@ app/src/main/java/com/rfidw/app/
 ├─ data/Tudu.java          – model TUDU + výhybky
 ├─ data/TuduLoader.java    – načítání z .csv / .sql
 ├─ csv/CsvStore.java       – výstupní CSV s přepisem podle ID_RFID
-├─ location/LocationCache.java – cache GPS polohy (aktualizace 1×/s)
+├─ location/LocationCache.java – cache GPS polohy (satelitní fix, aktualizace 500 ms)
 ├─ rfid/UhfManager.java    – obal nad RFIDWithUHFUART (EPC, heslo, zamčení)
 └─ ui/
    ├─ MainActivity.java    – obrazovka, workflow a propojení všeho
