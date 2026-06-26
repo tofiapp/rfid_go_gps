@@ -1,7 +1,9 @@
 package com.rfidw.app.ui;
 
+import android.Manifest;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
@@ -26,8 +28,10 @@ import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.core.widget.NestedScrollView;
@@ -42,6 +46,7 @@ import com.rfidw.app.csv.CsvStore;
 import com.rfidw.app.data.Tudu;
 import com.rfidw.app.data.TuduLoader;
 import com.rfidw.app.epc.EpcModel;
+import com.rfidw.app.location.LocationCache;
 import com.rfidw.app.rfid.UhfManager;
 
 import java.io.File;
@@ -59,15 +64,20 @@ public class MainActivity extends AppCompatActivity {
     // klávesy spouště čtečky (Chainway C5 a příbuzné)
     private static final int[] TRIGGER_KEYS = {139, 280, 293, 311, 312, 522, 523, 0x3E8};
 
+    private static final int REQUEST_LOCATION_PERMISSION = 1001;
+
     private static final int COLOR_STATUS_READY = 0xFF2E7D32;
     private static final int COLOR_STATUS_BUSY = 0xFF5F6A76;
     private static final int COLOR_STATUS_ERROR = 0xFFC62828;
+    private static final int COLOR_STATUS_GPS_WAIT = 0xFFE65100;
+    private static final int COLOR_STATUS_GPS_STALE = 0xFFF57C00;
     private static final int WORKFLOW_DONE_DELAY_MS = 1500;
     private static final int POWER_PRESET_KOLEJI_DBM = 16;
     private static final int POWER_PRESET_RUCE_DBM = 1;
 
     private final UhfManager uhf = new UhfManager();
     private final EpcModel epc = new EpcModel();
+    private LocationCache locationCache;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
 
@@ -103,6 +113,8 @@ public class MainActivity extends AppCompatActivity {
     private CheckBox cbAutoCsv;
     private MaterialButtonToggleGroup powerPresetGroup;
     private Boolean powerPresetInKoleji;
+    private boolean showGpsInStatus;
+    private boolean gpsUnavailableToastShown;
 
     // řádky šablony (kontejnery z include)
     private View[] rows = new View[7];
@@ -111,7 +123,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        prefs = getSharedPreferences("rfidgo", MODE_PRIVATE);
+        prefs = getSharedPreferences("rfidgogps", MODE_PRIVATE);
 
         bindViews();
         setupTopBarInsets();
@@ -120,11 +132,15 @@ public class MainActivity extends AppCompatActivity {
         collapseWorkflowCards();
         setupTemplateRows();
         setupCsv();
+        setupLocation();
         setupListeners();
 
         etPower.setText("");
 
-        epc.idRfid = prefs.getLong("idRfid", 1);
+        epc.idRfid = prefs.getLong("idRfid", -1);
+        if (epc.idRfid < 0) {
+            epc.idRfid = getSharedPreferences("rfidgo", MODE_PRIVATE).getLong("idRfid", 1);
+        }
         refreshTemplate();
         updateSummary1();
         updateStepIndicators();
@@ -197,7 +213,9 @@ public class MainActivity extends AppCompatActivity {
                     "chyba hesla",
                     "chyba zamčení",
                     "nedostupná",
-                    "inicializuji…"
+                    "inicializuji…",
+                    "připraveno · GPS čekám…",
+                    "připraveno · 49.1951° 16.6084° ±6m"
             };
             for (String text : statusTexts) {
                 maxWidth = Math.max(maxWidth, tvReaderStatus.getPaint().measureText(text));
@@ -808,6 +826,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setActionStatus(String text, int color) {
+        showGpsInStatus = false;
         tvReaderStatus.setText(text);
         tvReaderStatus.setTextColor(color);
     }
@@ -822,7 +841,65 @@ public class MainActivity extends AppCompatActivity {
             updateStepIndicators();
             return;
         }
-        setActionStatus("připraveno", COLOR_STATUS_READY);
+        showGpsInStatus = true;
+        refreshReadyStatusWithGps();
+    }
+
+    private void refreshReadyStatusWithGps() {
+        if (!showGpsInStatus || locationCache == null) return;
+        int color;
+        if (!locationCache.hasFix()) {
+            color = COLOR_STATUS_GPS_WAIT;
+        } else if (locationCache.isStale()) {
+            color = COLOR_STATUS_GPS_STALE;
+        } else {
+            color = COLOR_STATUS_READY;
+        }
+        tvReaderStatus.setText(getString(
+                R.string.status_ready_with_gps, locationCache.formatStatusSuffix()));
+        tvReaderStatus.setTextColor(color);
+    }
+
+    private void setupLocation() {
+        locationCache = new LocationCache(this);
+        locationCache.setListener(this::refreshReadyStatusWithGps);
+        ensureLocationPermission();
+    }
+
+    private void ensureLocationPermission() {
+        if (locationCache == null) return;
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED) {
+            locationCache.start(this);
+            return;
+        }
+        ActivityCompat.requestPermissions(
+                this,
+                new String[]{
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                },
+                REQUEST_LOCATION_PERMISSION);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
+                                           @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != REQUEST_LOCATION_PERMISSION) return;
+        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            locationCache.start(this);
+        }
+        if (showGpsInStatus) refreshReadyStatusWithGps();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (locationCache != null) {
+            ensureLocationPermission();
+            if (showGpsInStatus) refreshReadyStatusWithGps();
+        }
     }
 
     private void onWorkflowFailed(String status) {
@@ -940,7 +1017,7 @@ public class MainActivity extends AppCompatActivity {
     // ---------- CSV ----------
 
     private void setupCsv() {
-        File out = new File(getExternalFilesDir(null), "rfid_go_output.csv");
+        File out = new File(getExternalFilesDir(null), "rfid_go_gps_output.csv");
         tvCsvPath.setText(out.getAbsolutePath());
 
         csvAdapter = new CsvAdapter();
@@ -1420,6 +1497,22 @@ public class MainActivity extends AppCompatActivity {
             row.tudu = d.tudu;
             row.vyhybka = d.vyhybka;
             row.cast = d.cast;
+            LocationCache.Snapshot gps = locationCache != null ? locationCache.getSnapshot() : LocationCache.Snapshot.empty();
+            if (gps.valid) {
+                row.latitude = LocationCache.formatLatitude(gps.latitude);
+                row.longitude = LocationCache.formatLongitude(gps.longitude);
+                row.accuracyM = LocationCache.formatAccuracyM(gps.accuracyM);
+                row.gpsTime = LocationCache.formatGpsTime(gps.gpsTimeMs);
+            } else {
+                row.latitude = "";
+                row.longitude = "";
+                row.accuracyM = "";
+                row.gpsTime = "";
+                if (!gpsUnavailableToastShown) {
+                    gpsUnavailableToastShown = true;
+                    toast(getString(R.string.gps_unavailable_toast));
+                }
+            }
             csvStore.upsert(row);
             persistCsvAsync();
             refreshCsvTable();
@@ -1660,6 +1753,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        if (locationCache != null) locationCache.stop();
         super.onDestroy();
         io.execute(uhf::free);
         io.shutdown();
