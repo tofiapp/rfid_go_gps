@@ -169,8 +169,10 @@ public class DzsDatabase implements Closeable {
         }
     }
 
+    /** Číselné ID – 5, 5.0 a "5" se shodují mezi GPS_KM a RO_TPI. */
     private static String idExpr(String tableAlias, String column) {
-        return "TRIM(CAST(" + tableAlias + "." + column + " AS TEXT))";
+        return "CAST(CAST(REPLACE(TRIM(CAST(" + tableAlias + "." + column
+                + " AS TEXT)), ',', '.') AS REAL) AS INTEGER)";
     }
 
     /**
@@ -201,11 +203,11 @@ public class DzsDatabase implements Closeable {
 
         try (Cursor c = db.rawQuery(sql, null)) {
             while (c.moveToNext()) {
-                String superZId = c.getString(0);
-                String superDId = c.getString(1);
+                String superZId = readId(c, 0);
+                String superDId = readId(c, 1);
                 Double lat = readDouble(c, 2);
                 Double lon = readDouble(c, 3);
-                if (lat == null || lon == null) continue;
+                if (superZId == null || superDId == null || lat == null || lon == null) continue;
                 out.add(new GpsPoint(lat, lon, lookupTuduVyhybkaLabel(superZId, superDId)));
             }
         }
@@ -221,8 +223,7 @@ public class DzsDatabase implements Closeable {
                 + " AND ro." + roColumns.tudu + " IS NOT NULL AND ro." + roColumns.tudu + " <> ''"
                 + " AND " + vyhybkaExpr + " IS NOT NULL"
                 + " LIMIT 1";
-        try (Cursor c = db.rawQuery(lookupSql, new String[]{
-                normalizeId(superZId), normalizeId(superDId)})) {
+        try (Cursor c = db.rawQuery(lookupSql, new String[]{superZId, superDId})) {
             if (!c.moveToFirst()) return "";
             String tudu = c.getString(0);
             Integer vyhybka = readInt(c, 1);
@@ -252,7 +253,18 @@ public class DzsDatabase implements Closeable {
     private static String normalizeId(String value) {
         if (value == null) return null;
         String trimmed = value.trim();
-        return trimmed.isEmpty() ? null : trimmed;
+        if (trimmed.isEmpty()) return null;
+        try {
+            double numeric = Double.parseDouble(trimmed.replace(',', '.'));
+            if (!Double.isNaN(numeric) && !Double.isInfinite(numeric)) {
+                long asLong = Math.round(numeric);
+                if (Math.abs(numeric - asLong) < 1e-6) {
+                    return String.valueOf(asLong);
+                }
+            }
+        } catch (NumberFormatException ignored) {
+        }
+        return trimmed;
     }
 
     private static Integer readInt(Cursor c, int index) {
@@ -324,8 +336,8 @@ public class DzsDatabase implements Closeable {
             }
             String superZId = requireColumn(cols, "SUPER_Z_ID");
             String superDId = requireColumn(cols, "SUPER_D_ID");
-            // DZS_SUPERTRA_GPS_KM používá primárně LAT / LON
-            String lat = findRequiredColumn(cols, "LAT", "LATITUDE", "GPS_LAT", "SIRKA", "GPS_SIRKA", "Y");
+            // DZS_SUPERTRA_GPS_KM používá primárně LAT / LON (někdy LAN místo LAT)
+            String lat = findRequiredColumn(cols, "LAT", "LAN", "LATITUDE", "GPS_LAT", "SIRKA", "GPS_SIRKA", "Y");
             String lon = findRequiredColumn(cols, "LON", "LONGITUDE", "LNG", "GPS_LON", "DELKA", "GPS_DELKA", "X");
             return new GpsColumns(superZId, superDId, lat, lon);
         }
@@ -360,10 +372,12 @@ public class DzsDatabase implements Closeable {
         String vyhybkaSelectExpr(String tableAlias) {
             String prefix = tableAlias == null || tableAlias.isEmpty()
                     ? "" : tableAlias + ".";
+            String primary = "NULLIF(TRIM(CAST(" + prefix + vyhybka + " AS TEXT)), '')";
             if (vyhybkaFallback == null) {
-                return prefix + vyhybka;
+                return primary;
             }
-            return "COALESCE(" + prefix + vyhybka + ", " + prefix + vyhybkaFallback + ")";
+            String fallback = "NULLIF(TRIM(CAST(" + prefix + vyhybkaFallback + " AS TEXT)), '')";
+            return "COALESCE(" + primary + ", " + fallback + ")";
         }
 
         static RoColumns resolve(SQLiteDatabase db, String table) throws Exception {

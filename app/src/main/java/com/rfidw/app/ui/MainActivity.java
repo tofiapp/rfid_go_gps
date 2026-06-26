@@ -1520,10 +1520,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void onDatabaseLoaded() {
-        if (tuduList.isEmpty()) {
-            toast("Databáze neobsahuje žádné TUDU");
-            return;
-        }
         if (skipCsvTuduRestore) {
             skipCsvTuduRestore = false;
         }
@@ -1540,7 +1536,9 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         ensureGpsForTuduLookup();
-        if (!step1Done) {
+        if (tuduList.isEmpty()) {
+            toast("Databáze neobsahuje žádné TUDU – zkouším určit podle GPS…");
+        } else if (!step1Done) {
             if (gpsTestMode) {
                 if (locationCache == null || !locationCache.hasTestOverride()) {
                     toast(getString(R.string.gps_test_enabled_toast));
@@ -1596,7 +1594,9 @@ public class MainActivity extends AppCompatActivity {
                 lastGpsLookupLon = lon;
                 lastGpsLookupTimeMs = System.currentTimeMillis();
                 applyGpsMatch(result);
-                scheduleGpsTuduLookup();
+                if (!workflowRunning) {
+                    setActionStatusReady();
+                }
             });
         });
     }
