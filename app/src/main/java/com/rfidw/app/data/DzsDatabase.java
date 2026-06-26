@@ -109,16 +109,27 @@ public class DzsDatabase implements Closeable {
     }
 
     /**
-     * Najde nejbližší bod v DZS_SUPERTRA_GPS_KM a dohledá TUDU / výhybku v DZS_SUPER_RO_TPI.
+     * Najde nejbližší bod v DZS_SUPERTRA_GPS_KM, který má záznam v DZS_SUPER_RO_TPI.
      */
     public GpsMatch findNearest(double latitude, double longitude) {
-        String nearestSql = "SELECT " + gpsColumns.superZId + ", " + gpsColumns.superDId + ", "
-                + gpsColumns.latitude + ", " + gpsColumns.longitude
-                + " FROM " + TABLE_GPS_KM
-                + " WHERE " + gpsColumns.latitude + " IS NOT NULL"
-                + " AND " + gpsColumns.longitude + " IS NOT NULL"
-                + " ORDER BY ((" + gpsColumns.latitude + " - ?) * (" + gpsColumns.latitude + " - ?)"
-                + " + (" + gpsColumns.longitude + " - ?) * (" + gpsColumns.longitude + " - ?))"
+        GpsMatch joined = findNearestJoined(latitude, longitude);
+        if (joined != null) return joined;
+        return findNearestLegacy(latitude, longitude);
+    }
+
+    private GpsMatch findNearestJoined(double latitude, double longitude) {
+        String joinOn = idJoinCondition("g", gpsColumns.superZId, gpsColumns.superDId, "ro", roColumns.superZId, roColumns.superDId);
+        String sql = "SELECT ro." + roColumns.tudu + ", ro." + roColumns.vyhybka + ", "
+                + "g." + gpsColumns.latitude + ", g." + gpsColumns.longitude + ", "
+                + "g." + gpsColumns.superZId + ", g." + gpsColumns.superDId
+                + " FROM " + TABLE_GPS_KM + " g"
+                + " INNER JOIN " + TABLE_RO_TPI + " ro ON " + joinOn
+                + " WHERE g." + gpsColumns.latitude + " IS NOT NULL"
+                + " AND g." + gpsColumns.longitude + " IS NOT NULL"
+                + " AND TRIM(CAST(ro." + roColumns.tudu + " AS TEXT)) <> ''"
+                + " AND ro." + roColumns.vyhybka + " IS NOT NULL"
+                + " ORDER BY ((g." + gpsColumns.latitude + " - ?) * (g." + gpsColumns.latitude + " - ?)"
+                + " + (g." + gpsColumns.longitude + " - ?) * (g." + gpsColumns.longitude + " - ?))"
                 + " LIMIT 1";
 
         String[] args = {
@@ -126,34 +137,112 @@ public class DzsDatabase implements Closeable {
                 String.valueOf(longitude), String.valueOf(longitude)
         };
 
-        String superZId = null;
-        String superDId = null;
-        double bestLat = 0;
-        double bestLon = 0;
-
-        try (Cursor c = db.rawQuery(nearestSql, args)) {
+        try (Cursor c = db.rawQuery(sql, args)) {
             if (!c.moveToFirst()) return null;
-            superZId = c.getString(0);
-            superDId = c.getString(1);
-            bestLat = c.getDouble(2);
-            bestLon = c.getDouble(3);
-        }
-
-        if (superZId == null || superDId == null) return null;
-
-        String lookupSql = "SELECT " + roColumns.tudu + ", " + roColumns.vyhybka
-                + " FROM " + TABLE_RO_TPI
-                + " WHERE " + roColumns.superZId + " = ? AND " + roColumns.superDId + " = ?"
-                + " LIMIT 1";
-
-        try (Cursor c = db.rawQuery(lookupSql, new String[]{superZId, superDId})) {
-            if (!c.moveToFirst()) return null;
-            String tudu = c.getString(0);
+            String tudu = trimToNull(c.getString(0));
             Integer vyhybka = readInt(c, 1);
-            if (tudu == null || tudu.isEmpty() || vyhybka == null) return null;
+            double bestLat = c.getDouble(2);
+            double bestLon = c.getDouble(3);
+            String superZId = c.getString(4);
+            String superDId = c.getString(5);
+            if (tudu == null || vyhybka == null) return null;
             double dist = haversineM(latitude, longitude, bestLat, bestLon);
             return new GpsMatch(superZId, superDId, tudu, vyhybka, bestLat, bestLon, dist);
         }
+    }
+
+    /** Záloha: nejbližší GPS bod a ruční dohledání TUDU / výhybky. */
+    private GpsMatch findNearestLegacy(double latitude, double longitude) {
+        String nearestSql = "SELECT " + gpsColumns.superZId + ", " + gpsColumns.superDId + ", "
+                + gpsColumns.latitude + ", " + gpsColumns.longitude
+                + " FROM " + TABLE_GPS_KM
+                + " WHERE " + gpsColumns.latitude + " IS NOT NULL"
+                + " AND " + gpsColumns.longitude + " IS NOT NULL"
+                + " ORDER BY ((" + gpsColumns.latitude + " - ?) * (" + gpsColumns.latitude + " - ?)"
+                + " + (" + gpsColumns.longitude + " - ?) * (" + gpsColumns.longitude + " - ?))"
+                + " LIMIT 20";
+
+        String[] args = {
+                String.valueOf(latitude), String.valueOf(latitude),
+                String.valueOf(longitude), String.valueOf(longitude)
+        };
+
+        try (Cursor c = db.rawQuery(nearestSql, args)) {
+            while (c.moveToNext()) {
+                String superZId = c.getString(0);
+                String superDId = c.getString(1);
+                double bestLat = c.getDouble(2);
+                double bestLon = c.getDouble(3);
+                if (superZId == null || superDId == null) continue;
+                GpsMatch match = lookupRoEntry(superZId, superDId, latitude, longitude, bestLat, bestLon);
+                if (match != null) return match;
+            }
+        }
+        return null;
+    }
+
+    private GpsMatch lookupRoEntry(String superZId, String superDId,
+                                   double queryLat, double queryLon, double bestLat, double bestLon) {
+        String lookupSql = "SELECT " + roColumns.tudu + ", " + roColumns.vyhybka
+                + " FROM " + TABLE_RO_TPI
+                + " WHERE TRIM(CAST(" + roColumns.superZId + " AS TEXT)) = ?"
+                + " AND TRIM(CAST(" + roColumns.superDId + " AS TEXT)) = ?"
+                + " LIMIT 1";
+
+        for (String zKey : idLookupKeys(superZId)) {
+            for (String dKey : idLookupKeys(superDId)) {
+                try (Cursor c = db.rawQuery(lookupSql, new String[]{zKey, dKey})) {
+                    if (!c.moveToFirst()) continue;
+                    String tudu = trimToNull(c.getString(0));
+                    Integer vyhybka = readInt(c, 1);
+                    if (tudu == null || vyhybka == null) continue;
+                    double dist = haversineM(queryLat, queryLon, bestLat, bestLon);
+                    return new GpsMatch(superZId, superDId, tudu, vyhybka, bestLat, bestLon, dist);
+                }
+            }
+        }
+        return null;
+    }
+
+    private static String idJoinCondition(String gpsAlias, String gpsZ, String gpsD,
+                                          String roAlias, String roZ, String roD) {
+        return "TRIM(CAST(" + gpsAlias + "." + gpsZ + " AS TEXT)) = TRIM(CAST(" + roAlias + "." + roZ + " AS TEXT))"
+                + " AND TRIM(CAST(" + gpsAlias + "." + gpsD + " AS TEXT)) = TRIM(CAST(" + roAlias + "." + roD + " AS TEXT))";
+    }
+
+    private static List<String> idLookupKeys(String raw) {
+        List<String> keys = new ArrayList<>();
+        if (raw == null) return keys;
+        String trimmed = raw.trim();
+        if (trimmed.isEmpty()) return keys;
+        keys.add(trimmed);
+        String normalized = normalizeId(trimmed);
+        if (!keys.contains(normalized)) keys.add(normalized);
+        try {
+            String numeric = trimmed.replace(',', '.');
+            if (numeric.matches("-?\\d+(\\.\\d+)?")) {
+                long asLong = (long) Double.parseDouble(numeric);
+                String asStr = String.valueOf(asLong);
+                if (!keys.contains(asStr)) keys.add(asStr);
+            }
+        } catch (Exception ignored) { }
+        return keys;
+    }
+
+    private static String normalizeId(String id) {
+        if (id == null) return "";
+        String s = id.trim();
+        int dot = s.indexOf('.');
+        if (dot > 0 && s.substring(dot).matches("\\.0+")) {
+            return s.substring(0, dot);
+        }
+        return s;
+    }
+
+    private static String trimToNull(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     /**
@@ -194,17 +283,9 @@ public class DzsDatabase implements Closeable {
     }
 
     private String lookupTuduVyhybkaLabel(String superZId, String superDId) {
-        String lookupSql = "SELECT " + roColumns.tudu + ", " + roColumns.vyhybka
-                + " FROM " + TABLE_RO_TPI
-                + " WHERE " + roColumns.superZId + " = ? AND " + roColumns.superDId + " = ?"
-                + " LIMIT 1";
-        try (Cursor c = db.rawQuery(lookupSql, new String[]{superZId, superDId})) {
-            if (!c.moveToFirst()) return "";
-            String tudu = c.getString(0);
-            Integer vyhybka = readInt(c, 1);
-            if (tudu == null || tudu.isEmpty() || vyhybka == null) return "";
-            return tudu + " · výhybka " + vyhybka;
-        }
+        GpsMatch match = lookupRoEntry(superZId, superDId, 0, 0, 0, 0);
+        if (match == null) return "";
+        return match.tudu + " · výhybka " + match.vyhybka;
     }
 
     @Override

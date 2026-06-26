@@ -101,6 +101,7 @@ public class MainActivity extends AppCompatActivity {
     private long lastGpsLookupTimeMs;
     private static final double GPS_LOOKUP_MIN_MOVE_M = 5.0;
     private static final long GPS_LOOKUP_MIN_INTERVAL_MS = 1000;
+    private static final long GPS_LOOKUP_RETRY_MS = 3000;
     private static final String PREF_GPS_TEST_MODE = "gpsTestMode";
     private static final String PREF_TEST_LAT = "testLat";
     private static final String PREF_TEST_LON = "testLon";
@@ -139,6 +140,8 @@ public class MainActivity extends AppCompatActivity {
     private Boolean powerPresetInKoleji;
     private boolean showGpsStatus;
     private boolean gpsUnavailableToastShown;
+    private boolean gpsLookupFailed;
+    private final Runnable gpsLookupRetryRunnable = this::retryGpsTuduLookup;
     private int lastTopBarHeight = -1;
 
     // řádky šablony (kontejnery z include)
@@ -874,6 +877,14 @@ public class MainActivity extends AppCompatActivity {
                 if (gpsTestMode && locationCache != null && locationCache.hasTestOverride()) {
                     tvReaderStatus.setText(getString(R.string.gps_test_status));
                     tvReaderStatus.setTextColor(COLOR_STATUS_READY);
+                } else if (locationCache != null && locationCache.hasFix()) {
+                    if (gpsLookupFailed) {
+                        tvReaderStatus.setText(getString(R.string.gps_tudu_no_match));
+                        tvReaderStatus.setTextColor(COLOR_STATUS_ERROR);
+                    } else {
+                        tvReaderStatus.setText(getString(R.string.gps_tudu_lookup));
+                        tvReaderStatus.setTextColor(COLOR_STATUS_GPS_WAIT);
+                    }
                 } else {
                     tvReaderStatus.setText(getString(R.string.gps_tudu_wait));
                     tvReaderStatus.setTextColor(COLOR_STATUS_GPS_WAIT);
@@ -1484,6 +1495,8 @@ public class MainActivity extends AppCompatActivity {
                 closeDzsDatabase();
                 dzsDatabase = opened;
                 gpsAutoSelection = true;
+                gpsLookupFailed = false;
+                cancelGpsTuduLookupRetry();
                 lastGpsLookupLat = null;
                 lastGpsLookupLon = null;
                 lastGpsLookupTimeMs = 0;
@@ -1545,7 +1558,10 @@ public class MainActivity extends AppCompatActivity {
         long now = System.currentTimeMillis();
         if (lastGpsLookupLat != null && lastGpsLookupLon != null) {
             double moved = haversineM(lastGpsLookupLat, lastGpsLookupLon, snap.latitude, snap.longitude);
-            if (moved < GPS_LOOKUP_MIN_MOVE_M && now - lastGpsLookupTimeMs < GPS_LOOKUP_MIN_INTERVAL_MS) {
+            boolean movedEnough = moved >= GPS_LOOKUP_MIN_MOVE_M;
+            boolean intervalElapsed = now - lastGpsLookupTimeMs >= GPS_LOOKUP_MIN_INTERVAL_MS;
+            boolean needsRetry = !step1Done && now - lastGpsLookupTimeMs >= GPS_LOOKUP_RETRY_MS;
+            if (!movedEnough && !intervalElapsed && !needsRetry) {
                 return;
             }
         }
@@ -1556,14 +1572,39 @@ public class MainActivity extends AppCompatActivity {
             DzsDatabase.GpsMatch match = dzsDatabase.findNearest(lat, lon);
             ui.post(() -> {
                 gpsLookupInFlight = false;
-                if (!gpsAutoSelection || match == null) return;
                 lastGpsLookupLat = lat;
                 lastGpsLookupLon = lon;
                 lastGpsLookupTimeMs = System.currentTimeMillis();
+                if (!gpsAutoSelection) return;
+                if (match == null) {
+                    gpsLookupFailed = true;
+                    if (!workflowRunning) {
+                        setActionStatusReady();
+                    }
+                    scheduleGpsTuduLookupRetry();
+                    return;
+                }
+                gpsLookupFailed = false;
+                cancelGpsTuduLookupRetry();
                 applyGpsMatch(match);
                 scheduleGpsTuduLookup();
             });
         });
+    }
+
+    private void scheduleGpsTuduLookupRetry() {
+        if (!gpsAutoSelection || step1Done) return;
+        ui.removeCallbacks(gpsLookupRetryRunnable);
+        ui.postDelayed(gpsLookupRetryRunnable, GPS_LOOKUP_RETRY_MS);
+    }
+
+    private void cancelGpsTuduLookupRetry() {
+        ui.removeCallbacks(gpsLookupRetryRunnable);
+    }
+
+    private void retryGpsTuduLookup() {
+        if (!gpsAutoSelection || step1Done || dzsDatabase == null || locationCache == null) return;
+        scheduleGpsTuduLookup();
     }
 
     private void applyGpsMatch(DzsDatabase.GpsMatch match) {
@@ -2219,6 +2260,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        cancelGpsTuduLookupRetry();
         if (locationCache != null) locationCache.stop();
         closeDzsDatabase();
         super.onDestroy();
