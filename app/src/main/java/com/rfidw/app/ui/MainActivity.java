@@ -21,6 +21,7 @@ import android.util.TypedValue;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -115,6 +116,7 @@ public class MainActivity extends AppCompatActivity {
     private Boolean powerPresetInKoleji;
     private boolean showGpsStatus;
     private boolean gpsUnavailableToastShown;
+    private int lastTopBarHeight = -1;
 
     // řádky šablony (kontejnery z include)
     private View[] rows = new View[7];
@@ -221,16 +223,25 @@ public class MainActivity extends AppCompatActivity {
             }
             tvReaderStatus.setMinWidth((int) Math.ceil(maxWidth));
         });
-        topBar.post(() -> {
-            int topInset = topBar.getHeight();
-            int gap = (int) TypedValue.applyDimension(
-                    TypedValue.COMPLEX_UNIT_DIP, CARD1_TOP_GAP_DP, getResources().getDisplayMetrics());
-            mainScroll.setPadding(
-                    mainScroll.getPaddingLeft(),
-                    topInset + gap,
-                    mainScroll.getPaddingRight(),
-                    mainScroll.getPaddingBottom());
+        topBar.getViewTreeObserver().addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
+            @Override
+            public void onGlobalLayout() {
+                int topInset = topBar.getHeight();
+                if (topInset == lastTopBarHeight) return;
+                lastTopBarHeight = topInset;
+                applyMainScrollTopPadding(topInset);
+            }
         });
+    }
+
+    private void applyMainScrollTopPadding(int topInset) {
+        int gap = (int) TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP, CARD1_TOP_GAP_DP, getResources().getDisplayMetrics());
+        mainScroll.setPadding(
+                mainScroll.getPaddingLeft(),
+                topInset + gap,
+                mainScroll.getPaddingRight(),
+                mainScroll.getPaddingBottom());
     }
 
     // ---------- rozbalovací karty a spodní panel ----------
