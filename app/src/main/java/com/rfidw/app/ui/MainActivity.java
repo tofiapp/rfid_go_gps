@@ -102,8 +102,6 @@ public class MainActivity extends AppCompatActivity {
     private static final double GPS_LOOKUP_MIN_MOVE_M = 5.0;
     private static final long GPS_LOOKUP_MIN_INTERVAL_MS = 1000;
     private static final String PREF_GPS_TEST_MODE = "gpsTestMode";
-    private static final String PREF_TEST_TUDU = "testTudu";
-    private static final String PREF_TEST_VYHYBKA = "testVyhybka";
     private static final String PREF_TEST_LAT = "testLat";
     private static final String PREF_TEST_LON = "testLon";
 
@@ -1238,10 +1236,8 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void saveTestLocationToPrefs(String tudu, int vyhybka, double lat, double lon) {
+    private void saveTestLocationToPrefs(double lat, double lon) {
         prefs.edit()
-                .putString(PREF_TEST_TUDU, tudu)
-                .putInt(PREF_TEST_VYHYBKA, vyhybka)
                 .putLong(PREF_TEST_LAT, Double.doubleToRawLongBits(lat))
                 .putLong(PREF_TEST_LON, Double.doubleToRawLongBits(lon))
                 .apply();
@@ -1249,8 +1245,6 @@ public class MainActivity extends AppCompatActivity {
 
     private void clearSavedTestLocation() {
         prefs.edit()
-                .remove(PREF_TEST_TUDU)
-                .remove(PREF_TEST_VYHYBKA)
                 .remove(PREF_TEST_LAT)
                 .remove(PREF_TEST_LON)
                 .apply();
@@ -1258,9 +1252,6 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean restoreTestLocationFromPrefs() {
         if (!gpsTestMode || locationCache == null) return false;
-        String tudu = prefs.getString(PREF_TEST_TUDU, null);
-        int vyhybka = prefs.getInt(PREF_TEST_VYHYBKA, -1);
-        if (tudu == null || tudu.isEmpty() || vyhybka < 0) return false;
         if (!prefs.contains(PREF_TEST_LAT) || !prefs.contains(PREF_TEST_LON)) return false;
         double lat = Double.longBitsToDouble(prefs.getLong(PREF_TEST_LAT, 0));
         double lon = Double.longBitsToDouble(prefs.getLong(PREF_TEST_LON, 0));
@@ -1269,96 +1260,87 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showTestLocationPicker() {
-        if (tuduList.isEmpty()) {
+        if (dzsDatabase == null) {
             toast(getString(R.string.db_select_required));
             expandCard1Body();
             return;
         }
-        List<TestLocationItem> items = new ArrayList<>();
-        for (Tudu t : tuduList) {
-            for (Tudu.Vyhybka v : t.vyhybky) {
-                items.add(new TestLocationItem(t.code, v.cislo));
-            }
-        }
-        if (items.isEmpty()) {
-            toast(getString(R.string.db_select_required));
-            return;
-        }
+        io.execute(() -> {
+            List<DzsDatabase.GpsPoint> points = dzsDatabase.listGpsPoints();
+            ui.post(() -> {
+                if (points.isEmpty()) {
+                    toast(getString(R.string.gps_test_no_gps_point));
+                    return;
+                }
+                showTestLocationPickerDialog(points);
+            });
+        });
+    }
 
+    private void showTestLocationPickerDialog(List<DzsDatabase.GpsPoint> points) {
         ListView listView = new ListView(this);
         listView.setChoiceMode(ListView.CHOICE_MODE_SINGLE);
-        ArrayAdapter<TestLocationItem> adapter = new ArrayAdapter<>(this,
-                android.R.layout.simple_list_item_single_choice, items);
+        ArrayAdapter<DzsDatabase.GpsPoint> adapter = new ArrayAdapter<DzsDatabase.GpsPoint>(this,
+                android.R.layout.simple_list_item_single_choice, points) {
+            @NonNull
+            @Override
+            public View getView(int position, View convertView, @NonNull ViewGroup parent) {
+                TextView tv = (TextView) super.getView(position, convertView, parent);
+                DzsDatabase.GpsPoint point = points.get(position);
+                String coords = String.format(Locale.getDefault(), "%.4f° %.4f°", point.latitude, point.longitude);
+                if (point.label.isEmpty()) {
+                    tv.setText(coords);
+                } else {
+                    tv.setText(coords + " → " + point.label);
+                }
+                return tv;
+            }
+        };
         listView.setAdapter(adapter);
 
-        String savedTudu = prefs.getString(PREF_TEST_TUDU, null);
-        int savedVyhybka = prefs.getInt(PREF_TEST_VYHYBKA, -1);
-        for (int i = 0; i < items.size(); i++) {
-            TestLocationItem item = items.get(i);
-            if (item.tudu.equals(savedTudu) && item.vyhybka == savedVyhybka) {
+        double savedLat = prefs.contains(PREF_TEST_LAT)
+                ? Double.longBitsToDouble(prefs.getLong(PREF_TEST_LAT, 0)) : Double.NaN;
+        double savedLon = prefs.contains(PREF_TEST_LON)
+                ? Double.longBitsToDouble(prefs.getLong(PREF_TEST_LON, 0)) : Double.NaN;
+        for (int i = 0; i < points.size(); i++) {
+            DzsDatabase.GpsPoint point = points.get(i);
+            if (Math.abs(point.latitude - savedLat) < 1e-6
+                    && Math.abs(point.longitude - savedLon) < 1e-6) {
                 listView.setItemChecked(i, true);
                 break;
             }
         }
 
-        new AlertDialog.Builder(this)
+        AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle(R.string.gps_test_pick_title)
                 .setView(listView)
                 .setNegativeButton("Zrušit", null)
-                .setOnDismissListener(d -> listView.setOnItemClickListener(null))
-                .show();
+                .create();
 
         listView.setOnItemClickListener((parent, view, position, id) -> {
-            TestLocationItem item = items.get(position);
-            applyTestLocation(item.tudu, item.vyhybka);
+            DzsDatabase.GpsPoint point = points.get(position);
+            applyTestCoordinates(point.latitude, point.longitude);
+            dialog.dismiss();
         });
+        dialog.show();
     }
 
-    private void applyTestLocation(String tudu, int vyhybka) {
-        if (dzsDatabase == null) {
-            toast(getString(R.string.db_select_required));
-            return;
+    private void applyTestCoordinates(double lat, double lon) {
+        gpsAutoSelection = true;
+        gpsTestMode = true;
+        cbGpsTestMode.setChecked(true);
+        updateGpsTestModeUi();
+        prefs.edit().putBoolean(PREF_GPS_TEST_MODE, true).apply();
+        saveTestLocationToPrefs(lat, lon);
+        if (locationCache != null) {
+            locationCache.setTestOverride(lat, lon);
         }
-        io.execute(() -> {
-            DzsDatabase.GpsMatch match = dzsDatabase.findMatchForTuduVyhybka(tudu, vyhybka);
-            ui.post(() -> {
-                if (match == null) {
-                    toast(getString(R.string.gps_test_no_gps_point));
-                    return;
-                }
-                gpsAutoSelection = true;
-                gpsTestMode = true;
-                cbGpsTestMode.setChecked(true);
-                updateGpsTestModeUi();
-                prefs.edit().putBoolean(PREF_GPS_TEST_MODE, true).apply();
-                saveTestLocationToPrefs(match.tudu, match.vyhybka, match.latitude, match.longitude);
-                if (locationCache != null) {
-                    locationCache.setTestOverride(match.latitude, match.longitude);
-                }
-                lastGpsLookupLat = null;
-                lastGpsLookupLon = null;
-                lastGpsLookupTimeMs = 0;
-                applyGpsMatch(match);
-                if (!workflowRunning) {
-                    setActionStatusReady();
-                }
-            });
-        });
-    }
-
-    private static final class TestLocationItem {
-        final String tudu;
-        final int vyhybka;
-
-        TestLocationItem(String tudu, int vyhybka) {
-            this.tudu = tudu;
-            this.vyhybka = vyhybka;
-        }
-
-        @NonNull
-        @Override
-        public String toString() {
-            return tudu + " · výhybka " + vyhybka;
+        lastGpsLookupLat = null;
+        lastGpsLookupLon = null;
+        lastGpsLookupTimeMs = 0;
+        scheduleGpsTuduLookup();
+        if (!workflowRunning) {
+            setActionStatusReady();
         }
     }
 

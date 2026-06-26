@@ -157,41 +157,54 @@ public class DzsDatabase implements Closeable {
     }
 
     /**
-     * GPS bod pro konkrétní TUDU a výhybku – pro testovací režim bez fyzické polohy u koleje.
+     * Všechny GPS body z DZS_SUPERTRA_GPS_KM – pro výběr simulované polohy v test módu.
+     * Popisek (TUDU · výhybka) je jen nápověda; výběr probíhá podle souřadnic.
      */
-    public GpsMatch findMatchForTuduVyhybka(String tudu, int vyhybka) {
-        if (tudu == null || tudu.isEmpty()) return null;
+    public static class GpsPoint {
+        public final double latitude;
+        public final double longitude;
+        public final String label;
 
-        String lookupSql = "SELECT " + roColumns.superZId + ", " + roColumns.superDId
-                + " FROM " + TABLE_RO_TPI
-                + " WHERE " + roColumns.tudu + " = ? AND " + roColumns.vyhybka + " = ?"
-                + " LIMIT 1";
-
-        String superZId = null;
-        String superDId = null;
-        try (Cursor c = db.rawQuery(lookupSql, new String[]{tudu, String.valueOf(vyhybka)})) {
-            if (!c.moveToFirst()) return null;
-            superZId = c.getString(0);
-            superDId = c.getString(1);
+        public GpsPoint(double latitude, double longitude, String label) {
+            this.latitude = latitude;
+            this.longitude = longitude;
+            this.label = label != null ? label : "";
         }
-        if (superZId == null || superDId == null) return null;
+    }
 
-        String gpsSql = "SELECT " + gpsColumns.latitude + ", " + gpsColumns.longitude
+    public List<GpsPoint> listGpsPoints() {
+        List<GpsPoint> out = new ArrayList<>();
+        String sql = "SELECT " + gpsColumns.superZId + ", " + gpsColumns.superDId + ", "
+                + gpsColumns.latitude + ", " + gpsColumns.longitude
                 + " FROM " + TABLE_GPS_KM
-                + " WHERE " + gpsColumns.superZId + " = ? AND " + gpsColumns.superDId + " = ?"
-                + " AND " + gpsColumns.latitude + " IS NOT NULL"
+                + " WHERE " + gpsColumns.latitude + " IS NOT NULL"
                 + " AND " + gpsColumns.longitude + " IS NOT NULL"
-                + " LIMIT 1";
+                + " ORDER BY " + gpsColumns.latitude + ", " + gpsColumns.longitude;
 
-        double lat;
-        double lon;
-        try (Cursor c = db.rawQuery(gpsSql, new String[]{superZId, superDId})) {
-            if (!c.moveToFirst()) return null;
-            lat = c.getDouble(0);
-            lon = c.getDouble(1);
+        try (Cursor c = db.rawQuery(sql, null)) {
+            while (c.moveToNext()) {
+                String superZId = c.getString(0);
+                String superDId = c.getString(1);
+                double lat = c.getDouble(2);
+                double lon = c.getDouble(3);
+                out.add(new GpsPoint(lat, lon, lookupTuduVyhybkaLabel(superZId, superDId)));
+            }
         }
+        return out;
+    }
 
-        return new GpsMatch(superZId, superDId, tudu, vyhybka, lat, lon, 0);
+    private String lookupTuduVyhybkaLabel(String superZId, String superDId) {
+        String lookupSql = "SELECT " + roColumns.tudu + ", " + roColumns.vyhybka
+                + " FROM " + TABLE_RO_TPI
+                + " WHERE " + roColumns.superZId + " = ? AND " + roColumns.superDId + " = ?"
+                + " LIMIT 1";
+        try (Cursor c = db.rawQuery(lookupSql, new String[]{superZId, superDId})) {
+            if (!c.moveToFirst()) return "";
+            String tudu = c.getString(0);
+            Integer vyhybka = readInt(c, 1);
+            if (tudu == null || tudu.isEmpty() || vyhybka == null) return "";
+            return tudu + " · výhybka " + vyhybka;
+        }
     }
 
     @Override

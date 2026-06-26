@@ -25,7 +25,7 @@ Hlavní obrazovka vede operátora třemi kroky (**TUDU → Načtení → Hotovo*
 - TUDU a výhybku lze kdykoli **ručně změnit** klepnutím na náhledový panel – tím se vypne automatická aktualizace z GPS.
 - Výběr výhybky zohledňuje **již zapsané části v CSV** – dokončené výhybky jsou v seznamu zašedlé a nevybíratelné.
 - Při výběru výhybky se automaticky nastaví **první chybějící část** podle CSV.
-- **Testovací režim GPS** (zaškrtávátko v kartě TUDU): simuluje polohu u koleje podle souřadnic z databáze – vhodné bez signálu GPS (např. v budově) nebo pro testování z libovolné vzdálenosti. Vyberte TUDU a výhybku v dialogu *Simulovaná poloha*; do CSV se zapíší tyto souřadnice (řádek GPS stavu začíná `TEST`).
+- **Testovací režim GPS** (zaškrtávátko v kartě TUDU): simuluje polohu podle souřadnic z databáze – vhodné bez signálu GPS (např. v budově) nebo pro testování z libovolné vzdálenosti. Vyberte bod v dialogu *Simulovaná poloha*; **TUDU a výhybka se doplní automaticky** stejným postupem jako u skutečné GPS (nejblížší bod v `DZS_SUPERTRA_GPS_KM`). Do CSV se zapíší simulované souřadnice (řádek GPS stavu začíná `TEST`).
 
 **Očekávané sloupce**
 
