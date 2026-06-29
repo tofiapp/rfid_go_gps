@@ -6,6 +6,11 @@ import android.database.sqlite.SQLiteStatement;
 
 import java.io.Closeable;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -166,9 +171,9 @@ public class DzsDatabase implements Closeable {
     }
 
     public static DzsDatabase open(String path, File cacheDir, OpenProgressListener listener) throws Exception {
-        File dbFile = new File(path);
+        File dbFile = resolveWritableDatabaseFile(path, cacheDir, listener);
         SQLiteDatabase db = SQLiteDatabase.openDatabase(
-                path, null, SQLiteDatabase.OPEN_READONLY);
+                dbFile.getAbsolutePath(), null, SQLiteDatabase.OPEN_READWRITE);
         try {
             applyReadPragmas(db);
             report(listener, "Kontrola schématu", 5);
@@ -202,6 +207,44 @@ public class DzsDatabase implements Closeable {
         } catch (Exception e) {
             db.close();
             throw e;
+        }
+    }
+
+    /**
+     * SQLite potřebuje zapisovatelný adresář pro journal/WAL a dočasné tabulky při indexaci.
+     * Soubor ze Stažených nebo jiného sdíleného úložiště proto zkopírujeme do cache aplikace.
+     */
+    private static File resolveWritableDatabaseFile(String path, File cacheDir,
+                                                    OpenProgressListener listener) throws Exception {
+        File source = new File(path);
+        if (!source.isFile()) {
+            throw new Exception("Databáze nenalezena: " + path);
+        }
+        if (cacheDir == null || cacheDir.equals(source.getParentFile())) {
+            return source;
+        }
+        report(listener, "Kopíruji databázi do cache", 2);
+        if (!cacheDir.exists() && !cacheDir.mkdirs()) {
+            throw new Exception("Nelze vytvořit cache pro databázi");
+        }
+        File cached = new File(cacheDir, "sqlite_"
+                + Long.toHexString(source.length()) + "_"
+                + Long.toHexString(source.lastModified()) + ".db");
+        if (!cached.isFile() || cached.length() != source.length()
+                || cached.lastModified() < source.lastModified()) {
+            copyFile(source, cached);
+        }
+        return cached;
+    }
+
+    private static void copyFile(File source, File dest) throws IOException {
+        try (InputStream in = new FileInputStream(source);
+             OutputStream out = new FileOutputStream(dest)) {
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                out.write(buf, 0, n);
+            }
         }
     }
 
