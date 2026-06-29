@@ -151,6 +151,53 @@
                     android:orientation="vertical"
                     android:paddingTop="10dp">
 
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:paddingBottom="6dp"
+                        android:text="@string/tudu_mode_label"
+                        android:textColor="@color/text_muted"
+                        android:textSize="12sp"
+                        android:textStyle="bold"/>
+
+                    <com.google.android.material.button.MaterialButtonToggleGroup
+                        android:id="@+id/tuduModeGroup"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="8dp"
+                        app:singleSelection="true"
+                        app:selectionRequired="true">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnTuduModeGps"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:minHeight="40dp"
+                            android:text="@string/tudu_mode_gps"
+                            android:textSize="12sp"/>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnTuduModeManual"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:minHeight="40dp"
+                            android:text="@string/tudu_mode_manual"
+                            android:textSize="12sp"/>
+                    </com.google.android.material.button.MaterialButtonToggleGroup>
+
+                    <TextView
+                        android:id="@+id/tvTuduModeHint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:paddingBottom="8dp"
+                        android:text="@string/tudu_mode_gps_hint"
+                        android:textColor="@color/text_muted"
+                        android:textSize="11sp"/>
+
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnPickSource"
                         android:layout_width="match_parent"

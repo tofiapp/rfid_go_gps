@@ -58,10 +58,11 @@ import com.rfidw.app.rfid.UhfManager;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
-import java.util.Collections;
-import java.util.Locale;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -96,7 +97,7 @@ public class MainActivity extends AppCompatActivity {
     private Tudu currentTudu;
     private Tudu.Vyhybka currentVyhybka;
     private DzsDatabase dzsDatabase;
-    /** Po ručním výběru TUDU/výhybky neaktualizovat z GPS. */
+    /** Režim výběru TUDU: true = GPS, false = ruční výběr ze seznamu. */
     private boolean gpsAutoSelection = true;
     private volatile boolean gpsLookupInFlight;
     private boolean gpsLookupNoMatch;
@@ -107,7 +108,9 @@ public class MainActivity extends AppCompatActivity {
     private static final double GPS_LOOKUP_MIN_MOVE_M = 5.0;
     private static final long GPS_LOOKUP_MIN_INTERVAL_MS = 1000;
     private static final long GPS_LOOKUP_TIMEOUT_MS = 10_000;
+    private static final int GPS_NEARBY_TUDU_LIMIT = 10;
     private static final String PREF_GPS_TEST_MODE = "gpsTestMode";
+    private static final String PREF_TUDU_MODE_GPS = "tuduModeGps";
     private static final String PREF_TEST_LAT = "testLat";
     private static final String PREF_TEST_LON = "testLon";
 
@@ -142,6 +145,9 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvGpsTestModeHint;
     private boolean gpsTestMode;
     private MaterialButtonToggleGroup powerPresetGroup;
+    private MaterialButtonToggleGroup tuduModeGroup;
+    private TextView tvTuduModeHint;
+    private boolean tuduListFullyLoaded;
     private Boolean powerPresetInKoleji;
     private boolean showGpsStatus;
     private boolean gpsUnavailableToastShown;
@@ -166,6 +172,7 @@ public class MainActivity extends AppCompatActivity {
         setupTemplateRows();
         setupCsv();
         setupListeners();
+        setupTuduSelectionMode();
         setupGpsTestMode();
         tryAutoLoadDefaultDatabase();
 
@@ -228,6 +235,8 @@ public class MainActivity extends AppCompatActivity {
         btnPickTestLocation = findViewById(R.id.btnPickTestLocation);
         tvGpsTestModeHint = findViewById(R.id.tvGpsTestModeHint);
         powerPresetGroup = findViewById(R.id.powerPresetGroup);
+        tuduModeGroup = findViewById(R.id.tuduModeGroup);
+        tvTuduModeHint = findViewById(R.id.tvTuduModeHint);
 
         rows[0] = findViewById(R.id.row1);
         rows[1] = findViewById(R.id.row2);
@@ -407,12 +416,99 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showTuduPicker() {
+        if (dzsDatabase == null) {
+            toast(getString(R.string.db_select_required));
+            expandCard1Body();
+            return;
+        }
+        if (gpsAutoSelection) {
+            showNearbyTuduPicker();
+        } else {
+            ensureFullTuduListLoaded(this::showFullTuduPicker);
+        }
+    }
+
+    private void showNearbyTuduPicker() {
+        if (locationCache == null || !locationCache.getSnapshot().valid) {
+            toast(getString(R.string.tudu_picker_no_gps));
+            return;
+        }
+        final double lat = locationCache.getSnapshot().latitude;
+        final double lon = locationCache.getSnapshot().longitude;
+        gpsIo.execute(() -> {
+            List<DzsDatabase.GpsMatch> matches = Collections.emptyList();
+            try {
+                if (dzsDatabase != null) {
+                    matches = dzsDatabase.findNearestDistinctTudu(lat, lon, GPS_NEARBY_TUDU_LIMIT);
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Nearest TUDU lookup selhal", e);
+            }
+            final List<DzsDatabase.GpsMatch> result = matches;
+            ui.post(() -> {
+                if (result.isEmpty()) {
+                    toast(getString(R.string.gps_tudu_not_found));
+                    return;
+                }
+                showNearbyTuduPickerDialog(result);
+            });
+        });
+    }
+
+    private void showNearbyTuduPickerDialog(List<DzsDatabase.GpsMatch> matches) {
+        View dialogView = getLayoutInflater().inflate(R.layout.dialog_tudu_picker, null);
+        EditText etSearch = dialogView.findViewById(R.id.etTuduSearch);
+        ListView listView = dialogView.findViewById(R.id.lvTudu);
+        etSearch.setVisibility(View.GONE);
+
+        List<String> labels = new ArrayList<>(matches.size());
+        for (DzsDatabase.GpsMatch m : matches) {
+            labels.add(formatNearbyTuduLabel(m));
+        }
+
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_list_item_single_choice, labels);
+        listView.setAdapter(adapter);
+
+        String preselect = currentTudu != null ? currentTudu.code
+                : (epc.tudu != null ? epc.tudu : "");
+        for (int i = 0; i < matches.size(); i++) {
+            if (matches.get(i).tudu.equals(preselect)) {
+                listView.setItemChecked(i, true);
+                break;
+            }
+        }
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.tudu_picker_nearby_title))
+                .setView(dialogView)
+                .setNegativeButton("Zrušit", null)
+                .create();
+
+        listView.setOnItemClickListener((parent, v, position, id) -> {
+            applyGpsMatch(matches.get(position));
+            dialog.dismiss();
+        });
+
+        dialog.show();
+    }
+
+    private String formatNearbyTuduLabel(DzsDatabase.GpsMatch match) {
+        String dist;
+        if (match.distanceM < 1000) {
+            dist = String.format(Locale.ROOT, "%.0f m", match.distanceM);
+        } else {
+            dist = String.format(Locale.ROOT, "%.1f km", match.distanceM / 1000.0);
+        }
+        return match.tudu + " · " + dist;
+    }
+
+    private void showFullTuduPicker() {
         if (tuduList.isEmpty()) {
             toast(getString(R.string.db_select_required));
             expandCard1Body();
             return;
         }
-        gpsAutoSelection = false;
 
         View dialogView = getLayoutInflater().inflate(R.layout.dialog_tudu_picker, null);
         EditText etSearch = dialogView.findViewById(R.id.etTuduSearch);
@@ -471,13 +567,63 @@ public class MainActivity extends AppCompatActivity {
         etSearch.requestFocus();
     }
 
-    private void showVyhybkaPicker() {
-        if (currentTudu == null || currentTudu.vyhybky.isEmpty()) {
+    private void ensureFullTuduListLoaded(Runnable onReady) {
+        if (tuduListFullyLoaded && !tuduList.isEmpty()) {
+            onReady.run();
+            return;
+        }
+        if (dzsDatabase == null) {
             toast(getString(R.string.db_select_required));
             expandCard1Body();
             return;
         }
-        gpsAutoSelection = false;
+        toast(getString(R.string.tudu_loading_list));
+        io.execute(() -> {
+            List<Tudu> loaded = Collections.emptyList();
+            try {
+                if (dzsDatabase != null) {
+                    loaded = dzsDatabase.loadAllTudu();
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Načtení seznamu TUDU selhalo", e);
+            }
+            final List<Tudu> result = loaded;
+            ui.post(() -> {
+                if (dzsDatabase == null) return;
+                tuduList = result;
+                tuduListFullyLoaded = true;
+                if (result.isEmpty()) {
+                    toast(getString(R.string.db_select_required));
+                    expandCard1Body();
+                    return;
+                }
+                onReady.run();
+            });
+        });
+    }
+
+    private void showVyhybkaPicker() {
+        if (currentTudu == null) {
+            toast(getString(R.string.db_select_required));
+            expandCard1Body();
+            return;
+        }
+        Runnable showPicker = () -> {
+            if (currentTudu == null || currentTudu.vyhybky.isEmpty()) {
+                toast(getString(R.string.db_select_required));
+                expandCard1Body();
+                return;
+            }
+            showVyhybkaPickerDialog();
+        };
+        if (currentTudu.vyhybky.isEmpty() && dzsDatabase != null) {
+            ensureTuduDetailsLoaded(currentTudu.code, showPicker);
+        } else {
+            showPicker.run();
+        }
+    }
+
+    private void showVyhybkaPickerDialog() {
         final String tuduCode = currentTudu.code;
         final List<Tudu.Vyhybka> vyhybky = currentTudu.vyhybky;
 
@@ -530,6 +676,52 @@ public class MainActivity extends AppCompatActivity {
         });
 
         dialog.show();
+    }
+
+    private void ensureTuduDetailsLoaded(String tuduCode, Runnable onReady) {
+        if (dzsDatabase == null || tuduCode == null || tuduCode.isEmpty()) {
+            onReady.run();
+            return;
+        }
+        io.execute(() -> {
+            List<Tudu> loaded = Collections.emptyList();
+            try {
+                if (dzsDatabase != null) {
+                    loaded = dzsDatabase.loadTuduForCodes(Collections.singleton(tuduCode));
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Načtení TUDU " + tuduCode + " selhalo", e);
+            }
+            final List<Tudu> result = loaded;
+            ui.post(() -> {
+                if (result.isEmpty()) {
+                    onReady.run();
+                    return;
+                }
+                Tudu loadedTudu = result.get(0);
+                Tudu existing = null;
+                for (Tudu t : tuduList) {
+                    if (t.code.equals(tuduCode)) {
+                        existing = t;
+                        break;
+                    }
+                }
+                if (existing != null) {
+                    existing.vyhybky.clear();
+                    existing.vyhybky.addAll(loadedTudu.vyhybky);
+                } else {
+                    tuduList.add(loadedTudu);
+                }
+                if (currentTudu != null && currentTudu.code.equals(tuduCode)) {
+                    if (existing != null) {
+                        currentTudu = existing;
+                    } else {
+                        currentTudu = loadedTudu;
+                    }
+                }
+                onReady.run();
+            });
+        });
     }
 
     private void setupCollapsibles() {
@@ -1243,6 +1435,63 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void setupTuduSelectionMode() {
+        boolean gpsMode = prefs.getBoolean(PREF_TUDU_MODE_GPS, true);
+        gpsAutoSelection = gpsMode;
+        tuduModeGroup.check(gpsMode ? R.id.btnTuduModeGps : R.id.btnTuduModeManual);
+        updateTuduModeUi();
+        tuduModeGroup.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
+            if (!isChecked) return;
+            onTuduModeChanged(checkedId == R.id.btnTuduModeGps);
+        });
+    }
+
+    private void updateTuduModeUi() {
+        if (tvTuduModeHint == null) return;
+        tvTuduModeHint.setText(gpsAutoSelection
+                ? getString(R.string.tudu_mode_gps_hint)
+                : getString(R.string.tudu_mode_manual_hint));
+    }
+
+    private void onTuduModeChanged(boolean gpsMode) {
+        if (gpsAutoSelection == gpsMode) return;
+        gpsAutoSelection = gpsMode;
+        prefs.edit().putBoolean(PREF_TUDU_MODE_GPS, gpsMode).apply();
+        updateTuduModeUi();
+        if (gpsMode) {
+            gpsLookupNoMatch = false;
+            forceNextGpsLookup = true;
+            lastGpsLookupLat = null;
+            lastGpsLookupLon = null;
+            lastGpsLookupTimeMs = 0;
+            if (dzsDatabase != null) {
+                ensureGpsForTuduLookup();
+            }
+        } else if (dzsDatabase != null) {
+            ensureFullTuduListLoaded(() -> {
+                if (!tuduListFullyLoaded) return;
+                updateSourceFileLabel();
+            });
+        }
+        if (!workflowRunning) {
+            setActionStatusReady();
+        }
+    }
+
+    private void updateSourceFileLabel() {
+        if (tvSourceFile == null || dzsDatabase == null) return;
+        CharSequence current = tvSourceFile.getText();
+        if (current == null) return;
+        String text = current.toString();
+        int sep = text.indexOf("  •  TUDU:");
+        if (sep < 0) return;
+        String displayName = text.substring(0, sep);
+        int count = tuduListFullyLoaded ? tuduList.size() : dzsDatabase.countDistinctTudu();
+        tvSourceFile.setText(gpsAutoSelection
+                ? getString(R.string.db_loaded_gps, displayName, count)
+                : getString(R.string.db_loaded_manual, displayName, count));
+    }
+
     private void updateGpsTestModeUi() {
         int visibility = gpsTestMode ? View.VISIBLE : View.GONE;
         tvGpsTestModeHint.setVisibility(visibility);
@@ -1255,7 +1504,10 @@ public class MainActivity extends AppCompatActivity {
         updateGpsTestModeUi();
         if (locationCache == null) return;
         if (enabled) {
-            gpsAutoSelection = true;
+            if (!gpsAutoSelection) {
+                tuduModeGroup.check(R.id.btnTuduModeGps);
+                onTuduModeChanged(true);
+            }
             gpsLookupNoMatch = false;
             lastGpsLookupLat = null;
             lastGpsLookupLon = null;
@@ -1369,7 +1621,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void applyTestCoordinates(double lat, double lon) {
-        gpsAutoSelection = true;
+        if (!gpsAutoSelection) {
+            tuduModeGroup.check(R.id.btnTuduModeGps);
+            onTuduModeChanged(true);
+        }
         gpsTestMode = true;
         cbGpsTestMode.setChecked(true);
         updateGpsTestModeUi();
@@ -1523,11 +1778,14 @@ public class MainActivity extends AppCompatActivity {
     private void loadDatabaseFromPath(String path, String displayName, boolean showErrorToast) {
         try {
             DzsDatabase opened = DzsDatabase.open(path);
-            List<Tudu> loaded = opened.loadAllTudu();
+            int tuduCount = opened.countDistinctTudu();
+            boolean manualMode = !prefs.getBoolean(PREF_TUDU_MODE_GPS, true);
+            List<Tudu> loaded = manualMode ? opened.loadAllTudu() : Collections.emptyList();
             ui.post(() -> {
                 closeDzsDatabase();
                 dzsDatabase = opened;
-                gpsAutoSelection = true;
+                gpsAutoSelection = !manualMode;
+                tuduListFullyLoaded = manualMode;
                 gpsLookupNoMatch = false;
                 forceNextGpsLookup = true;
                 lastGpsLookupLat = null;
@@ -1538,7 +1796,11 @@ public class MainActivity extends AppCompatActivity {
                 powerPresetGroup.setSelectionRequired(false);
                 updatePowerPresetUi();
                 tuduList = loaded;
-                tvSourceFile.setText(displayName + "  •  TUDU: " + loaded.size());
+                tuduModeGroup.check(gpsAutoSelection ? R.id.btnTuduModeGps : R.id.btnTuduModeManual);
+                updateTuduModeUi();
+                tvSourceFile.setText(gpsAutoSelection
+                        ? getString(R.string.db_loaded_gps, displayName, tuduCount)
+                        : getString(R.string.db_loaded_manual, displayName, tuduCount));
                 collapseCard1Body();
                 scrollToCard1();
                 onDatabaseLoaded();
@@ -1568,7 +1830,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         ensureGpsForTuduLookup();
-        if (tuduList.isEmpty()) {
+        if (dzsDatabase != null && dzsDatabase.countDistinctTudu() == 0) {
             toast("Databáze neobsahuje žádné TUDU – zkouším určit podle GPS…");
         } else if (!step1Done && locationCache != null && !locationCache.hasFix()) {
             if (gpsTestMode) {

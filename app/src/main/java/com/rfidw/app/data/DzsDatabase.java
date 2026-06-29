@@ -5,11 +5,16 @@ import android.database.sqlite.SQLiteDatabase;
 
 import java.io.Closeable;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * SQLite zdroj TUDU / výhybek z tabulek DZS_SUPERTRA_GPS_KM a DZS_SUPER_RO_TPI.
@@ -97,8 +102,22 @@ public class DzsDatabase implements Closeable {
         }
     }
 
+    /** Počet unikátních TUDU kódů v indexu (bez plného načtení výhybek). */
+    public int countDistinctTudu() {
+        Set<String> codes = new HashSet<>();
+        for (RoIndexEntry entry : roByPairKey.values()) {
+            codes.add(entry.tudu);
+        }
+        return codes.size();
+    }
+
     /** Všechny TUDU a výhybky z DZS_SUPER_RO_TPI (pro ruční výběr). */
     public List<Tudu> loadAllTudu() {
+        return loadTuduForCodes(null);
+    }
+
+    /** TUDU a výhybky jen pro zadané kódy; {@code null} = všechny. */
+    public List<Tudu> loadTuduForCodes(Collection<String> codes) {
         Map<String, Tudu> map = new LinkedHashMap<>();
         String vyhybkaExpr = roColumns.vyhybkaSelectExpr(null);
         StringBuilder sql = new StringBuilder("SELECT ")
@@ -108,10 +127,23 @@ public class DzsDatabase implements Closeable {
         sql.append(" FROM ").append(TABLE_RO_TPI)
                 .append(" WHERE ").append(roColumns.tudu).append(" IS NOT NULL AND ")
                 .append(roColumns.tudu).append(" <> ''")
-                .append(" AND ").append(vyhybkaExpr).append(" IS NOT NULL")
-                .append(" ORDER BY ").append(roColumns.tudu).append(", ").append(vyhybkaExpr);
+                .append(" AND ").append(vyhybkaExpr).append(" IS NOT NULL");
+        String[] args = null;
+        if (codes != null && !codes.isEmpty()) {
+            Set<String> unique = new HashSet<>(codes);
+            StringBuilder placeholders = new StringBuilder();
+            args = new String[unique.size()];
+            int i = 0;
+            for (String code : unique) {
+                if (i > 0) placeholders.append(", ");
+                placeholders.append('?');
+                args[i++] = code;
+            }
+            sql.append(" AND ").append(roColumns.tudu).append(" IN (").append(placeholders).append(')');
+        }
+        sql.append(" ORDER BY ").append(roColumns.tudu).append(", ").append(vyhybkaExpr);
 
-        try (Cursor c = db.rawQuery(sql.toString(), null)) {
+        try (Cursor c = db.rawQuery(sql.toString(), args)) {
             while (c.moveToNext()) {
                 String tuduCode = c.getString(0);
                 if (tuduCode == null || tuduCode.isEmpty()) continue;
@@ -170,6 +202,49 @@ public class DzsDatabase implements Closeable {
                 bestGps.latitude, bestGps.longitude, dist);
     }
 
+    /**
+     * Nejbližší body pro každý unikátní TUDU kód, seřazené podle vzdálenosti.
+     * Vrací nejvýše {@code limit} záznamů (např. 10 nejbližších TUDU).
+     */
+    public List<GpsMatch> findNearestDistinctTudu(double latitude, double longitude, int limit) {
+        if (gpsIndex.isEmpty() || limit <= 0) return Collections.emptyList();
+
+        Map<String, GpsMatch> bestByTudu = new HashMap<>();
+        double cosLat = Math.cos(Math.toRadians(latitude));
+
+        for (GpsIndexEntry gps : gpsIndex) {
+            RoIndexEntry ro = roByPairKey.get(gps.pairKey);
+            if (ro == null) continue;
+            double dLat = gps.latitude - latitude;
+            double dLon = (gps.longitude - longitude) * cosLat;
+            double distSq = dLat * dLat + dLon * dLon;
+
+            GpsMatch existing = bestByTudu.get(ro.tudu);
+            if (existing != null) {
+                double existingDistSq = approximateDistSq(
+                        latitude, longitude, existing.latitude, existing.longitude, cosLat);
+                if (distSq >= existingDistSq) continue;
+            }
+
+            String[] ids = splitPairKey(gps.pairKey);
+            double dist = haversineM(latitude, longitude, gps.latitude, gps.longitude);
+            bestByTudu.put(ro.tudu, new GpsMatch(ids[0], ids[1], ro.tudu, ro.vyhybka,
+                    gps.latitude, gps.longitude, dist));
+        }
+
+        List<GpsMatch> sorted = new ArrayList<>(bestByTudu.values());
+        sorted.sort(Comparator.comparingDouble(m -> m.distanceM));
+        if (sorted.size() <= limit) return sorted;
+        return new ArrayList<>(sorted.subList(0, limit));
+    }
+
+    private static double approximateDistSq(double lat, double lon, double targetLat, double targetLon,
+                                            double cosLat) {
+        double dLat = targetLat - lat;
+        double dLon = (targetLon - lon) * cosLat;
+        return dLat * dLat + dLon * dLon;
+    }
+
     private static Map<String, RoIndexEntry> buildRoIndex(SQLiteDatabase db, RoColumns roColumns) {
         Map<String, RoIndexEntry> map = new HashMap<>();
         StringBuilder sql = new StringBuilder("SELECT ")
@@ -197,7 +272,8 @@ public class DzsDatabase implements Closeable {
 
     private static List<GpsIndexEntry> buildGpsIndex(SQLiteDatabase db, GpsColumns gpsColumns,
                                                      Map<String, RoIndexEntry> roByPairKey) {
-        List<GpsIndexEntry> out = new ArrayList<>();
+        // Jeden reprezentativní bod na SUPER_Z_ID|SUPER_D_ID – GPS tabulka má mnoho km bodů na výhybku.
+        Map<String, GpsIndexEntry> byPairKey = new HashMap<>();
         String sql = "SELECT " + gpsColumns.superZId + ", " + gpsColumns.superDId + ", "
                 + gpsColumns.latitude + ", " + gpsColumns.longitude
                 + " FROM " + TABLE_GPS_KM;
@@ -213,10 +289,10 @@ public class DzsDatabase implements Closeable {
                 }
                 String key = pairKey(superZId, superDId);
                 if (!roByPairKey.containsKey(key)) continue;
-                out.add(new GpsIndexEntry(key, lat, lon));
+                byPairKey.putIfAbsent(key, new GpsIndexEntry(key, lat, lon));
             }
         }
-        return out;
+        return new ArrayList<>(byPairKey.values());
     }
 
     private static String pairKey(String superZId, String superDId) {
