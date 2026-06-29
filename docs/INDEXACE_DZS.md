@@ -8,12 +8,13 @@ Implementace: `DzsDatabase.java`, `DzsIndexCache.java`.
 
 ## Přehled
 
-Indexace **neprobíhá v SQLite** (`CREATE INDEX` se nepoužívá). Aplikace při otevření databáze sestaví dva **paměťové indexy** a volitelně je uloží do **diskové cache** (gzip soubor `.idx`).
+Indexace **neprobíhá v SQLite** (`CREATE INDEX` se nepoužívá). Aplikace při otevření databáze sestaví **tři paměťové indexy** a volitelně je uloží do **diskové cache** (gzip soubor `.idx`).
 
 | Index | Zdrojová tabulka | Klíč | Hodnota |
 |-------|------------------|------|---------|
 | **RO index** (výhybky) | `DZS_SUPER_RO_TPI` | `SUPER_Z_ID\|SUPER_D_ID` | TUDU kód + číslo výhybky |
 | **GPS index** | `DZS_SUPERTRA_GPS_KM` | `SUPER_Z_ID\|SUPER_D_ID` | zeměpisná šířka + délka |
+| **Výhybka GPS index** | RO + GPS (při indexaci) | `TUDU` → číslo výhybky | souřadnice výhybky |
 
 Při běhu aplikace se z GPS indexu ještě sestaví **prostorová mřížka** (`SpatialGrid`) pro rychlé hledání nejbližšího bodu. Ta se **nepersistuje** – vytvoří se vždy z GPS indexu (~1 s), což je zanedbatelné oproti SQL skenu.
 
@@ -32,12 +33,14 @@ Aplikace detekuje názvy sloupců přes `PRAGMA table_info`. Níže jsou primár
 | Číslo výhybky | `COBJEKT` (primární), záložně `VYHYBKA`, `VYH_CISLO`, … |
 | Rozsah částí (volitelné) | `CAST_MIN`, `CAST_MAX` |
 | Filtr (volitelné) | `POLOHA` |
+| Kilometrický bod (volitelné) | `KMK_INT` |
 
 ### `DZS_SUPERTRA_GPS_KM`
 
 | Účel | Sloupce (priorita) |
 |------|---------------------|
 | Spojovací klíč | `SUPER_Z_ID`, `SUPER_D_ID` |
+| Kilometrický bod (volitelné) | `KM_INT` |
 | Šířka | `LAT`, `LAN`, `LATITUDE`, `GPS_LAT`, `SIRKA`, `Y`, … |
 | Délka | `LON`, `LONGITUDE`, `LNG`, `GPS_LON`, `DELKA`, `X`, … |
 
@@ -116,6 +119,16 @@ INNER JOIN (
 
 Výsledek: seznam `{ pairKey, latitude, longitude }`.
 
+### Fáze 2C – Výhybka GPS index
+
+Pro každou výhybku v RO tabulce se při indexaci určí souřadnice:
+
+1. Pokud existují `KMK_INT` (RO) a `KM_INT` (GPS), načtou se GPS body indexované po `SUPER_Z_ID|SUPER_D_ID|KM_INT` (jen relevantní páry z RO).
+2. Pro každý řádek RO se `KMK_INT` spáruje s odpovídajícím `KM_INT` v paměti.
+3. Bez kilometrických sloupců se použije záložní bod z GPS indexu (jeden na pár ID).
+
+Výsledek: mapa `TUDU → { číslo výhybky → lat, lon }`. Otevření dialogu výhybek pak jen spočítá haversine z této mapy (bez SQL JOIN).
+
 ### Fáze 3 – Uložení cache
 
 Index se zapíše do gzip souboru `.idx` (viz formát níže).
@@ -128,14 +141,14 @@ Index se zapíše do gzip souboru `.idx` (viz formát níže).
 
 ---
 
-## Formát souboru `.idx` (verze 4)
+## Formát souboru `.idx` (verze 5)
 
 Soubor je **gzip** komprimovaný binární stream ve formátu Java `DataOutputStream` (big-endian).
 
 | Pořadí | Typ | Hodnota |
 |--------|-----|---------|
 | 1 | `int32` | Magic `0x445A5349` (`"DZSI"`) |
-| 2 | `int32` | Verze `4` |
+| 2 | `int32` | Verze `5` |
 | 3 | `int64` | Velikost zdrojové DB v bajtech |
 | 4 | `int64` | `lastModified` zdrojové DB (ms od epochy) |
 | 5 | `int32` | Počet záznamů RO indexu |
@@ -148,6 +161,14 @@ Soubor je **gzip** komprimovaný binární stream ve formátu Java `DataOutputSt
 | | `utf` | `pairKey` |
 | | `float64` | `latitude` |
 | | `float64` | `longitude` |
+| M | `int32` | Počet záznamů výhybka GPS indexu |
+| … | opakování | Pro každý záznam: |
+| | `utf` | `tudu` |
+| | `int32` | `vyhybka` |
+| | `float64` | `latitude` |
+| | `float64` | `longitude` |
+
+**Poznámka:** Cache verze 4 (bez výhybka GPS indexu) se ignoruje – aplikace provede plnou reindexaci.
 
 Název souboru:
 
@@ -221,7 +242,7 @@ Plný průchod GPS indexem, pro každý TUDU kód nejlepší bod, seřazeno podl
 
 ### Vzdálenosti výhybek v TUDU (`findVyhybkaDistancesForTudu`)
 
-Dotaz do `DZS_SUPER_RO_TPI` pro daný TUDU. Pokud tabulky obsahují sloupce **KMK_INT** (RO) a **KM_INT** (GPS), spojí se s `DZS_SUPERTRA_GPS_KM` podle `SUPER_Z_ID`, `SUPER_D_ID` a shody kilometrického bodu – výhybky se stejným párem ID, ale jiným číslem, tak dostanou odlišné souřadnice a vzdálenost. Bez těchto sloupců se použije jeden GPS bod na pár ID (záložní režim).
+Používá předpočítaný **výhybka GPS index** – pro daný TUDU jen haversine nad mapou `číslo výhybky → souřadnice`. Žádný SQL dotaz při otevření pickeru.
 
 ### Ruční výběr TUDU (`loadAllTudu`)
 
@@ -235,14 +256,14 @@ Dotaz do `DZS_SUPER_RO_TPI` pro daný TUDU. Pokud tabulky obsahují sloupce **KM
 flowchart TD
     A[DZS_PASPORT_TPI.sqlite] --> B{DzsDatabase.open}
     B --> C{Platná .idx cache?}
-    C -->|Ano| D[Načti RO + GPS index z disku]
+    C -->|Ano| D[Načti RO + GPS + výhybka GPS z disku]
     C -->|Ne| E[buildRoIndex – DZS_SUPER_RO_TPI]
-    E --> F[Dočasná tabulka _dzs_ro_pairs]
-    F --> G[buildGpsIndex – DZS_SUPERTRA_GPS_KM]
+    E --> F[buildGpsIndex – DZS_SUPERTRA_GPS_KM]
+    F --> G[buildVyhybkaGpsIndex – souřadnice výhybek]
     G --> H[Ulož .idx cache]
     D --> I[SpatialGrid v paměti]
     H --> I
-    I --> J[findNearest / listGpsPoints / …]
+    I --> J[findNearest / findVyhybkaDistances / …]
     K[GPS čtečky] --> L[MainActivity]
     J --> L
 ```

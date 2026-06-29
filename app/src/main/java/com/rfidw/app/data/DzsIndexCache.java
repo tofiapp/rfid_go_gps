@@ -22,7 +22,7 @@ import java.util.zip.GZIPOutputStream;
 final class DzsIndexCache {
 
     private static final int MAGIC = 0x445A5349; // "DZSI"
-    private static final int VERSION = 4;
+    private static final int VERSION = 5;
 
     static final class RoEntry {
         final String tudu;
@@ -46,13 +46,31 @@ final class DzsIndexCache {
         }
     }
 
+    /** Souřadnice výhybky v rámci TUDU (předpočítáno při indexaci). */
+    static final class VyhybkaGpsEntry {
+        final String tudu;
+        final int vyhybka;
+        final double latitude;
+        final double longitude;
+
+        VyhybkaGpsEntry(String tudu, int vyhybka, double latitude, double longitude) {
+            this.tudu = tudu;
+            this.vyhybka = vyhybka;
+            this.latitude = latitude;
+            this.longitude = longitude;
+        }
+    }
+
     static final class LoadedIndex {
         final Map<String, RoEntry> roByPairKey;
         final List<GpsEntry> gpsIndex;
+        final List<VyhybkaGpsEntry> vyhybkaGpsIndex;
 
-        LoadedIndex(Map<String, RoEntry> roByPairKey, List<GpsEntry> gpsIndex) {
+        LoadedIndex(Map<String, RoEntry> roByPairKey, List<GpsEntry> gpsIndex,
+                    List<VyhybkaGpsEntry> vyhybkaGpsIndex) {
             this.roByPairKey = roByPairKey;
             this.gpsIndex = gpsIndex;
+            this.vyhybkaGpsIndex = vyhybkaGpsIndex;
         }
     }
 
@@ -81,7 +99,13 @@ final class DzsIndexCache {
             for (int i = 0; i < gpsCount; i++) {
                 gps.add(new GpsEntry(in.readUTF(), in.readDouble(), in.readDouble()));
             }
-            return new LoadedIndex(ro, gps);
+            int vyhybkaGpsCount = in.readInt();
+            List<VyhybkaGpsEntry> vyhybkaGps = new ArrayList<>(vyhybkaGpsCount);
+            for (int i = 0; i < vyhybkaGpsCount; i++) {
+                vyhybkaGps.add(new VyhybkaGpsEntry(
+                        in.readUTF(), in.readInt(), in.readDouble(), in.readDouble()));
+            }
+            return new LoadedIndex(ro, gps, vyhybkaGps);
         } catch (Exception ignored) {
             cacheFile.delete();
             return null;
@@ -94,7 +118,7 @@ final class DzsIndexCache {
     }
 
     static void save(File dbFile, File cacheDir, Map<String, RoEntry> roByPairKey,
-                     List<GpsEntry> gpsIndex) {
+                     List<GpsEntry> gpsIndex, List<VyhybkaGpsEntry> vyhybkaGpsIndex) {
         saveBody(dbFile, cacheDir, out -> {
             out.writeInt(roByPairKey.size());
             for (Map.Entry<String, RoEntry> e : roByPairKey.entrySet()) {
@@ -107,6 +131,13 @@ final class DzsIndexCache {
                 out.writeUTF(gps.pairKey);
                 out.writeDouble(gps.latitude);
                 out.writeDouble(gps.longitude);
+            }
+            out.writeInt(vyhybkaGpsIndex.size());
+            for (VyhybkaGpsEntry entry : vyhybkaGpsIndex) {
+                out.writeUTF(entry.tudu);
+                out.writeInt(entry.vyhybka);
+                out.writeDouble(entry.latitude);
+                out.writeDouble(entry.longitude);
             }
         });
     }
