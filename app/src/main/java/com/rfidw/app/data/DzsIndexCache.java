@@ -6,6 +6,8 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -77,39 +79,38 @@ final class DzsIndexCache {
     private DzsIndexCache() {
     }
 
+    /**
+     * Načte platný index z cache aplikace, ze složky databáze nebo ze sidecar souboru
+     * {@code databaze.sqlite.idx}.
+     */
     static LoadedIndex tryLoad(File dbFile, File cacheDir) {
-        if (dbFile == null || cacheDir == null || !dbFile.isFile()) return null;
-        File cacheFile = cacheFileFor(dbFile, cacheDir);
-        if (!cacheFile.isFile()) return null;
-        try (DataInputStream in = new DataInputStream(new GZIPInputStream(new FileInputStream(cacheFile)))) {
-            if (in.readInt() != MAGIC || in.readInt() != VERSION) return null;
-            long cachedSize = in.readLong();
-            long cachedMtime = in.readLong();
-            if (cachedSize != dbFile.length() || cachedMtime != dbFile.lastModified()) {
-                return null;
-            }
-            int roCount = in.readInt();
-            Map<String, RoEntry> ro = new HashMap<>(Math.max(roCount, 16));
-            for (int i = 0; i < roCount; i++) {
-                String pairKey = in.readUTF();
-                ro.put(pairKey, new RoEntry(in.readUTF(), in.readInt()));
-            }
-            int gpsCount = in.readInt();
-            List<GpsEntry> gps = new ArrayList<>(gpsCount);
-            for (int i = 0; i < gpsCount; i++) {
-                gps.add(new GpsEntry(in.readUTF(), in.readDouble(), in.readDouble()));
-            }
-            int vyhybkaGpsCount = in.readInt();
-            List<VyhybkaGpsEntry> vyhybkaGps = new ArrayList<>(vyhybkaGpsCount);
-            for (int i = 0; i < vyhybkaGpsCount; i++) {
-                vyhybkaGps.add(new VyhybkaGpsEntry(
-                        in.readUTF(), in.readInt(), in.readDouble(), in.readDouble()));
-            }
-            return new LoadedIndex(ro, gps, vyhybkaGps);
-        } catch (Exception ignored) {
-            cacheFile.delete();
-            return null;
+        if (dbFile == null || !dbFile.isFile()) return null;
+
+        File appCacheFile = cacheDir != null ? cacheFileFor(dbFile, cacheDir) : null;
+        if (appCacheFile != null && appCacheFile.isFile()) {
+            LoadedIndex loaded = readIndex(dbFile, appCacheFile);
+            if (loaded != null) return loaded;
         }
+
+        File parent = dbFile.getParentFile();
+        if (parent != null) {
+            File sibling = new File(parent, cacheFileName(dbFile));
+            LoadedIndex loaded = readIndex(dbFile, sibling);
+            if (loaded != null) {
+                importToAppCache(dbFile, cacheDir, sibling);
+                return loaded;
+            }
+        }
+
+        File sidecar = new File(dbFile.getAbsolutePath() + ".idx");
+        if (sidecar.isFile()) {
+            LoadedIndex loaded = readIndex(dbFile, sidecar);
+            if (loaded != null) {
+                importToAppCache(dbFile, cacheDir, sidecar);
+                return loaded;
+            }
+        }
+        return null;
     }
 
     @FunctionalInterface
@@ -164,9 +165,66 @@ final class DzsIndexCache {
         }
     }
 
+    private static LoadedIndex readIndex(File dbFile, File indexFile) {
+        if (indexFile == null || !indexFile.isFile()) return null;
+        try (DataInputStream in = new DataInputStream(new GZIPInputStream(new FileInputStream(indexFile)))) {
+            if (in.readInt() != MAGIC || in.readInt() != VERSION) return null;
+            long cachedSize = in.readLong();
+            long cachedMtime = in.readLong();
+            if (cachedSize != dbFile.length() || cachedMtime != dbFile.lastModified()) {
+                return null;
+            }
+            int roCount = in.readInt();
+            Map<String, RoEntry> ro = new HashMap<>(Math.max(roCount, 16));
+            for (int i = 0; i < roCount; i++) {
+                String pairKey = in.readUTF();
+                ro.put(pairKey, new RoEntry(in.readUTF(), in.readInt()));
+            }
+            int gpsCount = in.readInt();
+            List<GpsEntry> gps = new ArrayList<>(gpsCount);
+            for (int i = 0; i < gpsCount; i++) {
+                gps.add(new GpsEntry(in.readUTF(), in.readDouble(), in.readDouble()));
+            }
+            int vyhybkaGpsCount = in.readInt();
+            List<VyhybkaGpsEntry> vyhybkaGps = new ArrayList<>(vyhybkaGpsCount);
+            for (int i = 0; i < vyhybkaGpsCount; i++) {
+                vyhybkaGps.add(new VyhybkaGpsEntry(
+                        in.readUTF(), in.readInt(), in.readDouble(), in.readDouble()));
+            }
+            return new LoadedIndex(ro, gps, vyhybkaGps);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static void importToAppCache(File dbFile, File cacheDir, File sourceIndex) {
+        if (cacheDir == null || sourceIndex == null) return;
+        File dest = cacheFileFor(dbFile, cacheDir);
+        if (dest.isFile() && dest.length() == sourceIndex.length()) return;
+        if (!cacheDir.exists() && !cacheDir.mkdirs()) return;
+        try {
+            copyFile(sourceIndex, dest);
+        } catch (IOException ignored) {
+        }
+    }
+
+    private static void copyFile(File source, File dest) throws IOException {
+        try (InputStream in = new FileInputStream(source);
+             OutputStream out = new FileOutputStream(dest)) {
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                out.write(buf, 0, n);
+            }
+        }
+    }
+
     private static File cacheFileFor(File dbFile, File cacheDir) {
-        String name = "dzs_" + Long.toHexString(dbFile.length())
+        return new File(cacheDir, cacheFileName(dbFile));
+    }
+
+    private static String cacheFileName(File dbFile) {
+        return "dzs_" + Long.toHexString(dbFile.length())
                 + "_" + Long.toHexString(dbFile.lastModified()) + ".idx";
-        return new File(cacheDir, name);
     }
 }

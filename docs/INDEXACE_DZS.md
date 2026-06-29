@@ -124,7 +124,7 @@ Výsledek: seznam `{ pairKey, latitude, longitude }`.
 Pro každou výhybku v RO tabulce se při indexaci určí souřadnice:
 
 1. RO tabulka se načte **jednou** (společně s RO indexem ve fázi 2A) – druhý SQL sken se neprovádí.
-2. Pokud existují `KMK_INT` (RO) a `KM_INT` (GPS), jedním SQL dotazem se načtou GPS km body jen pro páry `(SUPER_Z_ID, SUPER_D_ID)` z RO (JOIN jen na rovnost ID – bez CAST v podmínce). Párování `KM_INT` s `KMK_INT` proběhne v paměti: nejprve přesná shoda, pak interval `[km−0,5, km+0,5)` pro desetinné hodnoty.
+2. Pokud existují `KMK_INT` (RO) a `KM_INT` (GPS), pro každou trojici `(SUPER_Z_ID, SUPER_D_ID, KMK_INT)` proběhne **malý cílený SQL dotaz** s filtrem ID a úzkým km oknem (`= KMK_INT`, případně `[km−0,5, km+0,5)`). SQLite neprochází celý kilometrický průběh úseku.
 3. Bez kilometrických sloupců se použije záložní bod z GPS indexu (jeden na pár ID).
 4. Sestavení mapy `TUDU → výhybka → souřadnice` probíhá čistě v paměti z již načtených RO řádků.
 
@@ -187,7 +187,7 @@ Příklad: DB 524 288 000 B, mtime `1719561600000` → `dzs_1f4000000_18ff3c
 python3 tools/preindex_dzs.py DZS_PASPORT_TPI.sqlite
 ```
 
-Výstup: `DZS_PASPORT_TPI.sqlite.idx` ve stejné složce (nebo `-o cesta/`).
+Výstup: `dzs_{velikost_hex}_{mtime_hex}.idx` a sidecar `DZS_PASPORT_TPI.sqlite.idx` ve stejné složce (nebo `-o cesta/`).
 
 Volby:
 
@@ -199,7 +199,16 @@ Volby:
 
 ### Nasazení na zařízení
 
-1. Zkopírujte `DZS_PASPORT_TPI.sqlite` na zařízení (Stažené soubory, kořen úložiště, …).
+**Nejjednodušší:** Zkopírujte na zařízení oba soubory do stejné složky (např. Stažené soubory):
+
+- `DZS_PASPORT_TPI.sqlite`
+- `DZS_PASPORT_TPI.sqlite.idx` (sidecar vygenerovaný nástrojem)
+
+Aplikace sidecar automaticky najde a použije – indexace na telefonu se přeskočí.
+
+**Alternativa – cache aplikace:**
+
+1. Zkopírujte `DZS_PASPORT_TPI.sqlite` na zařízení.
 2. Zkopírujte vygenerovaný `.idx` do cache aplikace:
 
 ```
