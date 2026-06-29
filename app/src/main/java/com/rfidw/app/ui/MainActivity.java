@@ -1777,7 +1777,9 @@ public class MainActivity extends AppCompatActivity {
 
     private void loadDatabaseFromPath(String path, String displayName, boolean showErrorToast) {
         try {
-            DzsDatabase opened = DzsDatabase.open(path);
+            DzsDatabase.OpenProgressListener progress = (phase, percent) ->
+                    ui.post(() -> tvSourceFile.setText(getString(R.string.db_loading_phase, phase)));
+            DzsDatabase opened = DzsDatabase.open(path, getCacheDir(), progress);
             int tuduCount = opened.countDistinctTudu();
             boolean manualMode = !prefs.getBoolean(PREF_TUDU_MODE_GPS, true);
             List<Tudu> loaded = manualMode ? opened.loadAllTudu() : Collections.emptyList();
