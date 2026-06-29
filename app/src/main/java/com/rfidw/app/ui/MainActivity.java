@@ -22,6 +22,7 @@ import android.text.TextWatcher;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
 import android.util.Log;
+import android.util.TypedValue;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -71,6 +72,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int[] TRIGGER_KEYS = {139, 280, 293, 311, 312, 522, 523, 0x3E8};
 
     private static final String TAG = "MainActivity";
+    private static final int REQUEST_LOCATION_PERMISSION = 1001;
     private static final int REQUEST_STORAGE_PERMISSION = 1002;
     private static final String DEFAULT_DB_NAME = "DZS_PASPORT_TPI.sqlite";
 
