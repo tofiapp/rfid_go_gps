@@ -155,6 +155,7 @@ public class DzsDatabase implements Closeable {
     private final Map<String, RoIndexEntry> roByPairKey;
     private final List<GpsIndexEntry> gpsIndex;
     private volatile SpatialGrid spatialGrid;
+    private volatile Map<String, GpsIndexEntry> gpsByPairKey;
 
     private DzsDatabase(SQLiteDatabase db, GpsColumns gpsColumns, RoColumns roColumns,
                         Map<String, RoIndexEntry> roByPairKey, List<GpsIndexEntry> gpsIndex) {
@@ -456,24 +457,63 @@ public class DzsDatabase implements Closeable {
     }
 
     /**
-     * Pro daný TUDU vrátí nejbližší vzdálenost (m) k jednotlivým výhybkám z GPS indexu.
+     * Pro daný TUDU vrátí nejbližší vzdálenost (m) k jednotlivým výhybkám.
+     * Čísla výhybek a GPS páry se berou ze stejných řádků RO tabulky jako v
+     * {@link #loadTuduForCodes} – index po SUPER_Z_ID|SUPER_D_ID nestačí, protože
+     * jeden pár může v datech odpovídat více výhybkám.
      */
     public Map<Integer, Double> findVyhybkaDistancesForTudu(String tuduCode,
                                                               double latitude, double longitude) {
         if (gpsIndex.isEmpty() || tuduCode == null || tuduCode.isEmpty()) {
             return Collections.emptyMap();
         }
+        String trimmedTudu = tuduCode.trim();
+        if (trimmedTudu.isEmpty()) return Collections.emptyMap();
+
+        Map<String, GpsIndexEntry> gpsByPair = gpsByPairKey();
         Map<Integer, Double> bestByVyhybka = new HashMap<>();
-        for (GpsIndexEntry gps : gpsIndex) {
-            RoIndexEntry ro = roByPairKey.get(gps.pairKey);
-            if (ro == null || !tuduCode.equals(ro.tudu)) continue;
-            double dist = haversineM(latitude, longitude, gps.latitude, gps.longitude);
-            Double existing = bestByVyhybka.get(ro.vyhybka);
-            if (existing == null || dist < existing) {
-                bestByVyhybka.put(ro.vyhybka, dist);
+        String vyhybkaExpr = roColumns.vyhybkaSelectExpr(null);
+        StringBuilder sql = new StringBuilder("SELECT ")
+                .append(roColumns.superZId).append(", ").append(roColumns.superDId).append(", ")
+                .append(vyhybkaExpr)
+                .append(" FROM ").append(TABLE_RO_TPI)
+                .append(" WHERE TRIM(CAST(").append(roColumns.tudu).append(" AS TEXT)) = ?")
+                .append(" AND ").append(vyhybkaExpr).append(" IS NOT NULL");
+        roColumns.appendPolohaFilter(sql, null);
+
+        try (Cursor c = db.rawQuery(sql.toString(), new String[]{trimmedTudu})) {
+            while (c.moveToNext()) {
+                String superZId = readId(c, 0);
+                String superDId = readId(c, 1);
+                Integer vyhybka = readInt(c, 2);
+                if (superZId == null || superDId == null || vyhybka == null) continue;
+                GpsIndexEntry gps = gpsByPair.get(pairKey(superZId, superDId));
+                if (gps == null) continue;
+                double dist = haversineM(latitude, longitude, gps.latitude, gps.longitude);
+                Double existing = bestByVyhybka.get(vyhybka);
+                if (existing == null || dist < existing) {
+                    bestByVyhybka.put(vyhybka, dist);
+                }
             }
         }
         return bestByVyhybka;
+    }
+
+    private Map<String, GpsIndexEntry> gpsByPairKey() {
+        Map<String, GpsIndexEntry> map = gpsByPairKey;
+        if (map == null) {
+            synchronized (this) {
+                map = gpsByPairKey;
+                if (map == null) {
+                    map = new HashMap<>(Math.max(gpsIndex.size(), 16));
+                    for (GpsIndexEntry gps : gpsIndex) {
+                        map.put(gps.pairKey, gps);
+                    }
+                    gpsByPairKey = map;
+                }
+            }
+        }
+        return map;
     }
 
     private static double approximateDistSq(double lat, double lon, double targetLat, double targetLon,
