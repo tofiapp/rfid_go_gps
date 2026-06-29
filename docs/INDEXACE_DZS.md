@@ -75,6 +75,8 @@ Všechny GPS km body pro páry ID z RO indexu (dočasná tabulka `_dzs_ro_pairs`
 
 - `SUPER_Z_ID`, `SUPER_D_ID`, `KM_EXT`, souřadnice
 - **žádná deduplikace** – každý km bod je samostatný záznam
+- SQL bez `ORDER BY` a bez `CAST` výrazů – parsování km/souřadnic v Javě (rychlejší na velkých tabulkách)
+- záložní postup: jeden sekvenční průchod GPS tabulkou s filtrem párů v paměti (nikdy dotaz po jednom páru)
 
 ### Fáze 3 – Uložení cache
 
