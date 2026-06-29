@@ -47,6 +47,7 @@
     <string name="db_loading_progress">%1$s · %2$d %%</string>
     <string name="db_select_required">Nejdříve vyberte databázi SQLite</string>
     <string name="db_file_type_error">Podporovaný formát je SQLite (.db / .sqlite)</string>
+    <string name="gps_reload_location">Načíst polohu</string>
     <string name="gps_tudu_wait">Čekám na GPS pro určení TUDU a výhybky…</string>
     <string name="gps_tudu_lookup">Určuji TUDU a výhybku podle GPS…</string>
     <string name="gps_tudu_not_found">U aktuální GPS polohy nelze určit TUDU – vyberte ručně</string>
@@ -60,7 +61,7 @@
     <string name="tudu_mode_label">Režim výběru TUDU</string>
     <string name="tudu_mode_gps">GPS</string>
     <string name="tudu_mode_manual">Ručně</string>
-    <string name="tudu_mode_gps_hint">TUDU a výhybka se doplní automaticky podle GPS. Při výběru TUDU se zobrazí 10 nejbližších.</string>
+    <string name="tudu_mode_gps_hint">TUDU a výhybka se doplní automaticky podle GPS. Ruční výběr zůstane aktivní, dokud nekliknete Načíst polohu (výhybka do načtení všech čipů).</string>
     <string name="tudu_mode_manual_hint">Vyberte TUDU a výhybku ručně ze seznamu v databázi.</string>
     <string name="tudu_picker_nearby_title">Nejbližší TUDU (10)</string>
     <string name="tudu_picker_no_gps">Pro výběr nejbližších TUDU je potřeba GPS poloha</string>

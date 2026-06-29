@@ -18,6 +18,7 @@ import android.provider.OpenableColumns;
 import android.text.Editable;
 import android.text.SpannableString;
 import android.text.Spanned;
+import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
@@ -45,6 +46,7 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
+import com.google.android.material.button.MaterialButton;
 import com.google.android.material.button.MaterialButtonToggleGroup;
 
 import com.rfidw.app.R;
@@ -101,6 +103,10 @@ public class MainActivity extends AppCompatActivity {
     private volatile long dbLoadGeneration;
     /** Režim výběru TUDU: true = GPS, false = ruční výběr ze seznamu. */
     private boolean gpsAutoSelection = true;
+    /** Ruční výběr TUDU v GPS režimu – GPS lookup nepřepíše, dokud uživatel neklikne Načíst polohu. */
+    private boolean gpsTuduLocked;
+    /** Ruční výběr výhybky v GPS režimu – GPS lookup nepřepíše, dokud nejsou načteny všechny části. */
+    private boolean gpsVyhybkaLocked;
     private volatile boolean gpsLookupInFlight;
     private boolean gpsLookupNoMatch;
     private boolean forceNextGpsLookup;
@@ -151,6 +157,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean gpsTestMode;
     private MaterialButtonToggleGroup powerPresetGroup;
     private MaterialButtonToggleGroup tuduModeGroup;
+    private MaterialButton btnGpsReloadLocation;
     private TextView tvTuduModeHint;
     private boolean tuduListFullyLoaded;
     private Boolean powerPresetInKoleji;
@@ -178,6 +185,7 @@ public class MainActivity extends AppCompatActivity {
         setupCsv();
         setupListeners();
         setupTuduSelectionMode();
+        setupGpsReloadLocation();
         setupGpsTestMode();
         tryAutoLoadDefaultDatabase();
 
@@ -244,6 +252,7 @@ public class MainActivity extends AppCompatActivity {
         tvGpsTestModeHint = findViewById(R.id.tvGpsTestModeHint);
         powerPresetGroup = findViewById(R.id.powerPresetGroup);
         tuduModeGroup = findViewById(R.id.tuduModeGroup);
+        btnGpsReloadLocation = findViewById(R.id.btnGpsReloadLocation);
         tvTuduModeHint = findViewById(R.id.tvTuduModeHint);
 
         rows[0] = findViewById(R.id.row1);
@@ -523,6 +532,7 @@ public class MainActivity extends AppCompatActivity {
                 .create();
 
         listView.setOnItemClickListener((parent, v, position, id) -> {
+            gpsTuduLocked = true;
             applyGpsMatch(matches.get(position));
             dialog.dismiss();
         });
@@ -651,7 +661,25 @@ public class MainActivity extends AppCompatActivity {
                 expandCard1Body();
                 return;
             }
-            showVyhybkaPickerDialog();
+            if (gpsAutoSelection && locationCache != null && locationCache.getSnapshot().valid) {
+                final double lat = locationCache.getSnapshot().latitude;
+                final double lon = locationCache.getSnapshot().longitude;
+                final String tuduCode = currentTudu.code;
+                gpsIo.execute(() -> {
+                    Map<Integer, Double> distances = Collections.emptyMap();
+                    try {
+                        if (dzsDatabase != null) {
+                            distances = dzsDatabase.findVyhybkaDistancesForTudu(tuduCode, lat, lon);
+                        }
+                    } catch (Exception e) {
+                        Log.w(TAG, "Vzdálenosti výhybek selhaly", e);
+                    }
+                    final Map<Integer, Double> result = distances;
+                    ui.post(() -> showVyhybkaPickerDialog(result));
+                });
+            } else {
+                showVyhybkaPickerDialog(null);
+            }
         };
         if (currentTudu.vyhybky.isEmpty() && dzsDatabase != null) {
             ensureTuduDetailsLoaded(currentTudu.code, showPicker);
@@ -660,9 +688,9 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void showVyhybkaPickerDialog() {
+    private void showVyhybkaPickerDialog(Map<Integer, Double> distancesM) {
         final String tuduCode = currentTudu.code;
-        final List<Tudu.Vyhybka> vyhybky = currentTudu.vyhybky;
+        final List<Tudu.Vyhybka> vyhybky = sortVyhybkyForPicker(currentTudu.vyhybky, distancesM);
 
         ListView listView = new ListView(this);
         listView.setChoiceMode(ListView.CHOICE_MODE_SINGLE);
@@ -680,7 +708,8 @@ public class MainActivity extends AppCompatActivity {
                 TextView tv = (TextView) view;
                 Tudu.Vyhybka v = vyhybky.get(position);
                 boolean done = isVyhybkaCompleteInCsv(tuduCode, v);
-                tv.setText(formatVyhybkaPickerLabel(tuduCode, v));
+                Double dist = distancesM != null ? distancesM.get(v.cislo) : null;
+                tv.setText(formatVyhybkaPickerLabel(tuduCode, v, dist));
                 if (done) {
                     tv.setTextColor(ContextCompat.getColor(MainActivity.this, R.color.text_muted));
                     tv.setAlpha(0.45f);
@@ -708,11 +737,74 @@ public class MainActivity extends AppCompatActivity {
                 toast("výhybka je již zapsaná v CSV");
                 return;
             }
+            if (gpsAutoSelection) {
+                gpsVyhybkaLocked = true;
+            }
             selectVyhybka(vyhybky.get(position), true);
             dialog.dismiss();
         });
 
         dialog.show();
+    }
+
+    private void setupGpsReloadLocation() {
+        if (btnGpsReloadLocation == null) return;
+        btnGpsReloadLocation.setOnClickListener(v -> onGpsReloadLocation());
+        updateGpsReloadButtonVisibility();
+    }
+
+    private void updateGpsReloadButtonVisibility() {
+        if (btnGpsReloadLocation == null) return;
+        btnGpsReloadLocation.setVisibility(gpsAutoSelection ? View.VISIBLE : View.GONE);
+    }
+
+    private void onGpsReloadLocation() {
+        if (!gpsAutoSelection || dzsDatabase == null) return;
+        if (locationCache == null || !locationCache.getSnapshot().valid) {
+            toast(getString(R.string.tudu_picker_no_gps));
+            return;
+        }
+        gpsTuduLocked = false;
+        gpsVyhybkaLocked = false;
+        gpsLookupNoMatch = false;
+        forceNextGpsLookup = true;
+        lastGpsLookupLat = null;
+        lastGpsLookupLon = null;
+        lastGpsLookupTimeMs = 0;
+        scheduleGpsTuduLookup();
+    }
+
+    private List<Tudu.Vyhybka> sortVyhybkyForPicker(List<Tudu.Vyhybka> source,
+                                                      Map<Integer, Double> distancesM) {
+        if (distancesM == null || distancesM.isEmpty()) {
+            return source;
+        }
+        List<Tudu.Vyhybka> sorted = new ArrayList<>(source);
+        sorted.sort((a, b) -> {
+            Double da = distancesM.get(a.cislo);
+            Double db = distancesM.get(b.cislo);
+            if (da == null && db == null) return Integer.compare(a.cislo, b.cislo);
+            if (da == null) return 1;
+            if (db == null) return -1;
+            int cmp = Double.compare(da, db);
+            return cmp != 0 ? cmp : Integer.compare(a.cislo, b.cislo);
+        });
+        return sorted;
+    }
+
+    private String formatDistanceM(double distanceM) {
+        if (distanceM < 1000) {
+            return String.format(Locale.ROOT, "%.0f m", distanceM);
+        }
+        return String.format(Locale.ROOT, "%.1f km", distanceM / 1000.0);
+    }
+
+    private void maybeClearGpsVyhybkaLock() {
+        if (!gpsVyhybkaLocked || !gpsAutoSelection) return;
+        if (currentTudu == null || currentVyhybka == null) return;
+        if (isVyhybkaCompleteInCsv(currentTudu.code, currentVyhybka)) {
+            gpsVyhybkaLocked = false;
+        }
     }
 
     private void ensureTuduDetailsLoaded(String tuduCode, Runnable onReady) {
@@ -1502,12 +1594,17 @@ public class MainActivity extends AppCompatActivity {
         tvTuduModeHint.setText(gpsAutoSelection
                 ? getString(R.string.tudu_mode_gps_hint)
                 : getString(R.string.tudu_mode_manual_hint));
+        updateGpsReloadButtonVisibility();
     }
 
     private void onTuduModeChanged(boolean gpsMode) {
         if (gpsAutoSelection == gpsMode) return;
         gpsAutoSelection = gpsMode;
         prefs.edit().putBoolean(PREF_TUDU_MODE_GPS, gpsMode).apply();
+        if (!gpsMode) {
+            gpsTuduLocked = false;
+            gpsVyhybkaLocked = false;
+        }
         updateTuduModeUi();
         if (gpsMode) {
             gpsLookupNoMatch = false;
@@ -1957,6 +2054,9 @@ public class MainActivity extends AppCompatActivity {
 
     private void scheduleGpsTuduLookup() {
         if (!gpsAutoSelection || dzsDatabase == null || locationCache == null || gpsLookupInFlight) {
+            return;
+        }
+        if (gpsTuduLocked || gpsVyhybkaLocked) {
             return;
         }
         if (workflowRunning || scanDoneAwaitingConfirm) {
@@ -2461,6 +2561,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** Po dokončení zápisu tagu (EPC samostatně, nebo celý řetězec EPC→heslo→lock). */
     private void onTagCycleComplete() {
+        maybeClearGpsVyhybkaLock();
         epc.idRfid += 1;
         prefs.edit().putLong("idRfid", epc.idRfid).apply();
         advanceCastAndVyhybka();
@@ -2557,6 +2658,23 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private CharSequence formatVyhybkaPickerLabel(String tuduCode, Tudu.Vyhybka v) {
+        return formatVyhybkaPickerLabel(tuduCode, v, null);
+    }
+
+    private CharSequence formatVyhybkaPickerLabel(String tuduCode, Tudu.Vyhybka v, Double distanceM) {
+        CharSequence base = formatVyhybkaPickerLabelCore(tuduCode, v);
+        if (distanceM == null) return base;
+        String full = base.toString() + " · " + formatDistanceM(distanceM);
+        if (!(base instanceof SpannableString)) {
+            return full;
+        }
+        SpannableString orig = (SpannableString) base;
+        SpannableString span = new SpannableString(full);
+        TextUtils.copySpansFrom(orig, 0, orig.length(), null, span, 0);
+        return span;
+    }
+
+    private CharSequence formatVyhybkaPickerLabelCore(String tuduCode, Tudu.Vyhybka v) {
         String prefix = getString(R.string.vyhybka_picker_prefix);
         String cisloStr = String.valueOf(v.cislo);
         if (!isVyhybkaPartialInCsv(tuduCode, v)) {
