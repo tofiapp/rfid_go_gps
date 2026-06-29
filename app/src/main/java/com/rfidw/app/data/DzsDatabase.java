@@ -2,6 +2,7 @@ package com.rfidw.app.data;
 
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteStatement;
 
 import java.io.Closeable;
 import java.io.File;
@@ -30,6 +31,7 @@ public class DzsDatabase implements Closeable {
 
     public static final String TABLE_GPS_KM = "DZS_SUPERTRA_GPS_KM";
     public static final String TABLE_RO_TPI = "DZS_SUPER_RO_TPI";
+    private static final String TEMP_RO_PAIRS = "_dzs_ro_pairs";
 
     /** Průběh otevírání databáze (fáze + odhad procent 0–100, nebo -1). */
     public interface OpenProgressListener {
@@ -189,7 +191,7 @@ public class DzsDatabase implements Closeable {
                 report(listener, "Indexuji výhybky", 20);
                 roByPairKey = buildRoIndex(db, roColumns);
                 report(listener, "Indexuji GPS body", 45);
-                gpsIndex = buildGpsIndex(db, gpsColumns, roColumns, roByPairKey);
+                gpsIndex = buildGpsIndex(db, gpsColumns, roByPairKey);
                 report(listener, "Ukládám cache", 85);
                 if (cacheDir != null) {
                     saveIndexCache(dbFile, cacheDir, roByPairKey, gpsIndex);
@@ -419,42 +421,66 @@ public class DzsDatabase implements Closeable {
     }
 
     private static List<GpsIndexEntry> buildGpsIndex(SQLiteDatabase db, GpsColumns gpsColumns,
-                                                     RoColumns roColumns,
                                                      Map<String, RoIndexEntry> roByPairKey) {
-        List<GpsIndexEntry> fromSql = buildGpsIndexSql(db, gpsColumns, roColumns);
+        if (roByPairKey.isEmpty()) return new ArrayList<>();
+        List<GpsIndexEntry> fromSql = buildGpsIndexSql(db, gpsColumns, roByPairKey);
         if (fromSql != null) return fromSql;
         return buildGpsIndexScan(db, gpsColumns, roByPairKey);
     }
 
     /**
-     * SQL deduplikace: jeden bod na SUPER_Z_ID|SUPER_D_ID, jen páry přítomné v RO_TPI.
-     * SQLite zpracuje miliony řádků rychleji než přenos přes JNI do Javy.
+     * SQL deduplikace: jeden bod na SUPER_Z_ID|SUPER_D_ID, jen páry z indexu výhybek.
+     * Filtrování probíhá před GROUP BY, aby se nezpracovávaly miliony irelevantních GPS řádků.
      */
     private static List<GpsIndexEntry> buildGpsIndexSql(SQLiteDatabase db, GpsColumns gpsColumns,
-                                                        RoColumns roColumns) {
+                                                        Map<String, RoIndexEntry> roByPairKey) {
+        if (!populateRoPairsTempTable(db, roByPairKey)) return null;
+
         String latExpr = gpsColumns.latitudeExpr("g");
         String lonExpr = gpsColumns.longitudeExpr("g");
         String sql = "SELECT g." + gpsColumns.superZId + ", g." + gpsColumns.superDId + ", "
                 + latExpr + ", " + lonExpr
                 + " FROM " + TABLE_GPS_KM + " g"
                 + " INNER JOIN ("
-                + "   SELECT " + gpsColumns.superZId + ", " + gpsColumns.superDId
-                + ", MIN(rowid) AS rid"
-                + "   FROM " + TABLE_GPS_KM
-                + "   GROUP BY " + gpsColumns.superZId + ", " + gpsColumns.superDId
-                + " ) agg ON g.rowid = agg.rid"
-                + " INNER JOIN ("
-                + "   SELECT DISTINCT " + roColumns.superZId + ", " + roColumns.superDId
-                + "   FROM " + TABLE_RO_TPI
-                + "   WHERE 1=1";
-        StringBuilder roSubquery = new StringBuilder(sql);
-        roColumns.appendPolohaFilter(roSubquery, null);
-        sql = roSubquery.append(
-                " ) ro ON g." + gpsColumns.superZId + " = ro." + roColumns.superZId
-                + " AND g." + gpsColumns.superDId + " = ro." + roColumns.superDId).toString();
+                + "   SELECT g2." + gpsColumns.superZId + ", g2." + gpsColumns.superDId
+                + ", MIN(g2.rowid) AS rid"
+                + "   FROM " + TABLE_GPS_KM + " g2"
+                + "   INNER JOIN " + TEMP_RO_PAIRS + " rp"
+                + "     ON g2." + gpsColumns.superZId + " = rp.super_z_id"
+                + "     AND g2." + gpsColumns.superDId + " = rp.super_d_id"
+                + "   GROUP BY g2." + gpsColumns.superZId + ", g2." + gpsColumns.superDId
+                + " ) agg ON g.rowid = agg.rid";
 
+        return readGpsIndexCursor(db, sql, null);
+    }
+
+    /** Záložní postup – stejný filtr přes dočasnou tabulku, bez CAST výrazů pro souřadnice. */
+    private static List<GpsIndexEntry> buildGpsIndexScan(SQLiteDatabase db, GpsColumns gpsColumns,
+                                                       Map<String, RoIndexEntry> roByPairKey) {
+        if (!populateRoPairsTempTable(db, roByPairKey)) {
+            return buildGpsIndexScanByKey(db, gpsColumns, roByPairKey);
+        }
+
+        String sql = "SELECT g." + gpsColumns.superZId + ", g." + gpsColumns.superDId + ", "
+                + gpsColumns.latitude + ", " + gpsColumns.longitude
+                + " FROM " + TABLE_GPS_KM + " g"
+                + " INNER JOIN ("
+                + "   SELECT g2." + gpsColumns.superZId + ", g2." + gpsColumns.superDId
+                + ", MIN(g2.rowid) AS rid"
+                + "   FROM " + TABLE_GPS_KM + " g2"
+                + "   INNER JOIN " + TEMP_RO_PAIRS + " rp"
+                + "     ON g2." + gpsColumns.superZId + " = rp.super_z_id"
+                + "     AND g2." + gpsColumns.superDId + " = rp.super_d_id"
+                + "   GROUP BY g2." + gpsColumns.superZId + ", g2." + gpsColumns.superDId
+                + " ) agg ON g.rowid = agg.rid";
+
+        List<GpsIndexEntry> fromSql = readGpsIndexCursor(db, sql, null);
+        return fromSql != null ? fromSql : buildGpsIndexScanByKey(db, gpsColumns, roByPairKey);
+    }
+
+    private static List<GpsIndexEntry> readGpsIndexCursor(SQLiteDatabase db, String sql, String[] args) {
         List<GpsIndexEntry> out = new ArrayList<>();
-        try (Cursor c = db.rawQuery(sql, null)) {
+        try (Cursor c = db.rawQuery(sql, args)) {
             while (c.moveToNext()) {
                 String superZId = readId(c, 0);
                 String superDId = readId(c, 1);
@@ -471,29 +497,58 @@ public class DzsDatabase implements Closeable {
         }
     }
 
-    /** Záložní postup – plný sken v Javě (starší chování). */
-    private static List<GpsIndexEntry> buildGpsIndexScan(SQLiteDatabase db, GpsColumns gpsColumns,
-                                                       Map<String, RoIndexEntry> roByPairKey) {
-        Map<String, GpsIndexEntry> byPairKey = new HashMap<>();
-        String sql = "SELECT " + gpsColumns.superZId + ", " + gpsColumns.superDId + ", "
-                + gpsColumns.latitude + ", " + gpsColumns.longitude
-                + " FROM " + TABLE_GPS_KM;
+    private static boolean populateRoPairsTempTable(SQLiteDatabase db,
+                                                  Map<String, RoIndexEntry> roByPairKey) {
+        try {
+            db.execSQL("CREATE TEMP TABLE IF NOT EXISTS " + TEMP_RO_PAIRS
+                    + " (super_z_id TEXT NOT NULL, super_d_id TEXT NOT NULL,"
+                    + " PRIMARY KEY (super_z_id, super_d_id))");
+            db.execSQL("DELETE FROM " + TEMP_RO_PAIRS);
+        } catch (Exception ignored) {
+            return false;
+        }
 
-        try (Cursor c = db.rawQuery(sql, null)) {
-            while (c.moveToNext()) {
-                String superZId = readId(c, 0);
-                String superDId = readId(c, 1);
-                Double lat = readDouble(c, 2);
-                Double lon = readDouble(c, 3);
-                if (superZId == null || superDId == null || lat == null || lon == null) {
-                    continue;
-                }
-                String key = pairKey(superZId, superDId);
-                if (!roByPairKey.containsKey(key)) continue;
-                byPairKey.putIfAbsent(key, new GpsIndexEntry(key, lat, lon));
+        SQLiteStatement insert = db.compileStatement(
+                "INSERT OR IGNORE INTO " + TEMP_RO_PAIRS + " (super_z_id, super_d_id) VALUES (?, ?)");
+        db.beginTransaction();
+        try {
+            for (String key : roByPairKey.keySet()) {
+                String[] ids = splitPairKey(key);
+                insert.clearBindings();
+                insert.bindString(1, ids[0]);
+                insert.bindString(2, ids[1]);
+                insert.executeInsert();
+            }
+            db.setTransactionSuccessful();
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    /** Poslední záložní postup – dotaz po jednom páru ID (pomalé, ale bez plného skenu GPS tabulky). */
+    private static List<GpsIndexEntry> buildGpsIndexScanByKey(SQLiteDatabase db, GpsColumns gpsColumns,
+                                                            Map<String, RoIndexEntry> roByPairKey) {
+        List<GpsIndexEntry> out = new ArrayList<>();
+        String sql = "SELECT " + gpsColumns.latitude + ", " + gpsColumns.longitude
+                + " FROM " + TABLE_GPS_KM
+                + " WHERE " + gpsColumns.superZId + " = ? AND " + gpsColumns.superDId + " = ?"
+                + " LIMIT 1";
+
+        for (String key : roByPairKey.keySet()) {
+            String[] ids = splitPairKey(key);
+            try (Cursor c = db.rawQuery(sql, new String[]{ids[0], ids[1]})) {
+                if (!c.moveToFirst()) continue;
+                Double lat = readDouble(c, 0);
+                Double lon = readDouble(c, 1);
+                if (lat == null || lon == null) continue;
+                out.add(new GpsIndexEntry(key, lat, lon));
+            } catch (Exception ignored) {
             }
         }
-        return new ArrayList<>(byPairKey.values());
+        return out;
     }
 
     private static String pairKey(String superZId, String superDId) {
