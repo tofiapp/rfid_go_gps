@@ -460,8 +460,8 @@ public class DzsDatabase implements Closeable {
     /**
      * Pro daný TUDU vrátí nejbližší vzdálenost (m) k jednotlivým výhybkám.
      * Čísla výhybek a GPS páry se berou ze stejných řádků RO tabulky jako v
-     * {@link #loadTuduForCodes} – index po SUPER_Z_ID|SUPER_D_ID nestačí, protože
-     * jeden pár může v datech odpovídat více výhybkám.
+     * {@link #loadTuduForCodes}. Index po SUPER_Z_ID|SUPER_D_ID nestačí, protože
+     * jeden pár může odpovídat více výhybkám – liší se sloupcem KMK_INT (RO) vs KM_INT (GPS).
      */
     public Map<Integer, Double> findVyhybkaDistancesForTudu(String tuduCode,
                                                               double latitude, double longitude) {
@@ -471,6 +471,49 @@ public class DzsDatabase implements Closeable {
         String trimmedTudu = tuduCode.trim();
         if (trimmedTudu.isEmpty()) return Collections.emptyMap();
 
+        if (roColumns.kmkInt != null && gpsColumns.kmInt != null) {
+            return findVyhybkaDistancesByKmJoin(trimmedTudu, latitude, longitude);
+        }
+        return findVyhybkaDistancesByPair(trimmedTudu, latitude, longitude);
+    }
+
+    private Map<Integer, Double> findVyhybkaDistancesByKmJoin(String trimmedTudu,
+                                                                double latitude, double longitude) {
+        Map<Integer, Double> bestByVyhybka = new HashMap<>();
+        String vyhybkaExpr = roColumns.vyhybkaSelectExpr("ro");
+        String latExpr = gpsColumns.latitudeExpr("g");
+        String lonExpr = gpsColumns.longitudeExpr("g");
+        String kmRoExpr = kmIntExpr("ro", roColumns.kmkInt);
+        String kmGpsExpr = kmIntExpr("g", gpsColumns.kmInt);
+        StringBuilder sql = new StringBuilder("SELECT ")
+                .append(vyhybkaExpr).append(", ").append(latExpr).append(", ").append(lonExpr)
+                .append(" FROM ").append(TABLE_RO_TPI).append(" ro")
+                .append(" INNER JOIN ").append(TABLE_GPS_KM).append(" g")
+                .append(" ON ").append(idJoinExpr("g", gpsColumns.superZId))
+                .append(" = ").append(idJoinExpr("ro", roColumns.superZId))
+                .append(" AND ").append(idJoinExpr("g", gpsColumns.superDId))
+                .append(" = ").append(idJoinExpr("ro", roColumns.superDId))
+                .append(" AND ").append(kmGpsExpr).append(" = ").append(kmRoExpr)
+                .append(" WHERE TRIM(CAST(ro.").append(roColumns.tudu).append(" AS TEXT)) = ?")
+                .append(" AND ").append(vyhybkaExpr).append(" IS NOT NULL")
+                .append(" AND ro.").append(roColumns.kmkInt).append(" IS NOT NULL")
+                .append(" AND g.").append(gpsColumns.kmInt).append(" IS NOT NULL");
+        roColumns.appendPolohaFilter(sql, "ro");
+
+        try (Cursor c = db.rawQuery(sql.toString(), new String[]{trimmedTudu})) {
+            while (c.moveToNext()) {
+                Integer vyhybka = readInt(c, 0);
+                Double lat = readDouble(c, 1);
+                Double lon = readDouble(c, 2);
+                if (vyhybka == null || lat == null || lon == null) continue;
+                recordVyhybkaDistance(bestByVyhybka, vyhybka, latitude, longitude, lat, lon);
+            }
+        }
+        return bestByVyhybka;
+    }
+
+    private Map<Integer, Double> findVyhybkaDistancesByPair(String trimmedTudu,
+                                                              double latitude, double longitude) {
         Map<String, GpsIndexEntry> gpsByPair = gpsByPairKey();
         Map<Integer, Double> bestByVyhybka = new HashMap<>();
         String vyhybkaExpr = roColumns.vyhybkaSelectExpr(null);
@@ -490,14 +533,21 @@ public class DzsDatabase implements Closeable {
                 if (superZId == null || superDId == null || vyhybka == null) continue;
                 GpsIndexEntry gps = gpsByPair.get(pairKey(superZId, superDId));
                 if (gps == null) continue;
-                double dist = haversineM(latitude, longitude, gps.latitude, gps.longitude);
-                Double existing = bestByVyhybka.get(vyhybka);
-                if (existing == null || dist < existing) {
-                    bestByVyhybka.put(vyhybka, dist);
-                }
+                recordVyhybkaDistance(bestByVyhybka, vyhybka, latitude, longitude,
+                        gps.latitude, gps.longitude);
             }
         }
         return bestByVyhybka;
+    }
+
+    private static void recordVyhybkaDistance(Map<Integer, Double> bestByVyhybka, int vyhybka,
+                                              double latitude, double longitude,
+                                              double targetLat, double targetLon) {
+        double dist = haversineM(latitude, longitude, targetLat, targetLon);
+        Double existing = bestByVyhybka.get(vyhybka);
+        if (existing == null || dist < existing) {
+            bestByVyhybka.put(vyhybka, dist);
+        }
     }
 
     private Map<String, GpsIndexEntry> gpsByPairKey() {
@@ -820,17 +870,29 @@ public class DzsDatabase implements Closeable {
         return 2 * r * Math.asin(Math.sqrt(a));
     }
 
+    private static String kmIntExpr(String tableAlias, String column) {
+        String qualified = tableAlias == null || tableAlias.isEmpty()
+                ? column : tableAlias + "." + column;
+        return "CAST(REPLACE(TRIM(CAST(" + qualified + " AS TEXT)), ',', '.') AS REAL)";
+    }
+
+    private static String idJoinExpr(String tableAlias, String column) {
+        return kmIntExpr(tableAlias, column);
+    }
+
     private static final class GpsColumns {
         final String superZId;
         final String superDId;
         final String latitude;
         final String longitude;
+        final String kmInt;
 
-        GpsColumns(String superZId, String superDId, String latitude, String longitude) {
+        GpsColumns(String superZId, String superDId, String latitude, String longitude, String kmInt) {
             this.superZId = superZId;
             this.superDId = superDId;
             this.latitude = latitude;
             this.longitude = longitude;
+            this.kmInt = kmInt;
         }
 
         /** Číselný výraz pro šířku – CAST + desetinná čárka, aby fungoval text i REAL. */
@@ -852,7 +914,8 @@ public class DzsDatabase implements Closeable {
             // DZS_SUPERTRA_GPS_KM používá primárně LAT / LON (někdy LAN místo LAT)
             String lat = findRequiredColumn(cols, "LAT", "LAN", "LATITUDE", "GPS_LAT", "SIRKA", "GPS_SIRKA", "Y");
             String lon = findRequiredColumn(cols, "LON", "LONGITUDE", "LNG", "GPS_LON", "DELKA", "GPS_DELKA", "X");
-            return new GpsColumns(superZId, superDId, lat, lon);
+            String kmInt = findOptionalColumn(cols, "KM_INT", "KM", "KILOMETR");
+            return new GpsColumns(superZId, superDId, lat, lon, kmInt);
         }
     }
 
@@ -871,9 +934,11 @@ public class DzsDatabase implements Closeable {
         final String castMin;
         final String castMax;
         final String poloha;
+        final String kmkInt;
 
         RoColumns(String superZId, String superDId, String tudu, String vyhybka,
-                  String vyhybkaFallback, String castMin, String castMax, String poloha) {
+                  String vyhybkaFallback, String castMin, String castMax, String poloha,
+                  String kmkInt) {
             this.superZId = superZId;
             this.superDId = superDId;
             this.tudu = tudu;
@@ -882,6 +947,7 @@ public class DzsDatabase implements Closeable {
             this.castMin = castMin;
             this.castMax = castMax;
             this.poloha = poloha;
+            this.kmkInt = kmkInt;
         }
 
         /** Vyřadí řádky s prázdnou POLOHOU nebo textem „NULL“. */
@@ -926,7 +992,8 @@ public class DzsDatabase implements Closeable {
                     vyhybkaFallback,
                     findOptionalColumn(cols, "CAST_MIN", "CASTMIN"),
                     findOptionalColumn(cols, "CAST_MAX", "CASTMAX"),
-                    findOptionalColumn(cols, "POLOHA")
+                    findOptionalColumn(cols, "POLOHA"),
+                    findOptionalColumn(cols, "KMK_INT", "KM_INT", "KILOMETR")
             );
         }
     }
