@@ -147,8 +147,14 @@ APK: `app/build/outputs/apk/debug/rfid_go_gps.apk`
 
 ### CI (GitHub Actions)
 
-Při pushi nebo PR na `main` se automaticky sestaví debug APK (workflow [`.github/workflows/android.yml`](.github/workflows/android.yml)).
-Výsledné APK je k dispozici jako artefakt **rfid-go-gps-debug-apk**.
+Po mergi PR do `main` workflow [`.github/workflows/android.yml`](.github/workflows/android.yml):
+
+1. zvýší verzi v `version.properties`,
+2. sestaví debug APK (`rfid_go_gps_<verze>.apk`),
+3. nahraje artefakt v Actions,
+4. vytvoří **GitHub Release** s APK ke stažení (záložka *Releases*).
+
+U otevřeného PR se APK sestaví bez zvýšení verze (artefakt u daného běhu workflow).
 
 ---
 
