@@ -125,7 +125,7 @@ Pro každou výhybku v RO tabulce se při indexaci určí souřadnice:
 
 1. RO tabulka se načte **jednou** (společně s RO indexem ve fázi 2A) – druhý SQL sken se neprovádí.
 2. Pokud existují `KMK_INT` (RO) a `KM_INT` (GPS), do dočasné tabulky se vloží jen trojice `(SUPER_Z_ID, SUPER_D_ID, KMK_INT)` z RO řádků (typicky stovky až tisíce), ne celý kilometrický průběh trati (miliony GPS řádků).
-3. GPS dotaz spáruje jen tyto konkrétní trojice s `KM_INT` v paměti.
+3. GPS dotaz nejprve spáruje přesnou shodu `KM_INT = KMK_INT`; pro chybějící trojice doplní desetinné hodnoty přes interval `[km−0,5, km+0,5)` (jen pro neúspěšné trojice, ne přes `ROUND` na celé GPS tabulce).
 4. Bez kilometrických sloupců se použije záložní bod z GPS indexu (jeden na pár ID).
 5. Sestavení mapy `TUDU → výhybka → souřadnice` probíhá čistě v paměti z již načtených RO řádků.
 
