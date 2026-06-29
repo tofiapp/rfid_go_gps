@@ -50,15 +50,19 @@
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnGpsReloadLocation"
-                        style="@style/Widget.Material3.Button.TextButton"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:minHeight="36dp"
-                        android:paddingStart="8dp"
-                        android:paddingEnd="8dp"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
                         android:text="@string/gps_reload_location"
+                        android:textColor="@color/primary"
                         android:textSize="12sp"
-                        android:visibility="gone"/>
+                        android:visibility="gone"
+                        app:backgroundTint="@android:color/transparent"
+                        app:strokeColor="@color/primary"
+                        app:strokeWidth="1dp"/>
                 </LinearLayout>
 
                 <LinearLayout
