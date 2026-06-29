@@ -4,6 +4,7 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 
 import java.io.Closeable;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -15,6 +16,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 
 /**
  * SQLite zdroj TUDU / výhybek z tabulek DZS_SUPERTRA_GPS_KM a DZS_SUPER_RO_TPI.
@@ -28,6 +30,11 @@ public class DzsDatabase implements Closeable {
 
     public static final String TABLE_GPS_KM = "DZS_SUPERTRA_GPS_KM";
     public static final String TABLE_RO_TPI = "DZS_SUPER_RO_TPI";
+
+    /** Průběh otevírání databáze (fáze + odhad procent 0–100, nebo -1). */
+    public interface OpenProgressListener {
+        void onProgress(String phase, int percent);
+    }
 
     public static class GpsMatch {
         public final String superZId;
@@ -72,11 +79,75 @@ public class DzsDatabase implements Closeable {
         }
     }
 
+    /**
+     * Prostorová mřížka pro rychlé vyhledání nejbližšího bodu bez O(n) průchodu celým seznamem.
+     * Velikost buňky ~0,005° (~500 m) – při hledání se postupně rozšiřuje okolí.
+     */
+    private static final class SpatialGrid {
+        private static final double CELL_DEG = 0.005;
+        private static final int MAX_RING = 40;
+
+        private final Map<Long, List<GpsIndexEntry>> cells = new HashMap<>();
+        private final List<GpsIndexEntry> allPoints;
+
+        SpatialGrid(List<GpsIndexEntry> points) {
+            this.allPoints = points;
+            for (GpsIndexEntry gps : points) {
+                cells.computeIfAbsent(cellKey(gps.latitude, gps.longitude), k -> new ArrayList<>())
+                        .add(gps);
+            }
+        }
+
+        void forEachNearest(double latitude, double longitude, Consumer<GpsIndexEntry> consumer) {
+            if (allPoints.isEmpty()) return;
+            int latCell = (int) Math.floor(latitude / CELL_DEG);
+            int lonCell = (int) Math.floor(longitude / CELL_DEG);
+            double bestDistSq = Double.MAX_VALUE;
+            double cosLat = Math.cos(Math.toRadians(latitude));
+
+            for (int ring = 0; ring <= MAX_RING; ring++) {
+                for (int dLat = -ring; dLat <= ring; dLat++) {
+                    for (int dLon = -ring; dLon <= ring; dLon++) {
+                        if (ring > 0 && Math.abs(dLat) < ring && Math.abs(dLon) < ring) {
+                            continue;
+                        }
+                        long key = packCell(latCell + dLat, lonCell + dLon);
+                        List<GpsIndexEntry> bucket = cells.get(key);
+                        if (bucket == null) continue;
+                        for (GpsIndexEntry gps : bucket) {
+                            double dLatM = gps.latitude - latitude;
+                            double dLonM = (gps.longitude - longitude) * cosLat;
+                            double distSq = dLatM * dLatM + dLonM * dLonM;
+                            if (distSq < bestDistSq) bestDistSq = distSq;
+                            consumer.accept(gps);
+                        }
+                    }
+                }
+                if (bestDistSq < Double.MAX_VALUE) {
+                    double ringBoundDeg = (ring + 1) * CELL_DEG;
+                    if (bestDistSq < ringBoundDeg * ringBoundDeg) return;
+                }
+            }
+            if (bestDistSq < Double.MAX_VALUE) return;
+            for (GpsIndexEntry gps : allPoints) consumer.accept(gps);
+        }
+
+        private static long cellKey(double latitude, double longitude) {
+            return packCell((int) Math.floor(latitude / CELL_DEG),
+                    (int) Math.floor(longitude / CELL_DEG));
+        }
+
+        private static long packCell(int latCell, int lonCell) {
+            return ((long) latCell << 32) | (lonCell & 0xFFFFFFFFL);
+        }
+    }
+
     private final SQLiteDatabase db;
     private final GpsColumns gpsColumns;
     private final RoColumns roColumns;
     private final Map<String, RoIndexEntry> roByPairKey;
     private final List<GpsIndexEntry> gpsIndex;
+    private final SpatialGrid spatialGrid;
 
     private DzsDatabase(SQLiteDatabase db, GpsColumns gpsColumns, RoColumns roColumns,
                         Map<String, RoIndexEntry> roByPairKey, List<GpsIndexEntry> gpsIndex) {
@@ -85,21 +156,94 @@ public class DzsDatabase implements Closeable {
         this.roColumns = roColumns;
         this.roByPairKey = roByPairKey;
         this.gpsIndex = gpsIndex;
+        this.spatialGrid = new SpatialGrid(gpsIndex);
     }
 
     public static DzsDatabase open(String path) throws Exception {
+        return open(path, null, null);
+    }
+
+    public static DzsDatabase open(String path, File cacheDir, OpenProgressListener listener) throws Exception {
+        File dbFile = new File(path);
         SQLiteDatabase db = SQLiteDatabase.openDatabase(
                 path, null, SQLiteDatabase.OPEN_READONLY);
         try {
+            applyReadPragmas(db);
+            report(listener, "Kontrola schématu", 5);
             GpsColumns gpsColumns = GpsColumns.resolve(db, TABLE_GPS_KM);
             RoColumns roColumns = RoColumns.resolve(db, TABLE_RO_TPI);
-            Map<String, RoIndexEntry> roByPairKey = buildRoIndex(db, roColumns);
-            List<GpsIndexEntry> gpsIndex = buildGpsIndex(db, gpsColumns, roByPairKey);
+
+            DzsIndexCache.LoadedIndex cached = null;
+            if (cacheDir != null) {
+                report(listener, "Načítám cache indexu", 10);
+                cached = DzsIndexCache.tryLoad(dbFile, new File(cacheDir, "dzs_index"));
+            }
+
+            Map<String, RoIndexEntry> roByPairKey;
+            List<GpsIndexEntry> gpsIndex;
+            if (cached != null) {
+                roByPairKey = convertRoIndex(cached.roByPairKey);
+                gpsIndex = convertGpsIndex(cached.gpsIndex);
+                report(listener, "Cache indexu načtena", 90);
+            } else {
+                report(listener, "Indexuji výhybky", 20);
+                roByPairKey = buildRoIndex(db, roColumns);
+                report(listener, "Indexuji GPS body", 45);
+                gpsIndex = buildGpsIndex(db, gpsColumns, roColumns, roByPairKey);
+                report(listener, "Ukládám cache", 85);
+                if (cacheDir != null) {
+                    saveIndexCache(dbFile, cacheDir, roByPairKey, gpsIndex);
+                }
+            }
+            report(listener, "Hotovo", 100);
             return new DzsDatabase(db, gpsColumns, roColumns, roByPairKey, gpsIndex);
         } catch (Exception e) {
             db.close();
             throw e;
         }
+    }
+
+    private static void applyReadPragmas(SQLiteDatabase db) {
+        try {
+            db.execSQL("PRAGMA cache_size = -64000");
+            db.execSQL("PRAGMA temp_store = MEMORY");
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static void report(OpenProgressListener listener, String phase, int percent) {
+        if (listener != null) listener.onProgress(phase, percent);
+    }
+
+    private static Map<String, RoIndexEntry> convertRoIndex(Map<String, DzsIndexCache.RoEntry> cached) {
+        Map<String, RoIndexEntry> map = new HashMap<>(cached.size());
+        for (Map.Entry<String, DzsIndexCache.RoEntry> e : cached.entrySet()) {
+            map.put(e.getKey(), new RoIndexEntry(e.getValue().tudu, e.getValue().vyhybka));
+        }
+        return map;
+    }
+
+    private static List<GpsIndexEntry> convertGpsIndex(List<DzsIndexCache.GpsEntry> cached) {
+        List<GpsIndexEntry> list = new ArrayList<>(cached.size());
+        for (DzsIndexCache.GpsEntry e : cached) {
+            list.add(new GpsIndexEntry(e.pairKey, e.latitude, e.longitude));
+        }
+        return list;
+    }
+
+    private static void saveIndexCache(File dbFile, File cacheDir,
+                                       Map<String, RoIndexEntry> roByPairKey,
+                                       List<GpsIndexEntry> gpsIndex) {
+        Map<String, DzsIndexCache.RoEntry> roOut = new HashMap<>(roByPairKey.size());
+        for (Map.Entry<String, RoIndexEntry> e : roByPairKey.entrySet()) {
+            RoIndexEntry ro = e.getValue();
+            roOut.put(e.getKey(), new DzsIndexCache.RoEntry(ro.tudu, ro.vyhybka));
+        }
+        List<DzsIndexCache.GpsEntry> gpsOut = new ArrayList<>(gpsIndex.size());
+        for (GpsIndexEntry gps : gpsIndex) {
+            gpsOut.add(new DzsIndexCache.GpsEntry(gps.pairKey, gps.latitude, gps.longitude));
+        }
+        DzsIndexCache.save(dbFile, new File(cacheDir, "dzs_index"), roOut, gpsOut);
     }
 
     /** Počet unikátních TUDU kódů v indexu (bez plného načtení výhybek). */
@@ -177,29 +321,30 @@ public class DzsDatabase implements Closeable {
     public GpsMatch findNearest(double latitude, double longitude) {
         if (gpsIndex.isEmpty()) return null;
 
-        GpsIndexEntry bestGps = null;
-        RoIndexEntry bestRo = null;
-        double bestDistSq = Double.MAX_VALUE;
+        final GpsIndexEntry[] bestGps = {null};
+        final RoIndexEntry[] bestRo = {null};
+        final double[] bestDistSq = {Double.MAX_VALUE};
         double cosLat = Math.cos(Math.toRadians(latitude));
 
-        for (GpsIndexEntry gps : gpsIndex) {
+        spatialGrid.forEachNearest(latitude, longitude, gps -> {
             RoIndexEntry ro = roByPairKey.get(gps.pairKey);
-            if (ro == null) continue;
+            if (ro == null) return;
             double dLat = gps.latitude - latitude;
             double dLon = (gps.longitude - longitude) * cosLat;
             double distSq = dLat * dLat + dLon * dLon;
-            if (distSq < bestDistSq) {
-                bestDistSq = distSq;
-                bestGps = gps;
-                bestRo = ro;
+            if (distSq < bestDistSq[0]) {
+                bestDistSq[0] = distSq;
+                bestGps[0] = gps;
+                bestRo[0] = ro;
             }
-        }
-        if (bestGps == null || bestRo == null) return null;
+        });
 
-        String[] ids = splitPairKey(bestGps.pairKey);
-        double dist = haversineM(latitude, longitude, bestGps.latitude, bestGps.longitude);
-        return new GpsMatch(ids[0], ids[1], bestRo.tudu, bestRo.vyhybka,
-                bestGps.latitude, bestGps.longitude, dist);
+        if (bestGps[0] == null || bestRo[0] == null) return null;
+
+        String[] ids = splitPairKey(bestGps[0].pairKey);
+        double dist = haversineM(latitude, longitude, bestGps[0].latitude, bestGps[0].longitude);
+        return new GpsMatch(ids[0], ids[1], bestRo[0].tudu, bestRo[0].vyhybka,
+                bestGps[0].latitude, bestGps[0].longitude, dist);
     }
 
     /**
@@ -271,8 +416,57 @@ public class DzsDatabase implements Closeable {
     }
 
     private static List<GpsIndexEntry> buildGpsIndex(SQLiteDatabase db, GpsColumns gpsColumns,
+                                                     RoColumns roColumns,
                                                      Map<String, RoIndexEntry> roByPairKey) {
-        // Jeden reprezentativní bod na SUPER_Z_ID|SUPER_D_ID – GPS tabulka má mnoho km bodů na výhybku.
+        List<GpsIndexEntry> fromSql = buildGpsIndexSql(db, gpsColumns, roColumns);
+        if (fromSql != null) return fromSql;
+        return buildGpsIndexScan(db, gpsColumns, roByPairKey);
+    }
+
+    /**
+     * SQL deduplikace: jeden bod na SUPER_Z_ID|SUPER_D_ID, jen páry přítomné v RO_TPI.
+     * SQLite zpracuje miliony řádků rychleji než přenos přes JNI do Javy.
+     */
+    private static List<GpsIndexEntry> buildGpsIndexSql(SQLiteDatabase db, GpsColumns gpsColumns,
+                                                        RoColumns roColumns) {
+        String latExpr = gpsColumns.latitudeExpr("g");
+        String lonExpr = gpsColumns.longitudeExpr("g");
+        String sql = "SELECT g." + gpsColumns.superZId + ", g." + gpsColumns.superDId + ", "
+                + latExpr + ", " + lonExpr
+                + " FROM " + TABLE_GPS_KM + " g"
+                + " INNER JOIN ("
+                + "   SELECT " + gpsColumns.superZId + ", " + gpsColumns.superDId
+                + ", MIN(rowid) AS rid"
+                + "   FROM " + TABLE_GPS_KM
+                + "   GROUP BY " + gpsColumns.superZId + ", " + gpsColumns.superDId
+                + " ) agg ON g.rowid = agg.rid"
+                + " INNER JOIN ("
+                + "   SELECT DISTINCT " + roColumns.superZId + ", " + roColumns.superDId
+                + "   FROM " + TABLE_RO_TPI
+                + " ) ro ON g." + gpsColumns.superZId + " = ro." + roColumns.superZId
+                + " AND g." + gpsColumns.superDId + " = ro." + roColumns.superDId;
+
+        List<GpsIndexEntry> out = new ArrayList<>();
+        try (Cursor c = db.rawQuery(sql, null)) {
+            while (c.moveToNext()) {
+                String superZId = readId(c, 0);
+                String superDId = readId(c, 1);
+                Double lat = readDouble(c, 2);
+                Double lon = readDouble(c, 3);
+                if (superZId == null || superDId == null || lat == null || lon == null) {
+                    continue;
+                }
+                out.add(new GpsIndexEntry(pairKey(superZId, superDId), lat, lon));
+            }
+            return out;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    /** Záložní postup – plný sken v Javě (starší chování). */
+    private static List<GpsIndexEntry> buildGpsIndexScan(SQLiteDatabase db, GpsColumns gpsColumns,
+                                                       Map<String, RoIndexEntry> roByPairKey) {
         Map<String, GpsIndexEntry> byPairKey = new HashMap<>();
         String sql = "SELECT " + gpsColumns.superZId + ", " + gpsColumns.superDId + ", "
                 + gpsColumns.latitude + ", " + gpsColumns.longitude
