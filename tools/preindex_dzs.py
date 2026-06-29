@@ -226,68 +226,75 @@ def triple_key(super_z_id: str, super_d_id: str, km: int) -> str:
     return f"{super_z_id}|{super_d_id}|{km}"
 
 
-def collect_triple_keys(ro_rows: List[RoVyhybkaRow]) -> set:
-    keys = set()
-    for _, _, super_z, super_d, kmk in ro_rows:
-        if kmk is not None:
-            keys.add(triple_key(super_z, super_d, kmk))
-    return keys
-
-
-def populate_km_triples_temp(conn: sqlite3.Connection, ro_rows: List[RoVyhybkaRow],
-                             only_keys: Optional[set] = None) -> None:
-    conn.execute("CREATE TEMP TABLE IF NOT EXISTS _dzs_ro_km_triples ("
-                 "super_z_id TEXT NOT NULL, super_d_id TEXT NOT NULL, km_int INTEGER NOT NULL,"
-                 "PRIMARY KEY (super_z_id, super_d_id, km_int))")
-    conn.execute("DELETE FROM _dzs_ro_km_triples")
-    triples = []
+def collect_km_by_pair(ro_rows: List[RoVyhybkaRow]) -> Dict[str, set]:
+    km_by_pair: Dict[str, set] = {}
     for _, _, super_z, super_d, kmk in ro_rows:
         if kmk is None:
             continue
-        key = triple_key(super_z, super_d, kmk)
-        if only_keys is not None and key not in only_keys:
-            continue
-        triples.append((super_z, super_d, kmk))
-    if triples:
+        pair = pair_key(super_z, super_d)
+        km_by_pair.setdefault(pair, set()).add(kmk)
+    return km_by_pair
+
+
+def populate_km_pairs_temp(conn: sqlite3.Connection, pair_keys: set) -> None:
+    conn.execute("CREATE TEMP TABLE IF NOT EXISTS _dzs_ro_km_pairs ("
+                 "super_z_id TEXT NOT NULL, super_d_id TEXT NOT NULL,"
+                 "PRIMARY KEY (super_z_id, super_d_id))")
+    conn.execute("DELETE FROM _dzs_ro_km_pairs")
+    rows = []
+    for key in pair_keys:
+        super_z, super_d = key.split("|", 1)
+        rows.append((super_z, super_d))
+    if rows:
         conn.executemany(
-            "INSERT OR IGNORE INTO _dzs_ro_km_triples (super_z_id, super_d_id, km_int) VALUES (?, ?, ?)",
-            triples,
+            "INSERT OR IGNORE INTO _dzs_ro_km_pairs (super_z_id, super_d_id) VALUES (?, ?)",
+            rows,
         )
 
 
-def query_gps_triple_join(conn: sqlite3.Connection, cols: dict,
-                          rounded_km: bool) -> Dict[str, Tuple[float, float]]:
+def load_gps_km_points_by_pair(conn: sqlite3.Connection, cols: dict,
+                               pair_keys: set) -> Dict[str, List[Tuple[float, float, float]]]:
+    if not pair_keys:
+        return {}
+    populate_km_pairs_temp(conn, pair_keys)
     km_col = cols["gps_km_int"]
     lat_expr = f"CAST(REPLACE(g.{cols['gps_lat']}, ',', '.') AS REAL)"
     lon_expr = f"CAST(REPLACE(g.{cols['gps_lon']}, ',', '.') AS REAL)"
     km_expr = km_int_expr("g", km_col)
-    if rounded_km:
-        km_join = f"({km_expr} >= (rt.km_int - 0.5) AND {km_expr} < (rt.km_int + 0.5))"
-    else:
-        km_join = f"{km_expr} = rt.km_int"
     sql = f"""
-        SELECT g.{cols['gps_super_z']}, g.{cols['gps_super_d']}, rt.km_int, {lat_expr}, {lon_expr}
+        SELECT g.{cols['gps_super_z']}, g.{cols['gps_super_d']}, {km_expr}, {lat_expr}, {lon_expr}
         FROM {TABLE_GPS} g
-        INNER JOIN _dzs_ro_km_triples rt
-          ON g.{cols['gps_super_z']} = rt.super_z_id
-         AND g.{cols['gps_super_d']} = rt.super_d_id
-         AND {km_join}
+        INNER JOIN _dzs_ro_km_pairs rp
+          ON g.{cols['gps_super_z']} = rp.super_z_id
+         AND g.{cols['gps_super_d']} = rp.super_d_id
     """
-    out: Dict[str, Tuple[float, float]] = {}
+    by_pair: Dict[str, List[Tuple[float, float, float]]] = {}
     try:
         for row in conn.execute(sql):
             super_z = normalize_id(row[0])
             super_d = normalize_id(row[1])
-            km = read_int(row[2])
+            km = read_double(row[2])
             lat = read_double(row[3])
             lon = read_double(row[4])
             if not super_z or not super_d or km is None or lat is None or lon is None:
                 continue
-            key = triple_key(super_z, super_d, km)
-            out.setdefault(key, (lat, lon))
+            by_pair.setdefault(pair_key(super_z, super_d), []).append((km, lat, lon))
     except sqlite3.Error:
         return {}
-    return out
+    return by_pair
+
+
+def match_km_coordinates(points: List[Tuple[float, float, float]], kmk_int: int) -> Optional[Tuple[float, float]]:
+    km_target = float(kmk_int)
+    for km, lat, lon in points:
+        if km == km_target:
+            return lat, lon
+    lo = kmk_int - 0.5
+    hi = kmk_int + 0.5
+    for km, lat, lon in points:
+        if lo <= km < hi:
+            return lat, lon
+    return None
 
 
 def build_gps_by_triple_key(conn: sqlite3.Connection, cols: dict,
@@ -296,21 +303,24 @@ def build_gps_by_triple_key(conn: sqlite3.Connection, cols: dict,
     if not km_col or not ro_rows:
         return {}
 
-    populate_km_triples_temp(conn, ro_rows, None)
-    out = query_gps_triple_join(conn, cols, rounded_km=False)
+    km_by_pair = collect_km_by_pair(ro_rows)
+    if not km_by_pair:
+        return {}
 
-    needed = collect_triple_keys(ro_rows)
-    if len(out) >= len(needed):
-        return out
+    gps_by_pair = load_gps_km_points_by_pair(conn, cols, set(km_by_pair.keys()))
+    if not gps_by_pair:
+        return {}
 
-    missing = needed - set(out.keys())
-    if not missing:
-        return out
-
-    populate_km_triples_temp(conn, ro_rows, missing)
-    rounded = query_gps_triple_join(conn, cols, rounded_km=True)
-    for key, coords in rounded.items():
-        out.setdefault(key, coords)
+    out: Dict[str, Tuple[float, float]] = {}
+    for pair, km_set in km_by_pair.items():
+        points = gps_by_pair.get(pair)
+        if not points:
+            continue
+        super_z, super_d = pair.split("|", 1)
+        for kmk in km_set:
+            coords = match_km_coordinates(points, kmk)
+            if coords is not None:
+                out[triple_key(super_z, super_d, kmk)] = coords
     return out
 
 
