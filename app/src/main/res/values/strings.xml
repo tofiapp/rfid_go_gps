@@ -55,4 +55,14 @@
     <string name="gps_test_enabled_toast">Testovací režim – vyberte simulovanou polohu</string>
     <string name="gps_test_no_gps_point">Databáze neobsahuje GPS body</string>
     <string name="gps_test_status">testovací režim</string>
+    <string name="tudu_mode_label">Režim výběru TUDU</string>
+    <string name="tudu_mode_gps">GPS</string>
+    <string name="tudu_mode_manual">Ručně</string>
+    <string name="tudu_mode_gps_hint">TUDU a výhybka se doplní automaticky podle GPS. Při výběru TUDU se zobrazí 10 nejbližších.</string>
+    <string name="tudu_mode_manual_hint">Vyberte TUDU a výhybku ručně ze seznamu v databázi.</string>
+    <string name="tudu_picker_nearby_title">Nejbližší TUDU (10)</string>
+    <string name="tudu_picker_no_gps">Pro výběr nejbližších TUDU je potřeba GPS poloha</string>
+    <string name="tudu_loading_list">Načítám seznam TUDU…</string>
+    <string name="db_loaded_gps">%1$s  •  TUDU: %2$d (GPS režim)</string>
+    <string name="db_loaded_manual">%1$s  •  TUDU: %2$d</string>
 </resources>
