@@ -208,7 +208,9 @@ public class DzsDatabase implements Closeable {
     private final List<GpsIndexEntry> gpsIndex;
     private final Map<String, Map<Integer, VyhybkaGpsCoords>> vyhybkaGpsByTudu;
     private final List<VyhybkaGpsIndexEntry> vyhybkaGpsFlat;
+    private final List<GpsIndexEntry> vyhybkaGridPoints;
     private volatile SpatialGrid spatialGrid;
+    private volatile SpatialGrid vyhybkaSpatialGrid;
 
     private DzsDatabase(SQLiteDatabase db, GpsColumns gpsColumns, RoColumns roColumns,
                         Map<String, RoIndexEntry> roByPairKey, List<GpsIndexEntry> gpsIndex,
@@ -220,6 +222,7 @@ public class DzsDatabase implements Closeable {
         this.gpsIndex = gpsIndex;
         this.vyhybkaGpsByTudu = vyhybkaGpsByTudu;
         this.vyhybkaGpsFlat = buildVyhybkaGpsFlat(vyhybkaGpsByTudu);
+        this.vyhybkaGridPoints = buildVyhybkaGridPoints(vyhybkaGpsFlat);
     }
 
     private SpatialGrid spatialGrid() {
@@ -236,10 +239,27 @@ public class DzsDatabase implements Closeable {
         return grid;
     }
 
-    /** Sestaví prostorový index (volat z IO vlákna před návratem do UI). */
+    private SpatialGrid vyhybkaSpatialGrid() {
+        SpatialGrid grid = vyhybkaSpatialGrid;
+        if (grid == null) {
+            synchronized (this) {
+                grid = vyhybkaSpatialGrid;
+                if (grid == null) {
+                    grid = new SpatialGrid(vyhybkaGridPoints);
+                    vyhybkaSpatialGrid = grid;
+                }
+            }
+        }
+        return grid;
+    }
+
+    /** Sestaví prostorové indexy (volat z IO vlákna před návratem do UI). */
     void ensureSpatialIndex(OpenProgressListener listener) {
         report(listener, "Připravuji vyhledávání", 95);
         spatialGrid();
+        if (!vyhybkaGpsFlat.isEmpty()) {
+            vyhybkaSpatialGrid();
+        }
         report(listener, "Hotovo", 100);
     }
 
@@ -503,18 +523,32 @@ public class DzsDatabase implements Closeable {
     private GpsMatch findNearestVyhybka(double latitude, double longitude) {
         if (vyhybkaGpsFlat.isEmpty()) return null;
 
-        VyhybkaGpsIndexEntry best = null;
-        double bestDist = Double.MAX_VALUE;
-        for (VyhybkaGpsIndexEntry entry : vyhybkaGpsFlat) {
-            double dist = haversineM(latitude, longitude, entry.latitude, entry.longitude);
-            if (dist < bestDist) {
-                bestDist = dist;
-                best = entry;
+        final VyhybkaGpsIndexEntry[] best = {null};
+        final double[] bestDist = {Double.MAX_VALUE};
+        double cosLat = Math.cos(Math.toRadians(latitude));
+
+        vyhybkaSpatialGrid().forEachNearest(latitude, longitude, gps -> {
+            int idx;
+            try {
+                idx = Integer.parseInt(gps.pairKey);
+            } catch (NumberFormatException ignored) {
+                return;
             }
-        }
-        if (best == null) return null;
-        return new GpsMatch("", "", best.tudu, best.vyhybka,
-                best.latitude, best.longitude, bestDist);
+            if (idx < 0 || idx >= vyhybkaGpsFlat.size()) return;
+            VyhybkaGpsIndexEntry entry = vyhybkaGpsFlat.get(idx);
+            double dLat = entry.latitude - latitude;
+            double dLon = (entry.longitude - longitude) * cosLat;
+            double distSq = dLat * dLat + dLon * dLon;
+            if (distSq < bestDist[0]) {
+                bestDist[0] = distSq;
+                best[0] = entry;
+            }
+        });
+
+        if (best[0] == null) return null;
+        double dist = haversineM(latitude, longitude, best[0].latitude, best[0].longitude);
+        return new GpsMatch("", "", best[0].tudu, best[0].vyhybka,
+                best[0].latitude, best[0].longitude, dist);
     }
 
     private GpsMatch findNearestPairLegacy(double latitude, double longitude) {
@@ -561,13 +595,31 @@ public class DzsDatabase implements Closeable {
     private List<GpsMatch> findNearestDistinctTuduFromVyhybka(double latitude, double longitude,
                                                               int limit) {
         Map<String, GpsMatch> bestByTudu = new HashMap<>();
-        for (VyhybkaGpsIndexEntry entry : vyhybkaGpsFlat) {
-            double dist = haversineM(latitude, longitude, entry.latitude, entry.longitude);
+        double cosLat = Math.cos(Math.toRadians(latitude));
+
+        vyhybkaSpatialGrid().forEachNearest(latitude, longitude, gps -> {
+            int idx;
+            try {
+                idx = Integer.parseInt(gps.pairKey);
+            } catch (NumberFormatException ignored) {
+                return;
+            }
+            if (idx < 0 || idx >= vyhybkaGpsFlat.size()) return;
+            VyhybkaGpsIndexEntry entry = vyhybkaGpsFlat.get(idx);
+            double dLat = entry.latitude - latitude;
+            double dLon = (entry.longitude - longitude) * cosLat;
+            double distSq = dLat * dLat + dLon * dLon;
+
             GpsMatch existing = bestByTudu.get(entry.tudu);
-            if (existing != null && existing.distanceM <= dist) continue;
+            if (existing != null) {
+                double existingDistSq = approximateDistSq(
+                        latitude, longitude, existing.latitude, existing.longitude, cosLat);
+                if (distSq >= existingDistSq) return;
+            }
+            double dist = haversineM(latitude, longitude, entry.latitude, entry.longitude);
             bestByTudu.put(entry.tudu, new GpsMatch("", "", entry.tudu, entry.vyhybka,
                     entry.latitude, entry.longitude, dist));
-        }
+        });
 
         List<GpsMatch> sorted = new ArrayList<>(bestByTudu.values());
         sorted.sort(Comparator.comparingDouble(m -> m.distanceM));
@@ -751,6 +803,19 @@ public class DzsDatabase implements Closeable {
         return list;
     }
 
+    /** Body pro prostorovou mřížku výhybek – pairKey = index v {@link #vyhybkaGpsFlat}. */
+    private static List<GpsIndexEntry> buildVyhybkaGridPoints(List<VyhybkaGpsIndexEntry> vyhybkaGpsFlat) {
+        if (vyhybkaGpsFlat == null || vyhybkaGpsFlat.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<GpsIndexEntry> points = new ArrayList<>(vyhybkaGpsFlat.size());
+        for (int i = 0; i < vyhybkaGpsFlat.size(); i++) {
+            VyhybkaGpsIndexEntry e = vyhybkaGpsFlat.get(i);
+            points.add(new GpsIndexEntry(String.valueOf(i), e.latitude, e.longitude));
+        }
+        return points;
+    }
+
     /**
      * GPS souřadnice po SUPER_Z_ID|SUPER_D_ID|KMK_INT – cílený dotaz na každou trojici
      * (filtr ID + úzké km okno), ne načtení celého kilometrického průběhu úseku.
@@ -769,6 +834,13 @@ public class DzsDatabase implements Closeable {
         String sqlRange = "SELECT " + latExpr + ", " + lonExpr + " FROM " + TABLE_GPS_KM
                 + " WHERE " + gpsColumns.superZId + " = ? AND " + gpsColumns.superDId + " = ?"
                 + " AND " + kmExpr + " >= ? AND " + kmExpr + " < ? LIMIT 1";
+        String sqlRound = "SELECT " + latExpr + ", " + lonExpr + " FROM " + TABLE_GPS_KM
+                + " WHERE " + gpsColumns.superZId + " = ? AND " + gpsColumns.superDId + " = ?"
+                + " AND CAST(ROUND(" + kmExpr + ") AS INTEGER) = ? LIMIT 1";
+        String sqlNearest = "SELECT " + latExpr + ", " + lonExpr + " FROM " + TABLE_GPS_KM
+                + " WHERE " + gpsColumns.superZId + " = ? AND " + gpsColumns.superDId + " = ?"
+                + " AND " + kmExpr + " IS NOT NULL"
+                + " ORDER BY ABS(" + kmExpr + " - ?) LIMIT 1";
 
         Map<String, VyhybkaGpsCoords> result = new HashMap<>();
         db.beginTransaction();
@@ -784,6 +856,12 @@ public class DzsDatabase implements Closeable {
                     if (coords == null) {
                         coords = queryTripleGps(db, sqlRange, ids[0], ids[1],
                                 String.valueOf(kmkInt - 0.5), String.valueOf(kmkInt + 0.5));
+                    }
+                    if (coords == null) {
+                        coords = queryTripleGps(db, sqlRound, ids[0], ids[1], String.valueOf(kmkInt));
+                    }
+                    if (coords == null) {
+                        coords = queryTripleGps(db, sqlNearest, ids[0], ids[1], String.valueOf(kmkInt));
                     }
                     if (coords != null) {
                         result.put(triple, coords);
@@ -1138,7 +1216,7 @@ public class DzsDatabase implements Closeable {
             // DZS_SUPERTRA_GPS_KM používá primárně LAT / LON (někdy LAN místo LAT)
             String lat = findRequiredColumn(cols, "LAT", "LAN", "LATITUDE", "GPS_LAT", "SIRKA", "GPS_SIRKA", "Y");
             String lon = findRequiredColumn(cols, "LON", "LONGITUDE", "LNG", "GPS_LON", "DELKA", "GPS_DELKA", "X");
-            String kmInt = findOptionalColumn(cols, "KM_INT", "KM", "KILOMETR");
+            String kmInt = findOptionalColumn(cols, "KM_INT", "KM", "KILOMETR", "KMK");
             return new GpsColumns(superZId, superDId, lat, lon, kmInt);
         }
     }
@@ -1217,7 +1295,7 @@ public class DzsDatabase implements Closeable {
                     findOptionalColumn(cols, "CAST_MIN", "CASTMIN"),
                     findOptionalColumn(cols, "CAST_MAX", "CASTMAX"),
                     findOptionalColumn(cols, "POLOHA"),
-                    findOptionalColumn(cols, "KMK_INT", "KM_INT", "KILOMETR")
+                    findOptionalColumn(cols, "KMK_INT", "KMK", "KM_INT", "KM", "KILOMETR")
             );
         }
     }

@@ -157,8 +157,8 @@ def resolve_columns(conn: sqlite3.Connection) -> dict:
         "ro_vyhybka": vyhybka,
         "ro_vyhybka_fallback": vyhybka_fallback,
         "ro_poloha": find_column(ro_cols, ("POLOHA",), required=False),
-        "gps_km_int": find_column(gps_cols, ("KM_INT", "KM", "KILOMETR"), required=False),
-        "ro_kmk_int": find_column(ro_cols, ("KMK_INT", "KM_INT", "KILOMETR"), required=False),
+        "gps_km_int": find_column(gps_cols, ("KM_INT", "KM", "KILOMETR", "KMK"), required=False),
+        "ro_kmk_int": find_column(ro_cols, ("KMK_INT", "KMK", "KM_INT", "KM", "KILOMETR"), required=False),
     }
 
 
@@ -279,6 +279,17 @@ def build_gps_by_triple_key(conn: sqlite3.Connection, cols: dict,
         f" WHERE {cols['gps_super_z']} = ? AND {cols['gps_super_d']} = ?"
         f" AND {km_expr} >= ? AND {km_expr} < ? LIMIT 1"
     )
+    sql_round = (
+        f"SELECT {lat_expr}, {lon_expr} FROM {TABLE_GPS}"
+        f" WHERE {cols['gps_super_z']} = ? AND {cols['gps_super_d']} = ?"
+        f" AND CAST(ROUND({km_expr}) AS INTEGER) = ? LIMIT 1"
+    )
+    sql_nearest = (
+        f"SELECT {lat_expr}, {lon_expr} FROM {TABLE_GPS}"
+        f" WHERE {cols['gps_super_z']} = ? AND {cols['gps_super_d']} = ?"
+        f" AND {km_expr} IS NOT NULL"
+        f" ORDER BY ABS({km_expr} - ?) LIMIT 1"
+    )
 
     out: Dict[str, Tuple[float, float]] = {}
     for pair, km_set in km_by_pair.items():
@@ -291,6 +302,10 @@ def build_gps_by_triple_key(conn: sqlite3.Connection, cols: dict,
             if coords is None:
                 coords = query_triple_gps(
                     conn, cols, sql_range, super_z, super_d, str(kmk - 0.5), str(kmk + 0.5))
+            if coords is None:
+                coords = query_triple_gps(conn, cols, sql_round, super_z, super_d, str(kmk))
+            if coords is None:
+                coords = query_triple_gps(conn, cols, sql_nearest, super_z, super_d, str(kmk))
             if coords is not None:
                 out[key] = coords
     return out
@@ -302,25 +317,29 @@ def build_vyhybka_gps_index(conn: sqlite3.Connection, cols: dict,
     gps_by_pair = {key: (lat, lon) for key, lat, lon in gps}
     gps_by_triple = build_gps_by_triple_key(conn, cols, ro_rows)
 
-    seen: set = set()
-    out: List[Tuple[str, int, float, float]] = []
+    by_tudu_vyhybka: Dict[Tuple[str, int], Tuple[float, float]] = {}
     for tudu, vyhybka_num, super_z, super_d, kmk in ro_rows:
         lat = None
         lon = None
+        from_triple = False
         if gps_by_triple and kmk is not None:
             coords = gps_by_triple.get(triple_key(super_z, super_d, kmk))
             if coords is not None:
                 lat, lon = coords
+                from_triple = True
         if lat is None or lon is None:
             coords = gps_by_pair.get(pair_key(super_z, super_d))
             if coords is None:
                 continue
             lat, lon = coords
 
-        dedupe = (tudu, vyhybka_num)
-        if dedupe in seen:
+        key = (tudu, vyhybka_num)
+        if key in by_tudu_vyhybka and not from_triple:
             continue
-        seen.add(dedupe)
+        by_tudu_vyhybka[key] = (lat, lon)
+
+    out: List[Tuple[str, int, float, float]] = []
+    for (tudu, vyhybka_num), (lat, lon) in by_tudu_vyhybka.items():
         out.append((tudu, vyhybka_num, lat, lon))
     return out
 
