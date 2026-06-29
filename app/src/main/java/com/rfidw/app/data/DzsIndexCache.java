@@ -114,8 +114,19 @@ final class DzsIndexCache {
         void write(DataOutputStream out) throws IOException;
     }
 
+    @FunctionalInterface
+    interface SaveProgressListener {
+        void onGpsWritten(int written, int total);
+    }
+
     static void save(File dbFile, String contentHash, File cacheDir,
                      Map<String, List<RoEntry>> roByPairKey, List<GpsEntry> gpsIndex) {
+        save(dbFile, contentHash, cacheDir, roByPairKey, gpsIndex, null);
+    }
+
+    static void save(File dbFile, String contentHash, File cacheDir,
+                     Map<String, List<RoEntry>> roByPairKey, List<GpsEntry> gpsIndex,
+                     SaveProgressListener progress) {
         saveBody(dbFile, contentHash, cacheDir, out -> {
             int roCount = 0;
             for (List<RoEntry> entries : roByPairKey.values()) {
@@ -130,12 +141,17 @@ final class DzsIndexCache {
                     out.writeDouble(ro.midKm);
                 }
             }
-            out.writeInt(gpsIndex.size());
-            for (GpsEntry gps : gpsIndex) {
+            int gpsTotal = gpsIndex.size();
+            out.writeInt(gpsTotal);
+            for (int i = 0; i < gpsTotal; i++) {
+                GpsEntry gps = gpsIndex.get(i);
                 out.writeUTF(gps.pairKey);
                 out.writeDouble(gps.kmExt);
                 out.writeDouble(gps.latitude);
                 out.writeDouble(gps.longitude);
+                if (progress != null && ((i + 1) % 100_000 == 0 || i + 1 == gpsTotal)) {
+                    progress.onGpsWritten(i + 1, gpsTotal);
+                }
             }
         });
     }

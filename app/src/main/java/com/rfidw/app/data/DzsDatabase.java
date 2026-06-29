@@ -197,7 +197,11 @@ public class DzsDatabase implements Closeable {
 
     /** Sestaví prostorový index (volat z IO vlákna před návratem do UI). */
     void ensureSpatialIndex(OpenProgressListener listener) {
-        report(listener, "Připravuji vyhledávání", 95);
+        if (gpsIndex.isEmpty()) {
+            report(listener, "Hotovo", 100);
+            return;
+        }
+        report(listener, "Připravuji vyhledávání", 93);
         spatialGrid();
         report(listener, "Hotovo", 100);
     }
@@ -237,14 +241,14 @@ public class DzsDatabase implements Closeable {
                 report(listener, "Indexuji výhybky", 20);
                 roByPairKey = buildRoIndex(db, roColumns);
                 report(listener, "Indexuji GPS body", 50);
-                gpsIndex = buildGpsIndex(db, gpsColumns, roByPairKey, listener);
-                report(listener, "Indexuji GPS body", 84);
+                int expectedGpsRows = countGpsRowsForPairs(db, gpsColumns, roByPairKey.keySet());
+                gpsIndex = buildGpsIndex(db, gpsColumns, roByPairKey, expectedGpsRows, listener);
                 report(listener, "Ukládám cache", 85);
                 if (cacheDir != null) {
                     if (contentHash == null) {
                         contentHash = DzsIndexCache.computeContentHash(sourceFile);
                     }
-                    saveIndexCache(sourceFile, contentHash, cacheDir, roByPairKey, gpsIndex);
+                    saveIndexCache(sourceFile, contentHash, cacheDir, roByPairKey, gpsIndex, listener);
                 }
             }
             DzsDatabase opened = new DzsDatabase(db, gpsColumns, roColumns, roByPairKey, gpsIndex);
@@ -333,9 +337,14 @@ public class DzsDatabase implements Closeable {
 
     private static void saveIndexCache(File dbFile, String contentHash, File cacheDir,
                                        Map<String, List<RoIndexEntry>> roByPairKey,
-                                       List<GpsIndexEntry> gpsIndex) {
+                                       List<GpsIndexEntry> gpsIndex,
+                                       OpenProgressListener listener) {
         DzsIndexCache.save(dbFile, contentHash, new File(cacheDir, "dzs_index"),
-                toRoCache(roByPairKey), toGpsCache(gpsIndex));
+                toRoCache(roByPairKey), toGpsCache(gpsIndex),
+                (written, total) -> {
+                    int pct = 85 + (int) ((written * 7L) / Math.max(total, 1));
+                    report(listener, cacheProgressPhase(written), Math.min(pct, 92));
+                });
     }
 
     private static Map<String, List<DzsIndexCache.RoEntry>> toRoCache(
@@ -599,12 +608,13 @@ public class DzsDatabase implements Closeable {
 
     private static List<GpsIndexEntry> buildGpsIndex(SQLiteDatabase db, GpsColumns gpsColumns,
                                                      Map<String, List<RoIndexEntry>> roByPairKey,
-                                                     OpenProgressListener listener) {
+                                                     int expectedRows, OpenProgressListener listener) {
         if (roByPairKey.isEmpty()) return new ArrayList<>();
         Set<String> pairKeys = roByPairKey.keySet();
-        List<GpsIndexEntry> fromJoin = buildGpsIndexJoin(db, gpsColumns, pairKeys, listener);
+        List<GpsIndexEntry> fromJoin = buildGpsIndexJoin(db, gpsColumns, pairKeys, expectedRows, listener);
         if (fromJoin != null) return fromJoin;
-        return buildGpsIndexFullScan(db, gpsColumns, pairKeys, listener);
+        int tableRows = countTableRows(db, TABLE_GPS_KM);
+        return buildGpsIndexFullScan(db, gpsColumns, pairKeys, expectedRows, tableRows, listener);
     }
 
     /**
@@ -613,7 +623,7 @@ public class DzsDatabase implements Closeable {
      * Bez ORDER BY a CAST ve SQL – parsování probíhá v Javě (rychlejší na velkých tabulkách).
      */
     private static List<GpsIndexEntry> buildGpsIndexJoin(SQLiteDatabase db, GpsColumns gpsColumns,
-                                                         Set<String> pairKeys,
+                                                         Set<String> pairKeys, int expectedRows,
                                                          OpenProgressListener listener) {
         if (!populateRoPairsTempTable(db, pairKeys)) return null;
 
@@ -624,7 +634,7 @@ public class DzsDatabase implements Closeable {
                 + "   ON g." + gpsColumns.superZId + " = rp.super_z_id"
                 + "   AND g." + gpsColumns.superDId + " = rp.super_d_id";
 
-        return readGpsKmIndexCursor(db, sql, null, listener);
+        return readGpsKmIndexCursor(db, sql, null, listener, null, expectedRows, -1);
     }
 
     /**
@@ -632,27 +642,46 @@ public class DzsDatabase implements Closeable {
      * Použije se jen když selže dočasná tabulka nebo JOIN dotaz; nikdy ne dotaz po jednom páru.
      */
     private static List<GpsIndexEntry> buildGpsIndexFullScan(SQLiteDatabase db, GpsColumns gpsColumns,
-                                                             Set<String> pairKeys,
-                                                             OpenProgressListener listener) {
+                                                             Set<String> pairKeys, int expectedRows,
+                                                             int tableRows, OpenProgressListener listener) {
         HashSet<String> pairFilter = new HashSet<>(pairKeys);
         String sql = "SELECT " + gpsColumns.superZId + ", " + gpsColumns.superDId + ", "
                 + gpsColumns.kmExt + ", " + gpsColumns.latitude + ", " + gpsColumns.longitude
                 + " FROM " + TABLE_GPS_KM;
-        return readGpsKmIndexCursor(db, sql, null, listener, pairFilter);
+        return readGpsKmIndexCursor(db, sql, null, listener, pairFilter, expectedRows, tableRows);
     }
 
-    private static List<GpsIndexEntry> readGpsKmIndexCursor(SQLiteDatabase db, String sql, String[] args,
-                                                            OpenProgressListener listener) {
-        return readGpsKmIndexCursor(db, sql, args, listener, null);
+    private static int countGpsRowsForPairs(SQLiteDatabase db, GpsColumns gpsColumns, Set<String> pairKeys) {
+        if (pairKeys.isEmpty() || !populateRoPairsTempTable(db, pairKeys)) return -1;
+        String sql = "SELECT COUNT(*) FROM " + TABLE_GPS_KM + " g"
+                + " INNER JOIN " + TEMP_RO_PAIRS + " rp"
+                + "   ON g." + gpsColumns.superZId + " = rp.super_z_id"
+                + "   AND g." + gpsColumns.superDId + " = rp.super_d_id";
+        return readCount(db, sql);
+    }
+
+    private static int countTableRows(SQLiteDatabase db, String table) {
+        return readCount(db, "SELECT COUNT(*) FROM " + table);
+    }
+
+    private static int readCount(SQLiteDatabase db, String sql) {
+        try (Cursor c = db.rawQuery(sql, null)) {
+            if (c.moveToFirst()) return c.getInt(0);
+        } catch (Exception ignored) {
+        }
+        return -1;
     }
 
     private static List<GpsIndexEntry> readGpsKmIndexCursor(SQLiteDatabase db, String sql, String[] args,
                                                             OpenProgressListener listener,
-                                                            Set<String> pairFilter) {
+                                                            Set<String> pairFilter, int expectedRows,
+                                                            int tableRows) {
         List<GpsIndexEntry> out = new ArrayList<>();
         try (Cursor c = db.rawQuery(sql, args)) {
             int processed = 0;
+            int scanned = 0;
             while (c.moveToNext()) {
+                scanned++;
                 String superZId = readId(c, 0);
                 String superDId = readId(c, 1);
                 if (superZId == null || superDId == null) continue;
@@ -664,21 +693,56 @@ public class DzsDatabase implements Closeable {
                 if (kmExt == null || lat == null || lon == null) continue;
                 out.add(new GpsIndexEntry(key, kmExt, lat, lon));
                 processed++;
-                if (processed % GPS_INDEX_PROGRESS_INTERVAL == 0) {
-                    reportGpsIndexProgress(listener, processed);
+                if (processed % GPS_INDEX_PROGRESS_INTERVAL == 0
+                        || (pairFilter != null && scanned % GPS_INDEX_PROGRESS_INTERVAL == 0)) {
+                    reportGpsIndexProgress(listener, processed, expectedRows, tableRows, scanned, pairFilter != null);
                 }
             }
-            reportGpsIndexProgress(listener, processed);
+            reportGpsIndexProgress(listener, processed, expectedRows, tableRows, scanned, pairFilter != null);
+            if (listener != null && processed > 0) {
+                report(listener, gpsProgressPhase(processed, pairFilter != null ? scanned : -1), 84);
+            }
             return out;
         } catch (Exception ignored) {
             return null;
         }
     }
 
-    private static void reportGpsIndexProgress(OpenProgressListener listener, int processed) {
+    private static void reportGpsIndexProgress(OpenProgressListener listener, int processed,
+                                               int expectedRows, int tableRows, int scanned,
+                                               boolean fullScan) {
         if (listener == null || processed <= 0) return;
-        int pct = 50 + Math.min(34, processed / GPS_INDEX_PROGRESS_INTERVAL);
-        report(listener, "Indexuji GPS body", pct);
+        int pct;
+        if (expectedRows > 0) {
+            pct = 50 + (int) Math.min(34L, (processed * 34L) / expectedRows);
+        } else if (fullScan && tableRows > 0) {
+            pct = 50 + (int) Math.min(34L, (scanned * 34L) / tableRows);
+        } else {
+            pct = 50 + Math.min(34, processed / GPS_INDEX_PROGRESS_INTERVAL);
+        }
+        report(listener, gpsProgressPhase(processed, fullScan ? scanned : -1), pct);
+    }
+
+    private static String gpsProgressPhase(int processed, int scanned) {
+        if (scanned >= 0) {
+            return String.format(Locale.ROOT, "Indexuji GPS body (%s / %s řádků)",
+                    formatCount(processed), formatCount(scanned));
+        }
+        return String.format(Locale.ROOT, "Indexuji GPS body (%s)", formatCount(processed));
+    }
+
+    private static String cacheProgressPhase(int written) {
+        return String.format(Locale.ROOT, "Ukládám cache (%s)", formatCount(written));
+    }
+
+    private static String formatCount(int count) {
+        if (count >= 1_000_000) {
+            return String.format(Locale.ROOT, "%.1f mil.", count / 1_000_000.0);
+        }
+        if (count >= 1_000) {
+            return String.format(Locale.ROOT, "%d tis.", count / 1_000);
+        }
+        return String.valueOf(count);
     }
 
     private static boolean populateRoPairsTempTable(SQLiteDatabase db, Set<String> pairKeys) {
