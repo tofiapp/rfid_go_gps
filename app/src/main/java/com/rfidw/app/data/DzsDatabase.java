@@ -37,7 +37,8 @@ public class DzsDatabase implements Closeable {
     public static final String TABLE_GPS_KM = "DZS_SUPERTRA_GPS_KM";
     public static final String TABLE_RO_TPI = "DZS_SUPER_RO_TPI";
     private static final String TEMP_RO_PAIRS = "_dzs_ro_pairs";
-    private static final String TEMP_RO_KM_TRIPLES = "_dzs_ro_km_triples";
+    /** Unikátní SUPER_Z_ID|SUPER_D_ID páry s KMK_INT – pro načtení GPS km bodů jedním dotazem. */
+    private static final String TEMP_RO_KM_PAIRS = "_dzs_ro_km_pairs";
 
     /** Průběh otevírání databáze (fáze + odhad procent 0–100, nebo -1). */
     public interface OpenProgressListener {
@@ -743,101 +744,120 @@ public class DzsDatabase implements Closeable {
     }
 
     /**
-     * GPS body po SUPER_Z_ID|SUPER_D_ID|KM_INT – jen pro trojice z RO (KMK_INT),
-     * ne celý kilometrický průběh trati.
+     * GPS body po SUPER_Z_ID|SUPER_D_ID|KM_INT – jen páry z RO s KMK_INT.
+     * Načte GPS km body jedním JOINem (jen rovnost ID), párování km proběhne v paměti.
      */
     private static Map<String, VyhybkaGpsCoords> buildGpsByTripleKey(
             SQLiteDatabase db, GpsColumns gpsColumns, List<RoVyhybkaRow> roRows) {
-        if (!populateRoKmTriplesTempTable(db, roRows, null)) return Collections.emptyMap();
+        Map<String, Set<Integer>> kmByPair = collectKmIntsByPair(roRows);
+        if (kmByPair.isEmpty()) return Collections.emptyMap();
 
-        Map<String, VyhybkaGpsCoords> map = queryGpsTripleJoin(db, gpsColumns, false);
-        Set<String> needed = collectTripleKeys(roRows);
-        if (map.size() >= needed.size()) return map;
+        Map<String, List<double[]>> gpsByPair = loadGpsKmPointsByPair(db, gpsColumns, kmByPair.keySet());
+        if (gpsByPair.isEmpty()) return Collections.emptyMap();
 
-        Set<String> missing = new HashSet<>(needed);
-        missing.removeAll(map.keySet());
-        if (missing.isEmpty()) return map;
-
-        if (!populateRoKmTriplesTempTable(db, roRows, missing)) return map;
-        Map<String, VyhybkaGpsCoords> rounded = queryGpsTripleJoin(db, gpsColumns, true);
-        for (Map.Entry<String, VyhybkaGpsCoords> e : rounded.entrySet()) {
-            map.putIfAbsent(e.getKey(), e.getValue());
+        Map<String, VyhybkaGpsCoords> result = new HashMap<>();
+        for (Map.Entry<String, Set<Integer>> entry : kmByPair.entrySet()) {
+            String pair = entry.getKey();
+            List<double[]> points = gpsByPair.get(pair);
+            if (points == null || points.isEmpty()) continue;
+            String[] ids = splitPairKey(pair);
+            for (int kmkInt : entry.getValue()) {
+                VyhybkaGpsCoords coords = matchKmCoordinates(points, kmkInt);
+                if (coords != null) {
+                    result.put(tripleKey(ids[0], ids[1], kmkInt), coords);
+                }
+            }
         }
-        return map;
+        return result;
     }
 
-    private static Set<String> collectTripleKeys(List<RoVyhybkaRow> roRows) {
-        Set<String> keys = new HashSet<>();
+    private static Map<String, Set<Integer>> collectKmIntsByPair(List<RoVyhybkaRow> roRows) {
+        Map<String, Set<Integer>> kmByPair = new HashMap<>();
         for (RoVyhybkaRow row : roRows) {
             if (row.kmkInt == null) continue;
-            keys.add(tripleKey(row.superZId, row.superDId, row.kmkInt));
+            kmByPair.computeIfAbsent(pairKey(row.superZId, row.superDId), k -> new HashSet<>())
+                    .add(row.kmkInt);
         }
-        return keys;
+        return kmByPair;
     }
 
     /**
-     * Spáruje GPS body s dočasnou tabulkou trojic. {@code roundedKm=false} je rychlá přesná
-     * shoda; {@code roundedKm=true} doplní desetinné KM_INT přes interval [km−0,5, km+0,5).
+     * Jedním SQL dotazem načte všechny GPS km body pro zadané páry ID.
+     * CAST na km/lat/lon je jen ve výsledných řádcích, ne v JOIN podmínce.
      */
-    private static Map<String, VyhybkaGpsCoords> queryGpsTripleJoin(
-            SQLiteDatabase db, GpsColumns gpsColumns, boolean roundedKm) {
+    private static Map<String, List<double[]>> loadGpsKmPointsByPair(
+            SQLiteDatabase db, GpsColumns gpsColumns, Set<String> pairKeys) {
+        if (pairKeys.isEmpty()) return Collections.emptyMap();
+        if (!populateKmPairsTempTable(db, pairKeys)) return Collections.emptyMap();
+
+        String kmExpr = kmIntExpr("g", gpsColumns.kmInt);
         String latExpr = gpsColumns.latitudeExpr("g");
         String lonExpr = gpsColumns.longitudeExpr("g");
-        String kmExpr = kmIntExpr("g", gpsColumns.kmInt);
-        String kmJoin = roundedKm
-                ? "(" + kmExpr + " >= (rt.km_int - 0.5) AND " + kmExpr + " < (rt.km_int + 0.5))"
-                : kmExpr + " = rt.km_int";
         String sql = "SELECT g." + gpsColumns.superZId + ", g." + gpsColumns.superDId + ", "
-                + "rt.km_int, " + latExpr + ", " + lonExpr
+                + kmExpr + ", " + latExpr + ", " + lonExpr
                 + " FROM " + TABLE_GPS_KM + " g"
-                + " INNER JOIN " + TEMP_RO_KM_TRIPLES + " rt"
-                + " ON g." + gpsColumns.superZId + " = rt.super_z_id"
-                + " AND g." + gpsColumns.superDId + " = rt.super_d_id"
-                + " AND " + kmJoin;
+                + " INNER JOIN " + TEMP_RO_KM_PAIRS + " rp"
+                + " ON g." + gpsColumns.superZId + " = rp.super_z_id"
+                + " AND g." + gpsColumns.superDId + " = rp.super_d_id";
 
-        Map<String, VyhybkaGpsCoords> map = new HashMap<>();
+        Map<String, List<double[]>> byPair = new HashMap<>();
         try (Cursor c = db.rawQuery(sql, null)) {
             while (c.moveToNext()) {
                 String superZId = readId(c, 0);
                 String superDId = readId(c, 1);
-                Integer km = readInt(c, 2);
+                Double km = readDouble(c, 2);
                 Double lat = readDouble(c, 3);
                 Double lon = readDouble(c, 4);
                 if (superZId == null || superDId == null || km == null || lat == null || lon == null) {
                     continue;
                 }
-                map.putIfAbsent(tripleKey(superZId, superDId, km), new VyhybkaGpsCoords(lat, lon));
+                byPair.computeIfAbsent(pairKey(superZId, superDId), k -> new ArrayList<>())
+                        .add(new double[]{km, lat, lon});
             }
         }
-        return map;
+        return byPair;
     }
 
-    private static boolean populateRoKmTriplesTempTable(SQLiteDatabase db, List<RoVyhybkaRow> roRows,
-                                                      Set<String> onlyTripleKeys) {
+    /**
+     * Přesná shoda km == KMK_INT; záložně interval [km−0,5, km+0,5) pro desetinné KM_INT.
+     */
+    private static VyhybkaGpsCoords matchKmCoordinates(List<double[]> points, int kmkInt) {
+        double kmTarget = kmkInt;
+        for (double[] pt : points) {
+            if (pt[0] == kmTarget) {
+                return new VyhybkaGpsCoords(pt[1], pt[2]);
+            }
+        }
+        double lo = kmkInt - 0.5;
+        double hi = kmkInt + 0.5;
+        for (double[] pt : points) {
+            double km = pt[0];
+            if (km >= lo && km < hi) {
+                return new VyhybkaGpsCoords(pt[1], pt[2]);
+            }
+        }
+        return null;
+    }
+
+    private static boolean populateKmPairsTempTable(SQLiteDatabase db, Set<String> pairKeys) {
         try {
-            db.execSQL("CREATE TEMP TABLE IF NOT EXISTS " + TEMP_RO_KM_TRIPLES
-                    + " (super_z_id TEXT NOT NULL, super_d_id TEXT NOT NULL, km_int INTEGER NOT NULL,"
-                    + " PRIMARY KEY (super_z_id, super_d_id, km_int))");
-            db.execSQL("DELETE FROM " + TEMP_RO_KM_TRIPLES);
+            db.execSQL("CREATE TEMP TABLE IF NOT EXISTS " + TEMP_RO_KM_PAIRS
+                    + " (super_z_id TEXT NOT NULL, super_d_id TEXT NOT NULL,"
+                    + " PRIMARY KEY (super_z_id, super_d_id))");
+            db.execSQL("DELETE FROM " + TEMP_RO_KM_PAIRS);
         } catch (Exception ignored) {
             return false;
         }
 
         SQLiteStatement insert = db.compileStatement(
-                "INSERT OR IGNORE INTO " + TEMP_RO_KM_TRIPLES
-                        + " (super_z_id, super_d_id, km_int) VALUES (?, ?, ?)");
+                "INSERT OR IGNORE INTO " + TEMP_RO_KM_PAIRS + " (super_z_id, super_d_id) VALUES (?, ?)");
         db.beginTransaction();
         try {
-            for (RoVyhybkaRow row : roRows) {
-                if (row.kmkInt == null) continue;
-                if (onlyTripleKeys != null) {
-                    String key = tripleKey(row.superZId, row.superDId, row.kmkInt);
-                    if (!onlyTripleKeys.contains(key)) continue;
-                }
+            for (String key : pairKeys) {
+                String[] ids = splitPairKey(key);
                 insert.clearBindings();
-                insert.bindString(1, row.superZId);
-                insert.bindString(2, row.superDId);
-                insert.bindLong(3, row.kmkInt);
+                insert.bindString(1, ids[0]);
+                insert.bindString(2, ids[1]);
                 insert.executeInsert();
             }
             db.setTransactionSuccessful();
