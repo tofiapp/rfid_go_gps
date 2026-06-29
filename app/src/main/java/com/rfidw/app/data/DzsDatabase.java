@@ -748,18 +748,52 @@ public class DzsDatabase implements Closeable {
      */
     private static Map<String, VyhybkaGpsCoords> buildGpsByTripleKey(
             SQLiteDatabase db, GpsColumns gpsColumns, List<RoVyhybkaRow> roRows) {
-        if (!populateRoKmTriplesTempTable(db, roRows)) return Collections.emptyMap();
+        if (!populateRoKmTriplesTempTable(db, roRows, null)) return Collections.emptyMap();
 
+        Map<String, VyhybkaGpsCoords> map = queryGpsTripleJoin(db, gpsColumns, false);
+        Set<String> needed = collectTripleKeys(roRows);
+        if (map.size() >= needed.size()) return map;
+
+        Set<String> missing = new HashSet<>(needed);
+        missing.removeAll(map.keySet());
+        if (missing.isEmpty()) return map;
+
+        if (!populateRoKmTriplesTempTable(db, roRows, missing)) return map;
+        Map<String, VyhybkaGpsCoords> rounded = queryGpsTripleJoin(db, gpsColumns, true);
+        for (Map.Entry<String, VyhybkaGpsCoords> e : rounded.entrySet()) {
+            map.putIfAbsent(e.getKey(), e.getValue());
+        }
+        return map;
+    }
+
+    private static Set<String> collectTripleKeys(List<RoVyhybkaRow> roRows) {
+        Set<String> keys = new HashSet<>();
+        for (RoVyhybkaRow row : roRows) {
+            if (row.kmkInt == null) continue;
+            keys.add(tripleKey(row.superZId, row.superDId, row.kmkInt));
+        }
+        return keys;
+    }
+
+    /**
+     * Spáruje GPS body s dočasnou tabulkou trojic. {@code roundedKm=false} je rychlá přesná
+     * shoda; {@code roundedKm=true} doplní desetinné KM_INT přes interval [km−0,5, km+0,5).
+     */
+    private static Map<String, VyhybkaGpsCoords> queryGpsTripleJoin(
+            SQLiteDatabase db, GpsColumns gpsColumns, boolean roundedKm) {
         String latExpr = gpsColumns.latitudeExpr("g");
         String lonExpr = gpsColumns.longitudeExpr("g");
         String kmExpr = kmIntExpr("g", gpsColumns.kmInt);
+        String kmJoin = roundedKm
+                ? "(" + kmExpr + " >= (rt.km_int - 0.5) AND " + kmExpr + " < (rt.km_int + 0.5))"
+                : kmExpr + " = rt.km_int";
         String sql = "SELECT g." + gpsColumns.superZId + ", g." + gpsColumns.superDId + ", "
                 + "rt.km_int, " + latExpr + ", " + lonExpr
                 + " FROM " + TABLE_GPS_KM + " g"
                 + " INNER JOIN " + TEMP_RO_KM_TRIPLES + " rt"
                 + " ON g." + gpsColumns.superZId + " = rt.super_z_id"
                 + " AND g." + gpsColumns.superDId + " = rt.super_d_id"
-                + " AND CAST(ROUND(" + kmExpr + ") AS INTEGER) = rt.km_int";
+                + " AND " + kmJoin;
 
         Map<String, VyhybkaGpsCoords> map = new HashMap<>();
         try (Cursor c = db.rawQuery(sql, null)) {
@@ -772,13 +806,14 @@ public class DzsDatabase implements Closeable {
                 if (superZId == null || superDId == null || km == null || lat == null || lon == null) {
                     continue;
                 }
-                map.put(tripleKey(superZId, superDId, km), new VyhybkaGpsCoords(lat, lon));
+                map.putIfAbsent(tripleKey(superZId, superDId, km), new VyhybkaGpsCoords(lat, lon));
             }
         }
         return map;
     }
 
-    private static boolean populateRoKmTriplesTempTable(SQLiteDatabase db, List<RoVyhybkaRow> roRows) {
+    private static boolean populateRoKmTriplesTempTable(SQLiteDatabase db, List<RoVyhybkaRow> roRows,
+                                                      Set<String> onlyTripleKeys) {
         try {
             db.execSQL("CREATE TEMP TABLE IF NOT EXISTS " + TEMP_RO_KM_TRIPLES
                     + " (super_z_id TEXT NOT NULL, super_d_id TEXT NOT NULL, km_int INTEGER NOT NULL,"
@@ -795,6 +830,10 @@ public class DzsDatabase implements Closeable {
         try {
             for (RoVyhybkaRow row : roRows) {
                 if (row.kmkInt == null) continue;
+                if (onlyTripleKeys != null) {
+                    String key = tripleKey(row.superZId, row.superDId, row.kmkInt);
+                    if (!onlyTripleKeys.contains(key)) continue;
+                }
                 insert.clearBindings();
                 insert.bindString(1, row.superZId);
                 insert.bindString(2, row.superDId);

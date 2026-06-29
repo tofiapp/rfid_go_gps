@@ -226,34 +226,52 @@ def triple_key(super_z_id: str, super_d_id: str, km: int) -> str:
     return f"{super_z_id}|{super_d_id}|{km}"
 
 
-def build_gps_by_triple_key(conn: sqlite3.Connection, cols: dict,
-                            ro_rows: List[RoVyhybkaRow]) -> Dict[str, Tuple[float, float]]:
-    km_col = cols["gps_km_int"]
-    if not km_col or not ro_rows:
-        return {}
+def collect_triple_keys(ro_rows: List[RoVyhybkaRow]) -> set:
+    keys = set()
+    for _, _, super_z, super_d, kmk in ro_rows:
+        if kmk is not None:
+            keys.add(triple_key(super_z, super_d, kmk))
+    return keys
 
+
+def populate_km_triples_temp(conn: sqlite3.Connection, ro_rows: List[RoVyhybkaRow],
+                             only_keys: Optional[set] = None) -> None:
     conn.execute("CREATE TEMP TABLE IF NOT EXISTS _dzs_ro_km_triples ("
                  "super_z_id TEXT NOT NULL, super_d_id TEXT NOT NULL, km_int INTEGER NOT NULL,"
                  "PRIMARY KEY (super_z_id, super_d_id, km_int))")
     conn.execute("DELETE FROM _dzs_ro_km_triples")
-    triples = [(super_z, super_d, kmk) for _, _, super_z, super_d, kmk in ro_rows if kmk is not None]
-    if not triples:
-        return {}
-    conn.executemany(
-        "INSERT OR IGNORE INTO _dzs_ro_km_triples (super_z_id, super_d_id, km_int) VALUES (?, ?, ?)",
-        triples,
-    )
+    triples = []
+    for _, _, super_z, super_d, kmk in ro_rows:
+        if kmk is None:
+            continue
+        key = triple_key(super_z, super_d, kmk)
+        if only_keys is not None and key not in only_keys:
+            continue
+        triples.append((super_z, super_d, kmk))
+    if triples:
+        conn.executemany(
+            "INSERT OR IGNORE INTO _dzs_ro_km_triples (super_z_id, super_d_id, km_int) VALUES (?, ?, ?)",
+            triples,
+        )
 
+
+def query_gps_triple_join(conn: sqlite3.Connection, cols: dict,
+                          rounded_km: bool) -> Dict[str, Tuple[float, float]]:
+    km_col = cols["gps_km_int"]
     lat_expr = f"CAST(REPLACE(g.{cols['gps_lat']}, ',', '.') AS REAL)"
     lon_expr = f"CAST(REPLACE(g.{cols['gps_lon']}, ',', '.') AS REAL)"
     km_expr = km_int_expr("g", km_col)
+    if rounded_km:
+        km_join = f"({km_expr} >= (rt.km_int - 0.5) AND {km_expr} < (rt.km_int + 0.5))"
+    else:
+        km_join = f"{km_expr} = rt.km_int"
     sql = f"""
         SELECT g.{cols['gps_super_z']}, g.{cols['gps_super_d']}, rt.km_int, {lat_expr}, {lon_expr}
         FROM {TABLE_GPS} g
         INNER JOIN _dzs_ro_km_triples rt
           ON g.{cols['gps_super_z']} = rt.super_z_id
          AND g.{cols['gps_super_d']} = rt.super_d_id
-         AND {km_expr} = rt.km_int
+         AND {km_join}
     """
     out: Dict[str, Tuple[float, float]] = {}
     try:
@@ -265,9 +283,34 @@ def build_gps_by_triple_key(conn: sqlite3.Connection, cols: dict,
             lon = read_double(row[4])
             if not super_z or not super_d or km is None or lat is None or lon is None:
                 continue
-            out[triple_key(super_z, super_d, km)] = (lat, lon)
+            key = triple_key(super_z, super_d, km)
+            out.setdefault(key, (lat, lon))
     except sqlite3.Error:
         return {}
+    return out
+
+
+def build_gps_by_triple_key(conn: sqlite3.Connection, cols: dict,
+                            ro_rows: List[RoVyhybkaRow]) -> Dict[str, Tuple[float, float]]:
+    km_col = cols["gps_km_int"]
+    if not km_col or not ro_rows:
+        return {}
+
+    populate_km_triples_temp(conn, ro_rows, None)
+    out = query_gps_triple_join(conn, cols, rounded_km=False)
+
+    needed = collect_triple_keys(ro_rows)
+    if len(out) >= len(needed):
+        return out
+
+    missing = needed - set(out.keys())
+    if not missing:
+        return out
+
+    populate_km_triples_temp(conn, ro_rows, missing)
+    rounded = query_gps_triple_join(conn, cols, rounded_km=True)
+    for key, coords in rounded.items():
+        out.setdefault(key, coords)
     return out
 
 
