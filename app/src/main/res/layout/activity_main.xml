@@ -41,6 +41,32 @@
                     android:textSize="16sp"
                     android:textStyle="bold"/>
 
+                <LinearLayout
+                    android:id="@+id/card1DbProgress"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:id="@+id/tvCard1DbProgress"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/text_muted"
+                        android:textSize="12sp"/>
+
+                    <com.google.android.material.progressindicator.LinearProgressIndicator
+                        android:id="@+id/card1DbProgressBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:max="100"
+                        app:indicatorColor="@color/primary"
+                        app:trackColor="@color/primary_container"
+                        app:trackCornerRadius="4dp"/>
+                </LinearLayout>
+
                 <!-- Náhledový obdélníček – výběr TUDU / výhybky klepnutím -->
                 <LinearLayout
                     android:id="@+id/summary1"

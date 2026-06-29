@@ -44,6 +44,7 @@
     <string name="db_none">Žádná databáze</string>
     <string name="db_auto_loading">Načítám DZS_PASPORT_TPI.sqlite…</string>
     <string name="db_loading_phase">Načítám: %1$s</string>
+    <string name="db_loading_progress">%1$s · %2$d %%</string>
     <string name="db_select_required">Nejdříve vyberte databázi SQLite</string>
     <string name="db_file_type_error">Podporovaný formát je SQLite (.db / .sqlite)</string>
     <string name="gps_tudu_wait">Čekám na GPS pro určení TUDU a výhybky…</string>
