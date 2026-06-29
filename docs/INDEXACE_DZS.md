@@ -230,15 +230,15 @@ python3 -c "import os; p='DZS_PASPORT_TPI.sqlite'; print(hex(os.path.getsize(p))
 
 ### GPS → TUDU + výhybka (`findNearest`)
 
-1. Z aktuální GPS polohy najde nejbližší bod v GPS indexu (prostorová mřížka + haversine).
-2. Z `pairKey` dohledá TUDU a výhybku v RO indexu.
-3. Vrátí `GpsMatch` včetně vzdálenosti v metrech.
+1. Z aktuální GPS polohy najde nejbližší **výhybku** v předpočítaném výhybka GPS indexu (každá výhybka má vlastní souřadnice, včetně párování KMK_INT / KM_INT).
+2. Vrátí `GpsMatch` včetně vzdálenosti v metrech.
+3. Záložně (prázdný výhybka index) hledá v párovém GPS indexu (jeden bod na SUPER_Z_ID + SUPER_D_ID).
 
 Volá se z `MainActivity` při pohybu ≥ 5 m nebo ≥ 1 s od posledního hledání.
 
 ### Seznam nejbližších TUDU (`findNearestDistinctTudu`)
 
-Plný průchod GPS indexem, pro každý TUDU kód nejlepší bod, seřazeno podle vzdálenosti (max. 10).
+Pro každý TUDU kód nejlepší výhybka podle předpočítaných souřadnic, seřazeno podle vzdálenosti (max. 10). Záložně párový GPS index.
 
 ### Vzdálenosti výhybek v TUDU (`findVyhybkaDistancesForTudu`)
 
