@@ -455,6 +455,27 @@ public class DzsDatabase implements Closeable {
         return new ArrayList<>(sorted.subList(0, limit));
     }
 
+    /**
+     * Pro daný TUDU vrátí nejbližší vzdálenost (m) k jednotlivým výhybkám z GPS indexu.
+     */
+    public Map<Integer, Double> findVyhybkaDistancesForTudu(String tuduCode,
+                                                              double latitude, double longitude) {
+        if (gpsIndex.isEmpty() || tuduCode == null || tuduCode.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<Integer, Double> bestByVyhybka = new HashMap<>();
+        for (GpsIndexEntry gps : gpsIndex) {
+            RoIndexEntry ro = roByPairKey.get(gps.pairKey);
+            if (ro == null || !tuduCode.equals(ro.tudu)) continue;
+            double dist = haversineM(latitude, longitude, gps.latitude, gps.longitude);
+            Double existing = bestByVyhybka.get(ro.vyhybka);
+            if (existing == null || dist < existing) {
+                bestByVyhybka.put(ro.vyhybka, dist);
+            }
+        }
+        return bestByVyhybka;
+    }
+
     private static double approximateDistSq(double lat, double lon, double targetLat, double targetLon,
                                             double cosLat) {
         double dLat = targetLat - lat;
