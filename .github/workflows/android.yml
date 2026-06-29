@@ -5,10 +5,13 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch:   # umožní spustit build ručně z webu GitHubu
+  workflow_dispatch:
 
 jobs:
   build:
+    if: >-
+      github.event_name != 'push' ||
+      startsWith(github.event.head_commit.message, 'chore: bump version')
     runs-on: ubuntu-latest
 
     steps:
@@ -27,12 +30,19 @@ jobs:
       - name: Práva pro gradlew
         run: chmod +x ./gradlew
 
+      - name: Načtení verze
+        id: version
+        run: |
+          VERSION_NAME=$(grep -oP '^APP_VERSION_NAME=\K.*' version.properties)
+          echo "name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "Building version $VERSION_NAME"
+
       - name: Sestavení debug APK
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Nahrání APK jako artefakt
         uses: actions/upload-artifact@v4
         with:
-          name: rfid-go-gps-apk
-          path: app/build/outputs/apk/debug/rfid_go_gps.apk
+          name: rfid-go-gps-${{ steps.version.outputs.name }}
+          path: app/build/outputs/apk/debug/rfid_go_gps_${{ steps.version.outputs.name }}.apk
           if-no-files-found: error
