@@ -21,7 +21,7 @@ import android.text.Spanned;
 import android.text.TextWatcher;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
-import android.util.TypedValue;
+import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -70,7 +70,7 @@ public class MainActivity extends AppCompatActivity {
     // klávesy spouště čtečky (Chainway C5 a příbuzné)
     private static final int[] TRIGGER_KEYS = {139, 280, 293, 311, 312, 522, 523, 0x3E8};
 
-    private static final int REQUEST_LOCATION_PERMISSION = 1001;
+    private static final String TAG = "MainActivity";
     private static final int REQUEST_STORAGE_PERMISSION = 1002;
     private static final String DEFAULT_DB_NAME = "DZS_PASPORT_TPI.sqlite";
 
@@ -97,6 +97,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean gpsAutoSelection = true;
     private volatile boolean gpsLookupInFlight;
     private boolean gpsLookupNoMatch;
+    private boolean forceNextGpsLookup;
     private Double lastGpsLookupLat;
     private Double lastGpsLookupLon;
     private long lastGpsLookupTimeMs;
@@ -879,6 +880,12 @@ public class MainActivity extends AppCompatActivity {
                     if (gpsLookupNoMatch) {
                         tvReaderStatus.setText(getString(R.string.gps_tudu_not_found));
                         tvReaderStatus.setTextColor(COLOR_STATUS_ERROR);
+                    } else if (gpsLookupInFlight) {
+                        tvReaderStatus.setText(getString(R.string.gps_tudu_lookup));
+                        tvReaderStatus.setTextColor(COLOR_STATUS_GPS_WAIT);
+                    } else if (dzsDatabase == null) {
+                        tvReaderStatus.setText(getString(R.string.gps_tudu_wait));
+                        tvReaderStatus.setTextColor(COLOR_STATUS_GPS_WAIT);
                     } else {
                         tvReaderStatus.setText(getString(R.string.gps_tudu_lookup));
                         tvReaderStatus.setTextColor(COLOR_STATUS_GPS_WAIT);
@@ -1502,6 +1509,7 @@ public class MainActivity extends AppCompatActivity {
                 dzsDatabase = opened;
                 gpsAutoSelection = true;
                 gpsLookupNoMatch = false;
+                forceNextGpsLookup = true;
                 lastGpsLookupLat = null;
                 lastGpsLookupLon = null;
                 lastGpsLookupTimeMs = 0;
@@ -1538,9 +1546,9 @@ public class MainActivity extends AppCompatActivity {
         ensureGpsForTuduLookup();
         if (tuduList.isEmpty()) {
             toast("Databáze neobsahuje žádné TUDU – zkouším určit podle GPS…");
-        } else if (!step1Done) {
+        } else if (!step1Done && locationCache != null && !locationCache.hasFix()) {
             if (gpsTestMode) {
-                if (locationCache == null || !locationCache.hasTestOverride()) {
+                if (!locationCache.hasTestOverride()) {
                     toast(getString(R.string.gps_test_enabled_toast));
                 }
             } else {
@@ -1559,14 +1567,19 @@ public class MainActivity extends AppCompatActivity {
         LocationCache.Snapshot snap = locationCache.getSnapshot();
         if (!snap.valid) return;
         long now = System.currentTimeMillis();
-        if (lastGpsLookupLat != null && lastGpsLookupLon != null) {
+        boolean force = forceNextGpsLookup;
+        if (!force && lastGpsLookupLat != null && lastGpsLookupLon != null) {
             double moved = haversineM(lastGpsLookupLat, lastGpsLookupLon, snap.latitude, snap.longitude);
             if (moved < GPS_LOOKUP_MIN_MOVE_M && now - lastGpsLookupTimeMs < GPS_LOOKUP_MIN_INTERVAL_MS) {
                 return;
             }
         }
+        forceNextGpsLookup = false;
         gpsLookupInFlight = true;
         gpsLookupNoMatch = false;
+        if (!workflowRunning) {
+            setActionStatusReady();
+        }
         final double lat = snap.latitude;
         final double lon = snap.longitude;
         io.execute(() -> {
@@ -1575,7 +1588,8 @@ public class MainActivity extends AppCompatActivity {
                 if (dzsDatabase != null) {
                     match = dzsDatabase.findNearest(lat, lon);
                 }
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                Log.w(TAG, "GPS TUDU lookup selhal", e);
                 match = null;
             }
             final DzsDatabase.GpsMatch result = match;
