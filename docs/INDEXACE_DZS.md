@@ -123,11 +123,11 @@ Výsledek: seznam `{ pairKey, latitude, longitude }`.
 
 Pro každou výhybku v RO tabulce se při indexaci určí souřadnice:
 
-1. Pokud existují `KMK_INT` (RO) a `KM_INT` (GPS), načtou se GPS body indexované po `SUPER_Z_ID|SUPER_D_ID|KM_INT` (jen relevantní páry z RO).
-2. Pro každý řádek RO se `KMK_INT` spáruje s odpovídajícím `KM_INT` v paměti.
-3. Bez kilometrických sloupců se použije záložní bod z GPS indexu (jeden na pár ID).
-
-Výsledek: mapa `TUDU → { číslo výhybky → lat, lon }`. Otevření dialogu výhybek pak jen spočítá haversine z této mapy (bez SQL JOIN).
+1. RO tabulka se načte **jednou** (společně s RO indexem ve fázi 2A) – druhý SQL sken se neprovádí.
+2. Pokud existují `KMK_INT` (RO) a `KM_INT` (GPS), do dočasné tabulky se vloží jen trojice `(SUPER_Z_ID, SUPER_D_ID, KMK_INT)` z RO řádků (typicky stovky až tisíce), ne celý kilometrický průběh trati (miliony GPS řádků).
+3. GPS dotaz spáruje jen tyto konkrétní trojice s `KM_INT` v paměti.
+4. Bez kilometrických sloupců se použije záložní bod z GPS indexu (jeden na pár ID).
+5. Sestavení mapy `TUDU → výhybka → souřadnice` probíhá čistě v paměti z již načtených RO řádků.
 
 ### Fáze 3 – Uložení cache
 
@@ -257,7 +257,7 @@ flowchart TD
     A[DZS_PASPORT_TPI.sqlite] --> B{DzsDatabase.open}
     B --> C{Platná .idx cache?}
     C -->|Ano| D[Načti RO + GPS + výhybka GPS z disku]
-    C -->|Ne| E[buildRoIndex – DZS_SUPER_RO_TPI]
+    C -->|Ne| E[buildRoIndexAndRows – DZS_SUPER_RO_TPI]
     E --> F[buildGpsIndex – DZS_SUPERTRA_GPS_KM]
     F --> G[buildVyhybkaGpsIndex – souřadnice výhybek]
     G --> H[Ulož .idx cache]

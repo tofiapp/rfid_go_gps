@@ -37,6 +37,7 @@ public class DzsDatabase implements Closeable {
     public static final String TABLE_GPS_KM = "DZS_SUPERTRA_GPS_KM";
     public static final String TABLE_RO_TPI = "DZS_SUPER_RO_TPI";
     private static final String TEMP_RO_PAIRS = "_dzs_ro_pairs";
+    private static final String TEMP_RO_KM_TRIPLES = "_dzs_ro_km_triples";
 
     /** Průběh otevírání databáze (fáze + odhad procent 0–100, nebo -1). */
     public interface OpenProgressListener {
@@ -71,6 +72,33 @@ public class DzsDatabase implements Closeable {
         RoIndexEntry(String tudu, int vyhybka) {
             this.tudu = tudu;
             this.vyhybka = vyhybka;
+        }
+    }
+
+    /** Jeden řádek RO tabulky potřebný pro výhybka GPS index (bez druhého SQL skenu). */
+    private static final class RoVyhybkaRow {
+        final String tudu;
+        final int vyhybka;
+        final String superZId;
+        final String superDId;
+        final Integer kmkInt;
+
+        RoVyhybkaRow(String tudu, int vyhybka, String superZId, String superDId, Integer kmkInt) {
+            this.tudu = tudu;
+            this.vyhybka = vyhybka;
+            this.superZId = superZId;
+            this.superDId = superDId;
+            this.kmkInt = kmkInt;
+        }
+    }
+
+    private static final class RoBuildResult {
+        final Map<String, RoIndexEntry> byPairKey;
+        final List<RoVyhybkaRow> vyhybkaRows;
+
+        RoBuildResult(Map<String, RoIndexEntry> byPairKey, List<RoVyhybkaRow> vyhybkaRows) {
+            this.byPairKey = byPairKey;
+            this.vyhybkaRows = vyhybkaRows;
         }
     }
 
@@ -231,11 +259,13 @@ public class DzsDatabase implements Closeable {
                 report(listener, "Cache indexu načtena", 90);
             } else {
                 report(listener, "Indexuji výhybky", 20);
-                roByPairKey = buildRoIndex(db, roColumns);
+                RoBuildResult roBuild = buildRoIndexAndRows(db, roColumns);
+                roByPairKey = roBuild.byPairKey;
                 report(listener, "Indexuji GPS body", 45);
                 gpsIndex = buildGpsIndex(db, gpsColumns, roByPairKey);
                 report(listener, "Indexuji souřadnice výhybek", 70);
-                vyhybkaGpsByTudu = buildVyhybkaGpsIndex(db, gpsColumns, roColumns, roByPairKey, gpsIndex);
+                vyhybkaGpsByTudu = buildVyhybkaGpsIndex(
+                        db, gpsColumns, roColumns, roBuild.vyhybkaRows, gpsIndex);
                 report(listener, "Ukládám cache", 85);
                 if (cacheDir != null) {
                     saveIndexCache(sourceFile, cacheDir, roByPairKey, gpsIndex, vyhybkaGpsByTudu);
@@ -546,13 +576,18 @@ public class DzsDatabase implements Closeable {
         return dLat * dLat + dLon * dLon;
     }
 
-    private static Map<String, RoIndexEntry> buildRoIndex(SQLiteDatabase db, RoColumns roColumns) {
-        Map<String, RoIndexEntry> map = new HashMap<>();
+    /** Jeden průchod RO tabulkou – párový index i řádky pro výhybka GPS index. */
+    private static RoBuildResult buildRoIndexAndRows(SQLiteDatabase db, RoColumns roColumns) {
+        Map<String, RoIndexEntry> byPairKey = new HashMap<>();
+        List<RoVyhybkaRow> vyhybkaRows = new ArrayList<>();
         String vyhybkaExpr = roColumns.vyhybkaSelectExpr(null);
         StringBuilder sql = new StringBuilder("SELECT ")
                 .append(roColumns.superZId).append(", ").append(roColumns.superDId).append(", ")
-                .append(roColumns.tudu).append(", ").append(vyhybkaExpr)
-                .append(" FROM ").append(TABLE_RO_TPI)
+                .append(roColumns.tudu).append(", ").append(vyhybkaExpr);
+        if (roColumns.kmkInt != null) {
+            sql.append(", ").append(roColumns.kmkInt);
+        }
+        sql.append(" FROM ").append(TABLE_RO_TPI)
                 .append(" WHERE ").append(roColumns.tudu).append(" IS NOT NULL AND ")
                 .append(roColumns.tudu).append(" <> ''")
                 .append(" AND ").append(vyhybkaExpr).append(" IS NOT NULL");
@@ -567,10 +602,12 @@ public class DzsDatabase implements Closeable {
                 if (superZId == null || superDId == null || tudu == null || vyhybka == null) {
                     continue;
                 }
-                map.put(pairKey(superZId, superDId), new RoIndexEntry(tudu, vyhybka));
+                byPairKey.put(pairKey(superZId, superDId), new RoIndexEntry(tudu, vyhybka));
+                Integer kmk = roColumns.kmkInt != null ? readInt(c, 4) : null;
+                vyhybkaRows.add(new RoVyhybkaRow(tudu, vyhybka, superZId, superDId, kmk));
             }
         }
-        return map;
+        return new RoBuildResult(byPairKey, vyhybkaRows);
     }
 
     /**
@@ -579,7 +616,7 @@ public class DzsDatabase implements Closeable {
      */
     private static Map<String, Map<Integer, VyhybkaGpsCoords>> buildVyhybkaGpsIndex(
             SQLiteDatabase db, GpsColumns gpsColumns, RoColumns roColumns,
-            Map<String, RoIndexEntry> roByPairKey, List<GpsIndexEntry> gpsIndex) {
+            List<RoVyhybkaRow> roRows, List<GpsIndexEntry> gpsIndex) {
         Map<String, GpsIndexEntry> gpsByPair = new HashMap<>(Math.max(gpsIndex.size(), 16));
         for (GpsIndexEntry gps : gpsIndex) {
             gpsByPair.put(gps.pairKey, gps);
@@ -587,74 +624,52 @@ public class DzsDatabase implements Closeable {
 
         Map<String, VyhybkaGpsCoords> gpsByTriple = Collections.emptyMap();
         if (roColumns.kmkInt != null && gpsColumns.kmInt != null) {
-            gpsByTriple = buildGpsByTripleKey(db, gpsColumns, roByPairKey);
+            gpsByTriple = buildGpsByTripleKey(db, gpsColumns, roRows);
         }
 
         Map<String, Map<Integer, VyhybkaGpsCoords>> result = new HashMap<>();
-        String vyhybkaExpr = roColumns.vyhybkaSelectExpr(null);
-        StringBuilder sql = new StringBuilder("SELECT ")
-                .append(roColumns.tudu).append(", ").append(vyhybkaExpr).append(", ")
-                .append(roColumns.superZId).append(", ").append(roColumns.superDId);
-        if (roColumns.kmkInt != null) {
-            sql.append(", ").append(roColumns.kmkInt);
-        }
-        sql.append(" FROM ").append(TABLE_RO_TPI)
-                .append(" WHERE ").append(roColumns.tudu).append(" IS NOT NULL AND ")
-                .append(roColumns.tudu).append(" <> ''")
-                .append(" AND ").append(vyhybkaExpr).append(" IS NOT NULL");
-        roColumns.appendPolohaFilter(sql, null);
-
-        try (Cursor c = db.rawQuery(sql.toString(), null)) {
-            while (c.moveToNext()) {
-                String tudu = readTrimmedText(c, 0);
-                Integer vyhybka = readInt(c, 1);
-                String superZId = readId(c, 2);
-                String superDId = readId(c, 3);
-                if (tudu == null || vyhybka == null || superZId == null || superDId == null) {
-                    continue;
+        for (RoVyhybkaRow row : roRows) {
+            Double lat = null;
+            Double lon = null;
+            if (!gpsByTriple.isEmpty() && row.kmkInt != null) {
+                VyhybkaGpsCoords triple = gpsByTriple.get(
+                        tripleKey(row.superZId, row.superDId, row.kmkInt));
+                if (triple != null) {
+                    lat = triple.latitude;
+                    lon = triple.longitude;
                 }
-
-                Double lat = null;
-                Double lon = null;
-                if (!gpsByTriple.isEmpty()) {
-                    Integer kmk = readInt(c, 4);
-                    if (kmk != null) {
-                        VyhybkaGpsCoords triple = gpsByTriple.get(tripleKey(superZId, superDId, kmk));
-                        if (triple != null) {
-                            lat = triple.latitude;
-                            lon = triple.longitude;
-                        }
-                    }
-                }
-                if (lat == null || lon == null) {
-                    GpsIndexEntry gps = gpsByPair.get(pairKey(superZId, superDId));
-                    if (gps == null) continue;
-                    lat = gps.latitude;
-                    lon = gps.longitude;
-                }
-
-                result.computeIfAbsent(tudu, k -> new HashMap<>())
-                        .putIfAbsent(vyhybka, new VyhybkaGpsCoords(lat, lon));
             }
+            if (lat == null || lon == null) {
+                GpsIndexEntry gps = gpsByPair.get(pairKey(row.superZId, row.superDId));
+                if (gps == null) continue;
+                lat = gps.latitude;
+                lon = gps.longitude;
+            }
+
+            result.computeIfAbsent(row.tudu, k -> new HashMap<>())
+                    .putIfAbsent(row.vyhybka, new VyhybkaGpsCoords(lat, lon));
         }
         return result;
     }
 
-    /** GPS body indexované po SUPER_Z_ID|SUPER_D_ID|KM_INT pro relevantní páry z RO. */
+    /**
+     * GPS body po SUPER_Z_ID|SUPER_D_ID|KM_INT – jen pro trojice z RO (KMK_INT),
+     * ne celý kilometrický průběh trati.
+     */
     private static Map<String, VyhybkaGpsCoords> buildGpsByTripleKey(
-            SQLiteDatabase db, GpsColumns gpsColumns, Map<String, RoIndexEntry> roByPairKey) {
-        if (!populateRoPairsTempTable(db, roByPairKey)) return Collections.emptyMap();
+            SQLiteDatabase db, GpsColumns gpsColumns, List<RoVyhybkaRow> roRows) {
+        if (!populateRoKmTriplesTempTable(db, roRows)) return Collections.emptyMap();
 
         String latExpr = gpsColumns.latitudeExpr("g");
         String lonExpr = gpsColumns.longitudeExpr("g");
         String kmExpr = kmIntExpr("g", gpsColumns.kmInt);
         String sql = "SELECT g." + gpsColumns.superZId + ", g." + gpsColumns.superDId + ", "
-                + kmExpr + ", " + latExpr + ", " + lonExpr
+                + "rt.km_int, " + latExpr + ", " + lonExpr
                 + " FROM " + TABLE_GPS_KM + " g"
-                + " INNER JOIN " + TEMP_RO_PAIRS + " rp"
-                + " ON g." + gpsColumns.superZId + " = rp.super_z_id"
-                + " AND g." + gpsColumns.superDId + " = rp.super_d_id"
-                + " WHERE g." + gpsColumns.kmInt + " IS NOT NULL";
+                + " INNER JOIN " + TEMP_RO_KM_TRIPLES + " rt"
+                + " ON g." + gpsColumns.superZId + " = rt.super_z_id"
+                + " AND g." + gpsColumns.superDId + " = rt.super_d_id"
+                + " AND " + kmExpr + " = rt.km_int";
 
         Map<String, VyhybkaGpsCoords> map = new HashMap<>();
         try (Cursor c = db.rawQuery(sql, null)) {
@@ -671,6 +686,38 @@ public class DzsDatabase implements Closeable {
             }
         }
         return map;
+    }
+
+    private static boolean populateRoKmTriplesTempTable(SQLiteDatabase db, List<RoVyhybkaRow> roRows) {
+        try {
+            db.execSQL("CREATE TEMP TABLE IF NOT EXISTS " + TEMP_RO_KM_TRIPLES
+                    + " (super_z_id TEXT NOT NULL, super_d_id TEXT NOT NULL, km_int INTEGER NOT NULL,"
+                    + " PRIMARY KEY (super_z_id, super_d_id, km_int))");
+            db.execSQL("DELETE FROM " + TEMP_RO_KM_TRIPLES);
+        } catch (Exception ignored) {
+            return false;
+        }
+
+        SQLiteStatement insert = db.compileStatement(
+                "INSERT OR IGNORE INTO " + TEMP_RO_KM_TRIPLES
+                        + " (super_z_id, super_d_id, km_int) VALUES (?, ?, ?)");
+        db.beginTransaction();
+        try {
+            for (RoVyhybkaRow row : roRows) {
+                if (row.kmkInt == null) continue;
+                insert.clearBindings();
+                insert.bindString(1, row.superZId);
+                insert.bindString(2, row.superDId);
+                insert.bindLong(3, row.kmkInt);
+                insert.executeInsert();
+            }
+            db.setTransactionSuccessful();
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        } finally {
+            db.endTransaction();
+        }
     }
 
     private static String tripleKey(String superZId, String superDId, int km) {
