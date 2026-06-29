@@ -66,13 +66,15 @@ jobs:
           echo "Building version $VERSION_NAME"
 
       - name: Sestavení debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleDebug :preindex:shadowJar --stacktrace
 
       - name: Nahrání APK jako artefakt
         uses: actions/upload-artifact@v4
         with:
           name: rfid-go-gps-${{ steps.version.outputs.name }}
-          path: app/build/outputs/apk/debug/rfid_go_gps_${{ steps.version.outputs.name }}.apk
+          path: |
+            app/build/outputs/apk/debug/rfid_go_gps_${{ steps.version.outputs.name }}.apk
+            preindex/build/libs/preindex-dzs.jar
           if-no-files-found: error
 
       - name: Commit a push verze
@@ -93,5 +95,7 @@ jobs:
           tag_name: v${{ steps.bump.outputs.version_name }}
           name: RFID Go GPS ${{ steps.bump.outputs.version_name }}
           body: Automaticky sestaveno po mergi do main.
-          files: app/build/outputs/apk/debug/rfid_go_gps_${{ steps.bump.outputs.version_name }}.apk
+          files: |
+            app/build/outputs/apk/debug/rfid_go_gps_${{ steps.bump.outputs.version_name }}.apk
+            preindex/build/libs/preindex-dzs.jar
           make_latest: true
