@@ -110,21 +110,27 @@ public class DzsDatabase implements Closeable {
     }
 
     /**
-     * Najde nejbližší bod v DZS_SUPERTRA_GPS_KM podle sloupců LAT/LON (nebo ekvivalent)
-     * a v DZS_SUPER_RO_TPI dohledá TUDU / výhybku přes SUPER_Z_ID a SUPER_D_ID.
-     * Prochází několik nejbližších bodů – nejbližší bez mapování v RO_TPI se přeskočí.
+     * Najde nejbližší bod v DZS_SUPERTRA_GPS_KM podle sloupců LAT/LON (nebo ekvivalent),
+     * který má odpovídající schodu v DZS_SUPER_RO_TPI (SUPER_Z_ID + SUPER_D_ID).
+     * JOIN používá stejnou normalizaci ID na obou stranách – jinak lookup často selže.
      */
     public GpsMatch findNearest(double latitude, double longitude) {
         String latExpr = gpsColumns.latitudeExpr("gps");
         String lonExpr = gpsColumns.longitudeExpr("gps");
+        String vyhybkaExpr = roColumns.vyhybkaSelectExpr("ro");
+        String joinOn = idJoinCondition("gps", "ro");
 
-        String nearestSql = "SELECT gps." + gpsColumns.superZId + ", gps." + gpsColumns.superDId + ", "
-                + latExpr + ", " + lonExpr
+        String nearestSql = "SELECT ro." + roColumns.tudu + ", " + vyhybkaExpr + ", "
+                + latExpr + ", " + lonExpr + ", "
+                + "gps." + gpsColumns.superZId + ", gps." + gpsColumns.superDId
                 + " FROM " + TABLE_GPS_KM + " gps"
+                + " INNER JOIN " + TABLE_RO_TPI + " ro ON " + joinOn
                 + " WHERE " + latExpr + " IS NOT NULL AND " + lonExpr + " IS NOT NULL"
+                + " AND ro." + roColumns.tudu + " IS NOT NULL AND ro." + roColumns.tudu + " <> ''"
+                + " AND " + vyhybkaExpr + " IS NOT NULL"
                 + " ORDER BY ((" + latExpr + " - ?) * (" + latExpr + " - ?)"
                 + " + (" + lonExpr + " - ?) * (" + lonExpr + " - ?))"
-                + " LIMIT 25";
+                + " LIMIT 1";
 
         String[] args = {
                 String.valueOf(latitude), String.valueOf(latitude),
@@ -132,20 +138,27 @@ public class DzsDatabase implements Closeable {
         };
 
         try (Cursor c = db.rawQuery(nearestSql, args)) {
-            while (c.moveToNext()) {
-                String superZId = readId(c, 0);
-                String superDId = readId(c, 1);
-                Double bestLat = readDouble(c, 2);
-                Double bestLon = readDouble(c, 3);
-                if (superZId == null || superDId == null || bestLat == null || bestLon == null) {
-                    continue;
-                }
-                GpsMatch match = lookupTuduVyhybka(superZId, superDId, bestLat, bestLon,
-                        latitude, longitude);
-                if (match != null) return match;
+            if (!c.moveToFirst()) return null;
+            String tudu = c.getString(0);
+            Integer vyhybka = readInt(c, 1);
+            Double bestLat = readDouble(c, 2);
+            Double bestLon = readDouble(c, 3);
+            String superZId = readId(c, 4);
+            String superDId = readId(c, 5);
+            if (tudu == null || tudu.isEmpty() || vyhybka == null
+                    || superZId == null || superDId == null
+                    || bestLat == null || bestLon == null) {
+                return null;
             }
+            double dist = haversineM(latitude, longitude, bestLat, bestLon);
+            return new GpsMatch(superZId, superDId, tudu, vyhybka, bestLat, bestLon, dist);
         }
-        return null;
+    }
+
+    private String idJoinCondition(String gpsAlias, String roAlias) {
+        return idExpr(gpsAlias, gpsColumns.superZId) + " = " + idExpr(roAlias, roColumns.superZId)
+                + " AND " + idExpr(gpsAlias, gpsColumns.superDId) + " = "
+                + idExpr(roAlias, roColumns.superDId);
     }
 
     private GpsMatch lookupTuduVyhybka(String superZId, String superDId,
@@ -154,8 +167,8 @@ public class DzsDatabase implements Closeable {
         String vyhybkaExpr = roColumns.vyhybkaSelectExpr("ro");
         String lookupSql = "SELECT ro." + roColumns.tudu + ", " + vyhybkaExpr
                 + " FROM " + TABLE_RO_TPI + " ro"
-                + " WHERE " + idExpr("ro", roColumns.superZId) + " = ?"
-                + " AND " + idExpr("ro", roColumns.superDId) + " = ?"
+                + " WHERE " + idExpr("ro", roColumns.superZId) + " = " + idBindExpr()
+                + " AND " + idExpr("ro", roColumns.superDId) + " = " + idBindExpr()
                 + " AND ro." + roColumns.tudu + " IS NOT NULL AND ro." + roColumns.tudu + " <> ''"
                 + " AND " + vyhybkaExpr + " IS NOT NULL"
                 + " LIMIT 1";
@@ -173,6 +186,11 @@ public class DzsDatabase implements Closeable {
     private static String idExpr(String tableAlias, String column) {
         return "CAST(CAST(REPLACE(TRIM(CAST(" + tableAlias + "." + column
                 + " AS TEXT)), ',', '.') AS REAL) AS INTEGER)";
+    }
+
+    /** Stejná normalizace pro bind parametr jako idExpr u sloupce. */
+    private static String idBindExpr() {
+        return "CAST(CAST(REPLACE(TRIM(?), ',', '.') AS REAL) AS INTEGER)";
     }
 
     /**
@@ -218,8 +236,8 @@ public class DzsDatabase implements Closeable {
         String vyhybkaExpr = roColumns.vyhybkaSelectExpr("ro");
         String lookupSql = "SELECT ro." + roColumns.tudu + ", " + vyhybkaExpr
                 + " FROM " + TABLE_RO_TPI + " ro"
-                + " WHERE " + idExpr("ro", roColumns.superZId) + " = ?"
-                + " AND " + idExpr("ro", roColumns.superDId) + " = ?"
+                + " WHERE " + idExpr("ro", roColumns.superZId) + " = " + idBindExpr()
+                + " AND " + idExpr("ro", roColumns.superDId) + " = " + idBindExpr()
                 + " AND ro." + roColumns.tudu + " IS NOT NULL AND ro." + roColumns.tudu + " <> ''"
                 + " AND " + vyhybkaExpr + " IS NOT NULL"
                 + " LIMIT 1";
@@ -273,7 +291,15 @@ public class DzsDatabase implements Closeable {
             return c.getInt(index);
         } catch (Exception e) {
             try {
-                return Integer.parseInt(c.getString(index).replaceAll("[^0-9-]", ""));
+                return (int) Math.round(c.getDouble(index));
+            } catch (Exception ignored) {
+            }
+            try {
+                String raw = c.getString(index);
+                if (raw == null) return null;
+                raw = raw.trim().replace(',', '.');
+                if (raw.isEmpty()) return null;
+                return (int) Math.round(Double.parseDouble(raw));
             } catch (Exception ignored) {
                 return null;
             }
