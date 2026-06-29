@@ -181,41 +181,46 @@ Příklad: DB 524 288 000 B, mtime `1719561600000` → `dzs_1f4000000_18ff3c
 
 ## Předindexace na PC
 
-Nástroj **nepotřebuje** grafické SQLite GUI – stačí Python 3 a soubor databáze.
+K indexaci **nepotřebujete Python ani SQLite GUI** – stačí Java 17+ (JRE stačí).
 
-### Windows (PowerShell / CMD)
+### Varianta A – JAR (doporučeno bez Pythonu)
+
+1. Stáhněte `preindex-dzs.jar` z [GitHub Releases](https://github.com/tofiapp/rfid_go_gps/releases)  
+   (nebo sestavte: `./gradlew :preindex:shadowJar` → `preindex/build/libs/preindex-dzs.jar`).
+2. Pokud nemáte Javu, nainstalujte [Temurin JRE 17+](https://adoptium.net/).
+
+**Windows (PowerShell / CMD):**
 
 ```powershell
-# 1. Stáhněte repozitář nebo jen složku tools/ (minimálně tools/preindex_dzs.py)
-# 2. Zkopírujte DZS_PASPORT_TPI.sqlite do stejné složky (nebo uveďte celou cestu)
+java -jar preindex-dzs.jar "C:\cesta\k\DZS_PASPORT_TPI.sqlite" --stats --verify
+```
 
-python tools\preindex_dzs.py "C:\cesta\k\DZS_PASPORT_TPI.sqlite" --stats --verify
+Nebo přetáhněte databázi na `tools\preindex-dzs.bat` (JAR musí být ve stejné složce).
+
+**Linux / macOS:**
+
+```bash
+java -jar preindex-dzs.jar /cesta/k/DZS_PASPORT_TPI.sqlite --stats --verify
 ```
 
 Výstup vedle databáze:
 - `dzs_{velikost_hex}_{mtime_hex}.idx`
 - `DZS_PASPORT_TPI.sqlite.idx` (sidecar – aplikace ho najde automaticky)
 
-### Linux / macOS
+### Varianta B – Python (volitelné)
+
+Pokud máte Python 3:
 
 ```bash
-python3 tools/preindex_dzs.py /cesta/k/DZS_PASPORT_TPI.sqlite --stats --verify
+python3 tools/preindex_dzs.py DZS_PASPORT_TPI.sqlite --stats --verify
 ```
 
-### Nástroj v repozitáři
-
-```bash
-python3 tools/preindex_dzs.py DZS_PASPORT_TPI.sqlite
-```
-
-Výstup: `dzs_{velikost_hex}_{mtime_hex}.idx` a sidecar `DZS_PASPORT_TPI.sqlite.idx` ve stejné složce (nebo `-o cesta/`).
-
-Volby:
+### Přepínače (JAR i Python)
 
 | Přepínač | Význam |
 |----------|--------|
 | `-o DIR` | Výstupní adresář |
-| `--stats` | Vypiš počty záznamů |
+| `--stats` | Vypiš detekované sloupce / počty |
 | `--verify` | Ověř načtení vygenerovaného souboru |
 
 ### Nasazení na zařízení
@@ -317,5 +322,7 @@ flowchart TD
 |--------|-------|
 | `app/src/main/java/com/rfidw/app/data/DzsDatabase.java` | Logika indexace a vyhledávání |
 | `app/src/main/java/com/rfidw/app/data/DzsIndexCache.java` | Serializace / deserializace `.idx` |
-| `tools/preindex_dzs.py` | Předindexace na PC |
+| `preindex/` + `preindex-dzs.jar` | Předindexace na PC bez Pythonu (Java 17+) |
+| `tools/preindex_dzs.py` | Předindexace na PC (Python 3) |
+| `tools/preindex-dzs.bat` | Spuštění JAR na Windows |
 | `README.md` | Uživatelská dokumentace aplikace |

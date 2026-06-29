@@ -1,0 +1,32 @@
+plugins {
+    id 'java'
+    id 'application'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.xerial:sqlite-jdbc:3.45.3.0'
+}
+
+application {
+    mainClass = 'com.rfidw.preindex.PreindexMain'
+}
+
+tasks.named('shadowJar') {
+    archiveBaseName = 'preindex-dzs'
+    archiveClassifier = ''
+    archiveVersion = ''
+}
+
+tasks.named('build') {
+    dependsOn tasks.named('shadowJar')
+}
