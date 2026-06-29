@@ -191,7 +191,8 @@ public class DzsDatabase implements Closeable {
     }
 
     public static DzsDatabase open(String path, File cacheDir, OpenProgressListener listener) throws Exception {
-        File dbFile = resolveWritableDatabaseFile(path, cacheDir, listener);
+        File sourceFile = new File(path);
+        File dbFile = resolveWritableDatabaseFile(sourceFile, cacheDir, listener);
         SQLiteDatabase db = SQLiteDatabase.openDatabase(
                 dbFile.getAbsolutePath(), null, SQLiteDatabase.OPEN_READWRITE);
         try {
@@ -203,7 +204,8 @@ public class DzsDatabase implements Closeable {
             DzsIndexCache.LoadedIndex cached = null;
             if (cacheDir != null) {
                 report(listener, "Načítám cache indexu", 10);
-                cached = DzsIndexCache.tryLoad(dbFile, new File(cacheDir, "dzs_index"));
+                // Otisk zdrojové DB – umožňuje předpřipravit .idx na PC (viz docs/INDEXACE_DZS.md).
+                cached = DzsIndexCache.tryLoad(sourceFile, new File(cacheDir, "dzs_index"));
             }
 
             Map<String, RoIndexEntry> roByPairKey;
@@ -219,7 +221,7 @@ public class DzsDatabase implements Closeable {
                 gpsIndex = buildGpsIndex(db, gpsColumns, roByPairKey);
                 report(listener, "Ukládám cache", 85);
                 if (cacheDir != null) {
-                    saveIndexCache(dbFile, cacheDir, roByPairKey, gpsIndex);
+                    saveIndexCache(sourceFile, cacheDir, roByPairKey, gpsIndex);
                 }
             }
             DzsDatabase opened = new DzsDatabase(db, gpsColumns, roColumns, roByPairKey, gpsIndex);
@@ -235,11 +237,10 @@ public class DzsDatabase implements Closeable {
      * SQLite potřebuje zapisovatelný adresář pro journal/WAL a dočasné tabulky při indexaci.
      * Soubor ze Stažených nebo jiného sdíleného úložiště proto zkopírujeme do cache aplikace.
      */
-    private static File resolveWritableDatabaseFile(String path, File cacheDir,
+    private static File resolveWritableDatabaseFile(File source, File cacheDir,
                                                     OpenProgressListener listener) throws Exception {
-        File source = new File(path);
         if (!source.isFile()) {
-            throw new Exception("Databáze nenalezena: " + path);
+            throw new Exception("Databáze nenalezena: " + source.getAbsolutePath());
         }
         if (cacheDir == null || cacheDir.equals(source.getParentFile())) {
             return source;
