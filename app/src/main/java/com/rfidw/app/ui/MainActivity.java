@@ -131,6 +131,7 @@ public class MainActivity extends AppCompatActivity {
 
     // view reference
     private TextView tvReaderStatus, tvGpsStatus, tvEpcPreview, tvEpcValid, tvSourceFile,
+            tvCard1DbProgress,
             tvWriteResult, tvCsvPath, tvPwdWriteResult, tvLockResult,
             tvSummaryTudu, tvSummaryVyhybka, tvSummaryCast,
             tvCastHintAction, tvCastHintPart,
@@ -138,7 +139,9 @@ public class MainActivity extends AppCompatActivity {
             tvLastRecordVyhybka, tvLastRecordCast,
             step1Circle, step2Circle, step3Circle, step1Label, step2Label;
     private View summary1, colSummaryTudu, colSummaryVyhybka, castHintBox, scanDoneScrim,
-            scanDoneDialog, deleteConfirmDialog, lastRecordBox, card1, topBar;
+            scanDoneDialog, deleteConfirmDialog, lastRecordBox, card1, topBar,
+            card1DbProgress;
+    private com.google.android.material.progressindicator.LinearProgressIndicator card1DbProgressBar;
     private NestedScrollView mainScroll;
     private BottomSheetBehavior<View> workflowBehavior;
     private EditText etAccessPwd, etPower, etPwdAccess, etPwdNew, etLockAccessPwd;
@@ -198,6 +201,9 @@ public class MainActivity extends AppCompatActivity {
         tvEpcPreview = findViewById(R.id.tvEpcPreview);
         tvEpcValid = findViewById(R.id.tvEpcValid);
         tvSourceFile = findViewById(R.id.tvSourceFile);
+        tvCard1DbProgress = findViewById(R.id.tvCard1DbProgress);
+        card1DbProgress = findViewById(R.id.card1DbProgress);
+        card1DbProgressBar = findViewById(R.id.card1DbProgressBar);
         tvWriteResult = findViewById(R.id.tvWriteResult);
         tvCsvPath = findViewById(R.id.tvCsvPath);
         tvPwdWriteResult = findViewById(R.id.tvPwdWriteResult);
@@ -395,6 +401,35 @@ public class MainActivity extends AppCompatActivity {
 
     private void collapseCard1Body() {
         collapseCard(R.id.header1, R.id.body1);
+    }
+
+    private void beginCard1DbLoad(String displayName) {
+        collapseCard1Body();
+        scrollToCard1();
+        if (card1DbProgress != null) {
+            card1DbProgress.setVisibility(View.VISIBLE);
+        }
+        updateCard1DbProgress(getString(R.string.db_loading_phase, displayName), 0);
+    }
+
+    private void updateCard1DbProgress(String phase, int percent) {
+        int clamped = Math.max(0, Math.min(100, percent));
+        String label = getString(R.string.db_loading_progress, phase, clamped);
+        if (tvCard1DbProgress != null) {
+            tvCard1DbProgress.setText(label);
+        }
+        if (card1DbProgressBar != null) {
+            card1DbProgressBar.setProgressCompat(clamped, true);
+        }
+        if (tvSourceFile != null) {
+            tvSourceFile.setText(label);
+        }
+    }
+
+    private void endCard1DbLoad() {
+        if (card1DbProgress != null) {
+            card1DbProgress.setVisibility(View.GONE);
+        }
     }
 
     private void collapseCard(int headerId, int bodyId) {
@@ -1224,6 +1259,8 @@ public class MainActivity extends AppCompatActivity {
         if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             tryAutoLoadDefaultDatabase();
         } else {
+            endCard1DbLoad();
+            expandCard1Body();
             tvSourceFile.setText(R.string.db_none);
         }
     }
@@ -1677,7 +1714,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void tryAutoLoadDefaultDatabase() {
-        tvSourceFile.setText(getString(R.string.db_auto_loading));
+        beginCard1DbLoad(DEFAULT_DB_NAME);
         io.execute(() -> {
             File found = findDefaultDatabaseFile();
             if (found != null) {
@@ -1686,10 +1723,18 @@ public class MainActivity extends AppCompatActivity {
             }
             if (needsStoragePermission()) {
                 pendingAutoLoadAfterStorage = true;
-                ui.post(this::requestStoragePermissionIfNeeded);
+                ui.post(() -> {
+                    endCard1DbLoad();
+                    expandCard1Body();
+                    requestStoragePermissionIfNeeded();
+                });
                 return;
             }
-            ui.post(() -> tvSourceFile.setText(R.string.db_none));
+            ui.post(() -> {
+                endCard1DbLoad();
+                expandCard1Body();
+                tvSourceFile.setText(R.string.db_none);
+            });
         });
     }
 
@@ -1771,7 +1816,7 @@ public class MainActivity extends AppCompatActivity {
     private void loadSource(Uri uri) {
         String name = queryName(uri);
         final String fileTypeError = getString(R.string.db_file_type_error);
-        tvSourceFile.setText("Načítám: " + name);
+        beginCard1DbLoad(name);
         io.execute(() -> {
             try {
                 String lower = name.toLowerCase(Locale.ROOT);
@@ -1782,6 +1827,8 @@ public class MainActivity extends AppCompatActivity {
                 loadDatabaseFromPath(dbFile.getAbsolutePath(), name, true);
             } catch (Exception e) {
                 runOnUiThreadIfAlive(0, () -> {
+                    endCard1DbLoad();
+                    expandCard1Body();
                     tvSourceFile.setText("Chyba načtení: " + e.getMessage());
                     toast("Chyba načtení databáze");
                 });
@@ -1791,6 +1838,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void loadDatabaseFromPath(String path, String displayName, boolean showErrorToast) {
         final long loadId = ++dbLoadGeneration;
+        runOnUiThreadIfAlive(loadId, () -> beginCard1DbLoad(displayName));
         DzsDatabase previous;
         synchronized (this) {
             previous = dzsDatabase;
@@ -1805,7 +1853,7 @@ public class MainActivity extends AppCompatActivity {
         try {
             DzsDatabase.OpenProgressListener progress = (phase, percent) ->
                     runOnUiThreadIfAlive(loadId, () ->
-                            tvSourceFile.setText(getString(R.string.db_loading_phase, phase)));
+                            updateCard1DbProgress(phase, percent));
             DzsDatabase opened = DzsDatabase.open(path, getCacheDir(), progress);
             if (loadId != dbLoadGeneration) {
                 opened.close();
@@ -1813,8 +1861,14 @@ public class MainActivity extends AppCompatActivity {
             }
             int tuduCount = opened.countDistinctTudu();
             boolean manualMode = !prefs.getBoolean(PREF_TUDU_MODE_GPS, true);
-            // GPS režim: prázdný ale měnitelný seznam – applyGpsMatch do něj přidává TUDU z GPS.
-            List<Tudu> loaded = manualMode ? opened.loadAllTudu() : new ArrayList<>();
+            List<Tudu> loaded;
+            if (manualMode) {
+                runOnUiThreadIfAlive(loadId, () ->
+                        updateCard1DbProgress("Načítám seznam TUDU", 98));
+                loaded = opened.loadAllTudu();
+            } else {
+                loaded = new ArrayList<>();
+            }
             if (loadId != dbLoadGeneration) {
                 opened.close();
                 return;
@@ -1838,6 +1892,7 @@ public class MainActivity extends AppCompatActivity {
                 tvSourceFile.setText(gpsAutoSelection
                         ? getString(R.string.db_loaded_gps, displayName, tuduCount)
                         : getString(R.string.db_loaded_manual, displayName, tuduCount));
+                endCard1DbLoad();
                 collapseCard1Body();
                 scrollToCard1();
                 onDatabaseLoaded();
@@ -1845,12 +1900,16 @@ public class MainActivity extends AppCompatActivity {
         } catch (OutOfMemoryError e) {
             Log.e(TAG, "Načtení databáze – nedostatek paměti", e);
             runOnUiThreadIfAlive(loadId, () -> {
+                endCard1DbLoad();
+                expandCard1Body();
                 tvSourceFile.setText("Chyba načtení: nedostatek paměti (index GPS bodů je příliš velký)");
                 if (showErrorToast) toast("Chyba načtení databáze – nedostatek paměti");
             });
         } catch (Exception e) {
             Log.w(TAG, "Načtení databáze selhalo", e);
             runOnUiThreadIfAlive(loadId, () -> {
+                endCard1DbLoad();
+                expandCard1Body();
                 tvSourceFile.setText("Chyba načtení: " + e.getMessage());
                 if (showErrorToast) toast("Chyba načtení databáze");
             });
