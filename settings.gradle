@@ -15,4 +15,3 @@ dependencyResolutionManagement {
 }
 rootProject.name = "RFID Go GPS"
 include ':app'
-include ':preindex'

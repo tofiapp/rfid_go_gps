@@ -2218,6 +2218,10 @@ public class MainActivity extends AppCompatActivity {
 
     private File copyUriToCache(Uri uri, String fileName) throws Exception {
         File out = new File(getCacheDir(), fileName);
+        long expectedSize = querySize(uri);
+        if (expectedSize > 0 && out.isFile() && out.length() == expectedSize) {
+            return out;
+        }
         try (InputStream in = getContentResolver().openInputStream(uri);
              FileOutputStream fos = new FileOutputStream(out, false)) {
             if (in == null) throw new Exception("Soubor nelze otevřít");
@@ -2226,6 +2230,17 @@ public class MainActivity extends AppCompatActivity {
             while ((n = in.read(buf)) > 0) fos.write(buf, 0, n);
         }
         return out;
+    }
+
+    private long querySize(Uri uri) {
+        try (Cursor c = getContentResolver().query(uri, new String[]{OpenableColumns.SIZE},
+                null, null, null)) {
+            if (c != null && c.moveToFirst() && !c.isNull(0)) {
+                return c.getLong(0);
+            }
+        } catch (Exception ignored) {
+        }
+        return -1;
     }
 
     private static double haversineM(double lat1, double lon1, double lat2, double lon2) {
