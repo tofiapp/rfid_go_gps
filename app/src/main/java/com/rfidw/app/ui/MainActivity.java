@@ -68,6 +68,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -101,6 +102,7 @@ public class MainActivity extends AppCompatActivity {
     private DzsDatabase dzsDatabase;
     /** Zruší zastaralé UI callbacky po novém načtení nebo zničení aktivity. */
     private volatile long dbLoadGeneration;
+    private int card1DbProgressPercent;
     /** Režim výběru TUDU: true = GPS, false = ruční výběr ze seznamu. */
     private boolean gpsAutoSelection = true;
     /** Ruční výběr TUDU v GPS režimu – GPS lookup nepřepíše, dokud uživatel neklikne Načíst polohu. */
@@ -415,14 +417,23 @@ public class MainActivity extends AppCompatActivity {
     private void beginCard1DbLoad(String displayName) {
         collapseCard1Body();
         scrollToCard1();
+        card1DbProgressPercent = 0;
         if (card1DbProgress != null) {
             card1DbProgress.setVisibility(View.VISIBLE);
         }
-        updateCard1DbProgress(getString(R.string.db_loading_phase, displayName), 0);
+        updateCard1DbProgress(getString(R.string.db_loading_phase, displayName), 0, true);
     }
 
     private void updateCard1DbProgress(String phase, int percent) {
+        updateCard1DbProgress(phase, percent, false);
+    }
+
+    private void updateCard1DbProgress(String phase, int percent, boolean force) {
         int clamped = Math.max(0, Math.min(100, percent));
+        if (!force && clamped < card1DbProgressPercent) {
+            return;
+        }
+        card1DbProgressPercent = clamped;
         String label = getString(R.string.db_loading_progress, phase, clamped);
         if (tvCard1DbProgress != null) {
             tvCard1DbProgress.setText(label);
@@ -1987,9 +1998,16 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         try {
-            DzsDatabase.OpenProgressListener progress = (phase, percent) ->
-                    runOnUiThreadIfAlive(loadId, () ->
-                            updateCard1DbProgress(phase, percent));
+            final AtomicInteger progressSeq = new AtomicInteger(0);
+            final AtomicInteger appliedProgressSeq = new AtomicInteger(0);
+            DzsDatabase.OpenProgressListener progress = (phase, percent) -> {
+                int seq = progressSeq.incrementAndGet();
+                runOnUiThreadIfAlive(loadId, () -> {
+                    if (seq < appliedProgressSeq.get()) return;
+                    appliedProgressSeq.set(seq);
+                    updateCard1DbProgress(phase, percent);
+                });
+            };
             DzsDatabase opened = DzsDatabase.open(path, getCacheDir(), progress);
             if (loadId != dbLoadGeneration) {
                 opened.close();

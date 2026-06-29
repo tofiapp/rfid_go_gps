@@ -238,6 +238,7 @@ public class DzsDatabase implements Closeable {
                 roByPairKey = buildRoIndex(db, roColumns);
                 report(listener, "Indexuji GPS body", 50);
                 gpsIndex = buildGpsIndex(db, gpsColumns, roByPairKey, listener);
+                report(listener, "Indexuji GPS body", 84);
                 report(listener, "Ukládám cache", 85);
                 if (cacheDir != null) {
                     if (contentHash == null) {
@@ -676,8 +677,8 @@ public class DzsDatabase implements Closeable {
 
     private static void reportGpsIndexProgress(OpenProgressListener listener, int processed) {
         if (listener == null || processed <= 0) return;
-        int pct = 50 + (int) ((processed / GPS_INDEX_PROGRESS_INTERVAL) % 35);
-        report(listener, "Indexuji GPS body", Math.min(pct, 84));
+        int pct = 50 + Math.min(34, processed / GPS_INDEX_PROGRESS_INTERVAL);
+        report(listener, "Indexuji GPS body", pct);
     }
 
     private static boolean populateRoPairsTempTable(SQLiteDatabase db, Set<String> pairKeys) {
