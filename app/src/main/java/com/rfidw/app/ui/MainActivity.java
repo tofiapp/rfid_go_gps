@@ -1801,7 +1801,8 @@ public class MainActivity extends AppCompatActivity {
             }
             int tuduCount = opened.countDistinctTudu();
             boolean manualMode = !prefs.getBoolean(PREF_TUDU_MODE_GPS, true);
-            List<Tudu> loaded = manualMode ? opened.loadAllTudu() : Collections.emptyList();
+            // GPS režim: prázdný ale měnitelný seznam – applyGpsMatch do něj přidává TUDU z GPS.
+            List<Tudu> loaded = manualMode ? opened.loadAllTudu() : new ArrayList<>();
             if (loadId != dbLoadGeneration) {
                 opened.close();
                 return;
