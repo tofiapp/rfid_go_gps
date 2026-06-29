@@ -218,8 +218,9 @@ def build_ro_index(conn: sqlite3.Connection, cols: dict) -> Dict[str, Tuple[str,
     return ro
 
 
-def km_int_expr(alias: str, column: str) -> str:
-    return f"CAST(REPLACE(TRIM(CAST({alias}.{column} AS TEXT)), ',', '.') AS REAL)"
+def km_int_expr(alias: Optional[str], column: str) -> str:
+    qualified = f"{alias}.{column}" if alias else column
+    return f"CAST(REPLACE(TRIM(CAST({qualified} AS TEXT)), ',', '.') AS REAL)"
 
 
 def triple_key(super_z_id: str, super_d_id: str, km: int) -> str:
@@ -236,65 +237,23 @@ def collect_km_by_pair(ro_rows: List[RoVyhybkaRow]) -> Dict[str, set]:
     return km_by_pair
 
 
-def populate_km_pairs_temp(conn: sqlite3.Connection, pair_keys: set) -> None:
-    conn.execute("CREATE TEMP TABLE IF NOT EXISTS _dzs_ro_km_pairs ("
-                 "super_z_id TEXT NOT NULL, super_d_id TEXT NOT NULL,"
-                 "PRIMARY KEY (super_z_id, super_d_id))")
-    conn.execute("DELETE FROM _dzs_ro_km_pairs")
-    rows = []
-    for key in pair_keys:
-        super_z, super_d = key.split("|", 1)
-        rows.append((super_z, super_d))
-    if rows:
-        conn.executemany(
-            "INSERT OR IGNORE INTO _dzs_ro_km_pairs (super_z_id, super_d_id) VALUES (?, ?)",
-            rows,
-        )
-
-
-def load_gps_km_points_by_pair(conn: sqlite3.Connection, cols: dict,
-                               pair_keys: set) -> Dict[str, List[Tuple[float, float, float]]]:
-    if not pair_keys:
-        return {}
-    populate_km_pairs_temp(conn, pair_keys)
+def query_triple_gps(conn: sqlite3.Connection, cols: dict, sql: str,
+                     super_z: str, super_d: str, *extra_args: str) -> Optional[Tuple[float, float]]:
     km_col = cols["gps_km_int"]
-    lat_expr = f"CAST(REPLACE(g.{cols['gps_lat']}, ',', '.') AS REAL)"
-    lon_expr = f"CAST(REPLACE(g.{cols['gps_lon']}, ',', '.') AS REAL)"
-    km_expr = km_int_expr("g", km_col)
-    sql = f"""
-        SELECT g.{cols['gps_super_z']}, g.{cols['gps_super_d']}, {km_expr}, {lat_expr}, {lon_expr}
-        FROM {TABLE_GPS} g
-        INNER JOIN _dzs_ro_km_pairs rp
-          ON g.{cols['gps_super_z']} = rp.super_z_id
-         AND g.{cols['gps_super_d']} = rp.super_d_id
-    """
-    by_pair: Dict[str, List[Tuple[float, float, float]]] = {}
+    lat_expr = f"CAST(REPLACE({cols['gps_lat']}, ',', '.') AS REAL)"
+    lon_expr = f"CAST(REPLACE({cols['gps_lon']}, ',', '.') AS REAL)"
+    args = (super_z, super_d) + extra_args
     try:
-        for row in conn.execute(sql):
-            super_z = normalize_id(row[0])
-            super_d = normalize_id(row[1])
-            km = read_double(row[2])
-            lat = read_double(row[3])
-            lon = read_double(row[4])
-            if not super_z or not super_d or km is None or lat is None or lon is None:
-                continue
-            by_pair.setdefault(pair_key(super_z, super_d), []).append((km, lat, lon))
+        row = conn.execute(sql, args).fetchone()
     except sqlite3.Error:
-        return {}
-    return by_pair
-
-
-def match_km_coordinates(points: List[Tuple[float, float, float]], kmk_int: int) -> Optional[Tuple[float, float]]:
-    km_target = float(kmk_int)
-    for km, lat, lon in points:
-        if km == km_target:
-            return lat, lon
-    lo = kmk_int - 0.5
-    hi = kmk_int + 0.5
-    for km, lat, lon in points:
-        if lo <= km < hi:
-            return lat, lon
-    return None
+        return None
+    if not row:
+        return None
+    lat = read_double(row[0])
+    lon = read_double(row[1])
+    if lat is None or lon is None:
+        return None
+    return lat, lon
 
 
 def build_gps_by_triple_key(conn: sqlite3.Connection, cols: dict,
@@ -307,20 +266,33 @@ def build_gps_by_triple_key(conn: sqlite3.Connection, cols: dict,
     if not km_by_pair:
         return {}
 
-    gps_by_pair = load_gps_km_points_by_pair(conn, cols, set(km_by_pair.keys()))
-    if not gps_by_pair:
-        return {}
+    km_expr = km_int_expr(None, km_col)
+    lat_expr = f"CAST(REPLACE({cols['gps_lat']}, ',', '.') AS REAL)"
+    lon_expr = f"CAST(REPLACE({cols['gps_lon']}, ',', '.') AS REAL)"
+    sql_exact = (
+        f"SELECT {lat_expr}, {lon_expr} FROM {TABLE_GPS}"
+        f" WHERE {cols['gps_super_z']} = ? AND {cols['gps_super_d']} = ?"
+        f" AND {km_expr} = ? LIMIT 1"
+    )
+    sql_range = (
+        f"SELECT {lat_expr}, {lon_expr} FROM {TABLE_GPS}"
+        f" WHERE {cols['gps_super_z']} = ? AND {cols['gps_super_d']} = ?"
+        f" AND {km_expr} >= ? AND {km_expr} < ? LIMIT 1"
+    )
 
     out: Dict[str, Tuple[float, float]] = {}
     for pair, km_set in km_by_pair.items():
-        points = gps_by_pair.get(pair)
-        if not points:
-            continue
         super_z, super_d = pair.split("|", 1)
         for kmk in km_set:
-            coords = match_km_coordinates(points, kmk)
+            key = triple_key(super_z, super_d, kmk)
+            if key in out:
+                continue
+            coords = query_triple_gps(conn, cols, sql_exact, super_z, super_d, str(kmk))
+            if coords is None:
+                coords = query_triple_gps(
+                    conn, cols, sql_range, super_z, super_d, str(kmk - 0.5), str(kmk + 0.5))
             if coords is not None:
-                out[triple_key(super_z, super_d, kmk)] = coords
+                out[key] = coords
     return out
 
 
@@ -532,6 +504,10 @@ def main() -> int:
     conn = sqlite3.connect(db_path)
     try:
         cols = resolve_columns(conn)
+        conn.execute(
+            f"CREATE INDEX IF NOT EXISTS _dzs_gps_zd ON {TABLE_GPS}"
+            f" ({cols['gps_super_z']}, {cols['gps_super_d']})"
+        )
         if args.stats:
             print("Sloupce:", cols)
         ro, ro_rows = build_ro_index_and_rows(conn, cols)
@@ -543,6 +519,10 @@ def main() -> int:
     body = serialize_index(db_path, ro, gps, vyhybka_gps)
     with gzip.open(idx_path, "wb") as f:
         f.write(body)
+    sidecar_path = db_path + ".idx"
+    if os.path.abspath(sidecar_path) != os.path.abspath(idx_path):
+        with gzip.open(sidecar_path, "wb") as f:
+            f.write(body)
 
     elapsed = time.perf_counter() - t0
     print(f"Hotovo: {idx_path}")
