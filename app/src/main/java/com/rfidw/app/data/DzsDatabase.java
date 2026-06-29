@@ -240,7 +240,7 @@ public class DzsDatabase implements Closeable {
     private static File resolveWritableDatabaseFile(File source, File cacheDir,
                                                     OpenProgressListener listener) throws Exception {
         if (!source.isFile()) {
-            throw new Exception("Databáze nenalezena: " + path);
+            throw new Exception("Databáze nenalezena: " + source.getAbsolutePath());
         }
         if (cacheDir == null || cacheDir.equals(source.getParentFile())) {
             return source;
