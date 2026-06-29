@@ -35,6 +35,8 @@ Hlavní obrazovka vede operátora třemi kroky (**TUDU → Načtení → Hotovo*
 
 Vzorová databáze je ve složce [`sample_data/`](sample_data).
 
+**Předindexace (rychlejší start):** Index výhybek a GPS lze připravit na PC pomocí [`tools/preindex_dzs.py`](tools/preindex_dzs.py). Podrobný popis algoritmu, formátu cache a nasazení na zařízení je v [`docs/INDEXACE_DZS.md`](docs/INDEXACE_DZS.md).
+
 **Nápověda k části výhybky** – u výhybek se třemi částmi (1–3) se pod výběrem zobrazí textová nápověda:
 - část 1 → *jazyk*
 - část 2 → *levé rameno*

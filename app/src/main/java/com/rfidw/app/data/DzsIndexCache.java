@@ -15,8 +15,9 @@ import java.util.zip.GZIPOutputStream;
 
 /**
  * Disková cache paměťových indexů DZS databáze.
- * Klíč platnosti: velikost a čas změny SQLite souboru – při stejném obsahu se přeskočí
- * pomalé skenování tabulek při každém spuštění aplikace.
+ * Klíč platnosti: velikost a čas změny <b>zdrojového</b> SQLite souboru – při stejném
+ * obsahu se přeskočí pomalé skenování tabulek. Umožňuje předpřipravit .idx na PC
+ * (viz docs/INDEXACE_DZS.md a tools/preindex_dzs.py).
  */
 final class DzsIndexCache {
 
