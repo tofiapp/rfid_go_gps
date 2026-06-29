@@ -272,6 +272,7 @@ public class DzsDatabase implements Closeable {
                 .append(" WHERE ").append(roColumns.tudu).append(" IS NOT NULL AND ")
                 .append(roColumns.tudu).append(" <> ''")
                 .append(" AND ").append(vyhybkaExpr).append(" IS NOT NULL");
+        roColumns.appendPolohaFilter(sql, null);
         String[] args = null;
         if (codes != null && !codes.isEmpty()) {
             Set<String> unique = new HashSet<>(codes);
@@ -398,7 +399,9 @@ public class DzsDatabase implements Closeable {
         if (roColumns.vyhybkaFallback != null) {
             sql.append(", ").append(roColumns.vyhybkaFallback);
         }
-        sql.append(" FROM ").append(TABLE_RO_TPI);
+        sql.append(" FROM ").append(TABLE_RO_TPI)
+                .append(" WHERE 1=1");
+        roColumns.appendPolohaFilter(sql, null);
 
         try (Cursor c = db.rawQuery(sql.toString(), null)) {
             while (c.moveToNext()) {
@@ -443,8 +446,12 @@ public class DzsDatabase implements Closeable {
                 + " INNER JOIN ("
                 + "   SELECT DISTINCT " + roColumns.superZId + ", " + roColumns.superDId
                 + "   FROM " + TABLE_RO_TPI
-                + " ) ro ON g." + gpsColumns.superZId + " = ro." + roColumns.superZId
-                + " AND g." + gpsColumns.superDId + " = ro." + roColumns.superDId;
+                + "   WHERE 1=1";
+        StringBuilder roSubquery = new StringBuilder(sql);
+        roColumns.appendPolohaFilter(roSubquery, null);
+        sql = roSubquery.append(
+                " ) ro ON g." + gpsColumns.superZId + " = ro." + roColumns.superZId
+                + " AND g." + gpsColumns.superDId + " = ro." + roColumns.superDId).toString();
 
         List<GpsIndexEntry> out = new ArrayList<>();
         try (Cursor c = db.rawQuery(sql, null)) {
@@ -677,9 +684,10 @@ public class DzsDatabase implements Closeable {
         final String vyhybkaFallback;
         final String castMin;
         final String castMax;
+        final String poloha;
 
         RoColumns(String superZId, String superDId, String tudu, String vyhybka,
-                  String vyhybkaFallback, String castMin, String castMax) {
+                  String vyhybkaFallback, String castMin, String castMax, String poloha) {
             this.superZId = superZId;
             this.superDId = superDId;
             this.tudu = tudu;
@@ -687,6 +695,18 @@ public class DzsDatabase implements Closeable {
             this.vyhybkaFallback = vyhybkaFallback;
             this.castMin = castMin;
             this.castMax = castMax;
+            this.poloha = poloha;
+        }
+
+        /** Vyřadí řádky s prázdnou POLOHOU nebo textem „NULL“. */
+        void appendPolohaFilter(StringBuilder sql, String tableAlias) {
+            if (poloha == null) return;
+            String prefix = tableAlias == null || tableAlias.isEmpty()
+                    ? "" : tableAlias + ".";
+            String expr = "TRIM(CAST(" + prefix + poloha + " AS TEXT))";
+            sql.append(" AND ").append(prefix).append(poloha).append(" IS NOT NULL")
+                    .append(" AND ").append(expr).append(" <> ''")
+                    .append(" AND UPPER(").append(expr).append(") <> 'NULL'");
         }
 
         String vyhybkaSelectExpr(String tableAlias) {
@@ -719,7 +739,8 @@ public class DzsDatabase implements Closeable {
                     vyhybka,
                     vyhybkaFallback,
                     findOptionalColumn(cols, "CAST_MIN", "CASTMIN"),
-                    findOptionalColumn(cols, "CAST_MAX", "CASTMAX")
+                    findOptionalColumn(cols, "CAST_MAX", "CASTMAX"),
+                    findOptionalColumn(cols, "POLOHA")
             );
         }
     }
