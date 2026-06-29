@@ -97,6 +97,8 @@ public class MainActivity extends AppCompatActivity {
     private Tudu currentTudu;
     private Tudu.Vyhybka currentVyhybka;
     private DzsDatabase dzsDatabase;
+    /** Zruší zastaralé UI callbacky po novém načtení nebo zničení aktivity. */
+    private volatile long dbLoadGeneration;
     /** Režim výběru TUDU: true = GPS, false = ruční výběr ze seznamu. */
     private boolean gpsAutoSelection = true;
     private volatile boolean gpsLookupInFlight;
@@ -1767,7 +1769,7 @@ public class MainActivity extends AppCompatActivity {
                 File dbFile = copyUriToCache(uri, "dzs_source.db");
                 loadDatabaseFromPath(dbFile.getAbsolutePath(), name, true);
             } catch (Exception e) {
-                ui.post(() -> {
+                runOnUiThreadIfAlive(0, () -> {
                     tvSourceFile.setText("Chyba načtení: " + e.getMessage());
                     toast("Chyba načtení databáze");
                 });
@@ -1776,15 +1778,35 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void loadDatabaseFromPath(String path, String displayName, boolean showErrorToast) {
+        final long loadId = ++dbLoadGeneration;
+        DzsDatabase previous;
+        synchronized (this) {
+            previous = dzsDatabase;
+            dzsDatabase = null;
+        }
+        if (previous != null) {
+            try {
+                previous.close();
+            } catch (Exception ignored) {
+            }
+        }
         try {
             DzsDatabase.OpenProgressListener progress = (phase, percent) ->
-                    ui.post(() -> tvSourceFile.setText(getString(R.string.db_loading_phase, phase)));
+                    runOnUiThreadIfAlive(loadId, () ->
+                            tvSourceFile.setText(getString(R.string.db_loading_phase, phase)));
             DzsDatabase opened = DzsDatabase.open(path, getCacheDir(), progress);
+            if (loadId != dbLoadGeneration) {
+                opened.close();
+                return;
+            }
             int tuduCount = opened.countDistinctTudu();
             boolean manualMode = !prefs.getBoolean(PREF_TUDU_MODE_GPS, true);
             List<Tudu> loaded = manualMode ? opened.loadAllTudu() : Collections.emptyList();
-            ui.post(() -> {
-                closeDzsDatabase();
+            if (loadId != dbLoadGeneration) {
+                opened.close();
+                return;
+            }
+            runOnUiThreadIfAlive(loadId, () -> {
                 dzsDatabase = opened;
                 gpsAutoSelection = !manualMode;
                 tuduListFullyLoaded = manualMode;
@@ -1807,12 +1829,28 @@ public class MainActivity extends AppCompatActivity {
                 scrollToCard1();
                 onDatabaseLoaded();
             });
+        } catch (OutOfMemoryError e) {
+            Log.e(TAG, "Načtení databáze – nedostatek paměti", e);
+            runOnUiThreadIfAlive(loadId, () -> {
+                tvSourceFile.setText("Chyba načtení: nedostatek paměti (index GPS bodů je příliš velký)");
+                if (showErrorToast) toast("Chyba načtení databáze – nedostatek paměti");
+            });
         } catch (Exception e) {
-            ui.post(() -> {
+            Log.w(TAG, "Načtení databáze selhalo", e);
+            runOnUiThreadIfAlive(loadId, () -> {
                 tvSourceFile.setText("Chyba načtení: " + e.getMessage());
                 if (showErrorToast) toast("Chyba načtení databáze");
             });
         }
+    }
+
+    private void runOnUiThreadIfAlive(long loadId, Runnable action) {
+        if (isFinishing() || isDestroyed()) return;
+        ui.post(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            if (loadId != 0 && loadId != dbLoadGeneration) return;
+            action.run();
+        });
     }
 
     private void onDatabaseLoaded() {
@@ -1894,11 +1932,13 @@ public class MainActivity extends AppCompatActivity {
                 match = null;
             }
             final DzsDatabase.GpsMatch result = match;
+            final long loadId = dbLoadGeneration;
             ui.post(() -> {
+                if (isFinishing() || isDestroyed()) return;
                 cancelGpsLookupTimeout();
                 gpsLookupInFlight = false;
                 updatePowerPresetUi();
-                if (!gpsAutoSelection || dzsDatabase == null) return;
+                if (loadId != dbLoadGeneration || !gpsAutoSelection || dzsDatabase == null) return;
                 if (result == null) {
                     gpsLookupNoMatch = locationCache != null && locationCache.hasFix();
                     if (!workflowRunning) {
@@ -2579,6 +2619,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        dbLoadGeneration++;
         cancelGpsLookupTimeout();
         if (locationCache != null) locationCache.stop();
         closeDzsDatabase();

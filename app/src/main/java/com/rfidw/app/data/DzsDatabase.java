@@ -154,7 +154,7 @@ public class DzsDatabase implements Closeable {
     private final RoColumns roColumns;
     private final Map<String, RoIndexEntry> roByPairKey;
     private final List<GpsIndexEntry> gpsIndex;
-    private final SpatialGrid spatialGrid;
+    private volatile SpatialGrid spatialGrid;
 
     private DzsDatabase(SQLiteDatabase db, GpsColumns gpsColumns, RoColumns roColumns,
                         Map<String, RoIndexEntry> roByPairKey, List<GpsIndexEntry> gpsIndex) {
@@ -163,7 +163,27 @@ public class DzsDatabase implements Closeable {
         this.roColumns = roColumns;
         this.roByPairKey = roByPairKey;
         this.gpsIndex = gpsIndex;
-        this.spatialGrid = new SpatialGrid(gpsIndex);
+    }
+
+    private SpatialGrid spatialGrid() {
+        SpatialGrid grid = spatialGrid;
+        if (grid == null) {
+            synchronized (this) {
+                grid = spatialGrid;
+                if (grid == null) {
+                    grid = new SpatialGrid(gpsIndex);
+                    spatialGrid = grid;
+                }
+            }
+        }
+        return grid;
+    }
+
+    /** Sestaví prostorový index (volat z IO vlákna před návratem do UI). */
+    void ensureSpatialIndex(OpenProgressListener listener) {
+        report(listener, "Připravuji vyhledávání", 95);
+        spatialGrid();
+        report(listener, "Hotovo", 100);
     }
 
     public static DzsDatabase open(String path) throws Exception {
@@ -202,8 +222,9 @@ public class DzsDatabase implements Closeable {
                     saveIndexCache(dbFile, cacheDir, roByPairKey, gpsIndex);
                 }
             }
-            report(listener, "Hotovo", 100);
-            return new DzsDatabase(db, gpsColumns, roColumns, roByPairKey, gpsIndex);
+            DzsDatabase opened = new DzsDatabase(db, gpsColumns, roColumns, roByPairKey, gpsIndex);
+            opened.ensureSpatialIndex(listener);
+            return opened;
         } catch (Exception e) {
             db.close();
             throw e;
@@ -279,16 +300,21 @@ public class DzsDatabase implements Closeable {
     private static void saveIndexCache(File dbFile, File cacheDir,
                                        Map<String, RoIndexEntry> roByPairKey,
                                        List<GpsIndexEntry> gpsIndex) {
-        Map<String, DzsIndexCache.RoEntry> roOut = new HashMap<>(roByPairKey.size());
-        for (Map.Entry<String, RoIndexEntry> e : roByPairKey.entrySet()) {
-            RoIndexEntry ro = e.getValue();
-            roOut.put(e.getKey(), new DzsIndexCache.RoEntry(ro.tudu, ro.vyhybka));
-        }
-        List<DzsIndexCache.GpsEntry> gpsOut = new ArrayList<>(gpsIndex.size());
-        for (GpsIndexEntry gps : gpsIndex) {
-            gpsOut.add(new DzsIndexCache.GpsEntry(gps.pairKey, gps.latitude, gps.longitude));
-        }
-        DzsIndexCache.save(dbFile, new File(cacheDir, "dzs_index"), roOut, gpsOut);
+        DzsIndexCache.saveBody(dbFile, new File(cacheDir, "dzs_index"), out -> {
+            out.writeInt(roByPairKey.size());
+            for (Map.Entry<String, RoIndexEntry> e : roByPairKey.entrySet()) {
+                RoIndexEntry ro = e.getValue();
+                out.writeUTF(e.getKey());
+                out.writeUTF(ro.tudu);
+                out.writeInt(ro.vyhybka);
+            }
+            out.writeInt(gpsIndex.size());
+            for (GpsIndexEntry gps : gpsIndex) {
+                out.writeUTF(gps.pairKey);
+                out.writeDouble(gps.latitude);
+                out.writeDouble(gps.longitude);
+            }
+        });
     }
 
     /** Počet unikátních TUDU kódů v indexu (bez plného načtení výhybek). */
@@ -372,7 +398,7 @@ public class DzsDatabase implements Closeable {
         final double[] bestDistSq = {Double.MAX_VALUE};
         double cosLat = Math.cos(Math.toRadians(latitude));
 
-        spatialGrid.forEachNearest(latitude, longitude, gps -> {
+        spatialGrid().forEachNearest(latitude, longitude, gps -> {
             RoIndexEntry ro = roByPairKey.get(gps.pairKey);
             if (ro == null) return;
             double dLat = gps.latitude - latitude;

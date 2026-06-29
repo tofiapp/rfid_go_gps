@@ -5,6 +5,7 @@ import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -86,17 +87,14 @@ final class DzsIndexCache {
         }
     }
 
+    @FunctionalInterface
+    interface IndexBodyWriter {
+        void write(DataOutputStream out) throws IOException;
+    }
+
     static void save(File dbFile, File cacheDir, Map<String, RoEntry> roByPairKey,
                      List<GpsEntry> gpsIndex) {
-        if (dbFile == null || cacheDir == null || !dbFile.isFile()) return;
-        if (!cacheDir.exists() && !cacheDir.mkdirs()) return;
-        File cacheFile = cacheFileFor(dbFile, cacheDir);
-        File tmp = new File(cacheDir, cacheFile.getName() + ".tmp");
-        try (DataOutputStream out = new DataOutputStream(new GZIPOutputStream(new FileOutputStream(tmp)))) {
-            out.writeInt(MAGIC);
-            out.writeInt(VERSION);
-            out.writeLong(dbFile.length());
-            out.writeLong(dbFile.lastModified());
+        saveBody(dbFile, cacheDir, out -> {
             out.writeInt(roByPairKey.size());
             for (Map.Entry<String, RoEntry> e : roByPairKey.entrySet()) {
                 out.writeUTF(e.getKey());
@@ -109,6 +107,21 @@ final class DzsIndexCache {
                 out.writeDouble(gps.latitude);
                 out.writeDouble(gps.longitude);
             }
+        });
+    }
+
+    /** Zápis indexu bez mezilehlých kopií v paměti (pouze stream). */
+    static void saveBody(File dbFile, File cacheDir, IndexBodyWriter bodyWriter) {
+        if (dbFile == null || cacheDir == null || !dbFile.isFile() || bodyWriter == null) return;
+        if (!cacheDir.exists() && !cacheDir.mkdirs()) return;
+        File cacheFile = cacheFileFor(dbFile, cacheDir);
+        File tmp = new File(cacheDir, cacheFile.getName() + ".tmp");
+        try (DataOutputStream out = new DataOutputStream(new GZIPOutputStream(new FileOutputStream(tmp)))) {
+            out.writeInt(MAGIC);
+            out.writeInt(VERSION);
+            out.writeLong(dbFile.length());
+            out.writeLong(dbFile.lastModified());
+            bodyWriter.write(out);
             out.flush();
         } catch (Exception ignored) {
             tmp.delete();
