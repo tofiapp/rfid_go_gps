@@ -2,7 +2,7 @@
 """
 Předindexace DZS SQLite databáze pro RFID Go GPS.
 
-Sestaví soubor .idx kompatibilní s DzsIndexCache (verze 4) – stejný formát,
+Sestaví soubor .idx kompatibilní s DzsIndexCache (verze 5) – stejný formát,
 jaký aplikace ukládá po první indexaci. Index lze zkopírovat na zařízení do:
 
   /data/data/com.rfidw.app.gps/cache/dzs_index/
@@ -24,7 +24,7 @@ import time
 from typing import Dict, List, Optional, Tuple
 
 MAGIC = 0x445A5349  # "DZSI"
-VERSION = 4
+VERSION = 5
 
 TABLE_GPS = "DZS_SUPERTRA_GPS_KM"
 TABLE_RO = "DZS_SUPER_RO_TPI"
@@ -154,6 +154,8 @@ def resolve_columns(conn: sqlite3.Connection) -> dict:
         "ro_vyhybka": vyhybka,
         "ro_vyhybka_fallback": vyhybka_fallback,
         "ro_poloha": find_column(ro_cols, ("POLOHA",), required=False),
+        "gps_km_int": find_column(gps_cols, ("KM_INT", "KM", "KILOMETR"), required=False),
+        "ro_kmk_int": find_column(ro_cols, ("KMK_INT", "KM_INT", "KILOMETR"), required=False),
     }
 
 
@@ -198,6 +200,108 @@ def build_ro_index(conn: sqlite3.Connection, cols: dict) -> Dict[str, Tuple[str,
             continue
         ro[pair_key(super_z, super_d)] = (tudu, vyhybka_num)
     return ro
+
+
+def km_int_expr(alias: str, column: str) -> str:
+    return f"CAST(REPLACE(TRIM(CAST({alias}.{column} AS TEXT)), ',', '.') AS REAL)"
+
+
+def triple_key(super_z_id: str, super_d_id: str, km: int) -> str:
+    return f"{super_z_id}|{super_d_id}|{km}"
+
+
+def build_gps_by_triple_key(conn: sqlite3.Connection, cols: dict,
+                            ro: Dict[str, Tuple[str, int]]) -> Dict[str, Tuple[float, float]]:
+    km_col = cols["gps_km_int"]
+    if not km_col or not ro:
+        return {}
+
+    conn.execute("CREATE TEMP TABLE IF NOT EXISTS _dzs_ro_pairs ("
+                 "super_z_id TEXT NOT NULL, super_d_id TEXT NOT NULL,"
+                 "PRIMARY KEY (super_z_id, super_d_id))")
+    conn.execute("DELETE FROM _dzs_ro_pairs")
+    conn.executemany(
+        "INSERT OR IGNORE INTO _dzs_ro_pairs (super_z_id, super_d_id) VALUES (?, ?)",
+        [split_pair_key(k) for k in ro.keys()],
+    )
+
+    lat_expr = f"CAST(REPLACE(g.{cols['gps_lat']}, ',', '.') AS REAL)"
+    lon_expr = f"CAST(REPLACE(g.{cols['gps_lon']}, ',', '.') AS REAL)"
+    km_expr = km_int_expr("g", km_col)
+    sql = f"""
+        SELECT g.{cols['gps_super_z']}, g.{cols['gps_super_d']}, {km_expr}, {lat_expr}, {lon_expr}
+        FROM {TABLE_GPS} g
+        INNER JOIN _dzs_ro_pairs rp
+          ON g.{cols['gps_super_z']} = rp.super_z_id
+         AND g.{cols['gps_super_d']} = rp.super_d_id
+        WHERE g.{km_col} IS NOT NULL
+    """
+    out: Dict[str, Tuple[float, float]] = {}
+    try:
+        for row in conn.execute(sql):
+            super_z = normalize_id(row[0])
+            super_d = normalize_id(row[1])
+            km = read_int(row[2])
+            lat = read_double(row[3])
+            lon = read_double(row[4])
+            if not super_z or not super_d or km is None or lat is None or lon is None:
+                continue
+            out[triple_key(super_z, super_d, km)] = (lat, lon)
+    except sqlite3.Error:
+        return {}
+    return out
+
+
+def build_vyhybka_gps_index(conn: sqlite3.Connection, cols: dict,
+                            ro: Dict[str, Tuple[str, int]],
+                            gps: List[Tuple[str, float, float]]) -> List[Tuple[str, int, float, float]]:
+    gps_by_pair = {key: (lat, lon) for key, lat, lon in gps}
+    gps_by_triple = build_gps_by_triple_key(conn, cols, ro)
+
+    vyhybka = vyhybka_expr(cols)
+    kmk_col = cols["ro_kmk_int"]
+    select_cols = (
+        f"{cols['ro_tudu']}, {vyhybka}, {cols['ro_super_z']}, {cols['ro_super_d']}"
+        + (f", {kmk_col}" if kmk_col else "")
+    )
+    sql = f"""
+        SELECT {select_cols}
+        FROM {TABLE_RO}
+        WHERE {cols['ro_tudu']} IS NOT NULL AND {cols['ro_tudu']} <> ''
+          AND {vyhybka} IS NOT NULL
+        {poloha_filter(cols)}
+    """
+
+    seen: set = set()
+    out: List[Tuple[str, int, float, float]] = []
+    for row in conn.execute(sql):
+        tudu = (row[0] or "").strip()
+        vyhybka_num = read_int(row[1])
+        super_z = normalize_id(row[2])
+        super_d = normalize_id(row[3])
+        if not tudu or vyhybka_num is None or not super_z or not super_d:
+            continue
+
+        lat = None
+        lon = None
+        if gps_by_triple and kmk_col:
+            kmk = read_int(row[4])
+            if kmk is not None:
+                coords = gps_by_triple.get(triple_key(super_z, super_d, kmk))
+                if coords is not None:
+                    lat, lon = coords
+        if lat is None or lon is None:
+            coords = gps_by_pair.get(pair_key(super_z, super_d))
+            if coords is None:
+                continue
+            lat, lon = coords
+
+        dedupe = (tudu, vyhybka_num)
+        if dedupe in seen:
+            continue
+        seen.add(dedupe)
+        out.append((tudu, vyhybka_num, lat, lon))
+    return out
 
 
 def build_gps_index(conn: sqlite3.Connection, cols: dict, ro: Dict[str, Tuple[str, int]]) -> List[Tuple[str, float, float]]:
@@ -290,7 +394,8 @@ def cache_filename(db_path: str) -> str:
 
 
 def serialize_index(db_path: str, ro: Dict[str, Tuple[str, int]],
-                    gps: List[Tuple[str, float, float]]) -> bytes:
+                    gps: List[Tuple[str, float, float]],
+                    vyhybka_gps: List[Tuple[str, int, float, float]]) -> bytes:
     size = os.path.getsize(db_path)
     mtime_ms = int(os.path.getmtime(db_path) * 1000)
     parts = [write_int(MAGIC), write_int(VERSION), write_long(size), write_long(mtime_ms)]
@@ -302,6 +407,12 @@ def serialize_index(db_path: str, ro: Dict[str, Tuple[str, int]],
     parts.append(write_int(len(gps)))
     for key, lat, lon in gps:
         parts.append(write_utf(key))
+        parts.append(write_double(lat))
+        parts.append(write_double(lon))
+    parts.append(write_int(len(vyhybka_gps)))
+    for tudu, vyhybka, lat, lon in vyhybka_gps:
+        parts.append(write_utf(tudu))
+        parts.append(write_int(vyhybka))
         parts.append(write_double(lat))
         parts.append(write_double(lon))
     return b"".join(parts)
@@ -337,6 +448,12 @@ def verify_index(db_path: str, idx_path: str) -> bool:
             read_utf()
             struct.unpack(">d", f.read(8))
             struct.unpack(">d", f.read(8))
+        vyhybka_gps_count = read_int()
+        for _ in range(vyhybka_gps_count):
+            read_utf()
+            read_int()
+            struct.unpack(">d", f.read(8))
+            struct.unpack(">d", f.read(8))
         extra = f.read(1)
         if extra:
             print("CHYBA: přebytečná data na konci", file=sys.stderr)
@@ -370,10 +487,11 @@ def main() -> int:
             print("Sloupce:", cols)
         ro = build_ro_index(conn, cols)
         gps = build_gps_index(conn, cols, ro)
+        vyhybka_gps = build_vyhybka_gps_index(conn, cols, ro, gps)
     finally:
         conn.close()
 
-    body = serialize_index(db_path, ro, gps)
+    body = serialize_index(db_path, ro, gps, vyhybka_gps)
     with gzip.open(idx_path, "wb") as f:
         f.write(body)
 
@@ -381,6 +499,7 @@ def main() -> int:
     print(f"Hotovo: {idx_path}")
     print(f"  RO záznamů: {len(ro)}")
     print(f"  GPS bodů:   {len(gps)}")
+    print(f"  Výhybky GPS: {len(vyhybka_gps)}")
     print(f"  Čas:        {elapsed:.1f} s")
     print(f"  Otisk:      velikost={os.path.getsize(db_path)}, mtime_ms={int(os.path.getmtime(db_path) * 1000)}")
 
