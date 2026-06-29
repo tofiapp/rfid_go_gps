@@ -279,11 +279,13 @@ public class DzsDatabase implements Closeable {
             RoColumns roColumns = RoColumns.resolve(db, TABLE_RO_TPI);
             ensureGpsPairIndex(db, gpsColumns);
 
+            String contentHash = null;
             DzsIndexCache.LoadedIndex cached = null;
             if (cacheDir != null) {
-                report(listener, "Načítám cache indexu", 10);
-                // Otisk zdrojové DB – umožňuje předpřipravit .idx na PC (viz docs/INDEXACE_DZS.md).
-                cached = DzsIndexCache.tryLoad(sourceFile, new File(cacheDir, "dzs_index"));
+                report(listener, "Kontrola databáze", 8);
+                contentHash = DzsIndexCache.computeContentHash(sourceFile);
+                report(listener, "Načítám cache indexu", 12);
+                cached = DzsIndexCache.tryLoad(sourceFile, contentHash, new File(cacheDir, "dzs_index"));
             }
 
             Map<String, RoIndexEntry> roByPairKey;
@@ -305,7 +307,10 @@ public class DzsDatabase implements Closeable {
                         db, gpsColumns, roColumns, roBuild.vyhybkaRows, gpsIndex);
                 report(listener, "Ukládám cache", 85);
                 if (cacheDir != null) {
-                    saveIndexCache(sourceFile, cacheDir, roByPairKey, gpsIndex, vyhybkaGpsByTudu);
+                    if (contentHash == null) {
+                        contentHash = DzsIndexCache.computeContentHash(sourceFile);
+                    }
+                    saveIndexCache(sourceFile, contentHash, cacheDir, roByPairKey, gpsIndex, vyhybkaGpsByTudu);
                 }
             }
             DzsDatabase opened = new DzsDatabase(db, gpsColumns, roColumns, roByPairKey, gpsIndex,
@@ -337,8 +342,7 @@ public class DzsDatabase implements Closeable {
         File cached = new File(cacheDir, "sqlite_"
                 + Long.toHexString(source.length()) + "_"
                 + Long.toHexString(source.lastModified()) + ".db");
-        if (!cached.isFile() || cached.length() != source.length()
-                || cached.lastModified() < source.lastModified()) {
+        if (!cached.isFile() || cached.length() != source.length()) {
             copyFile(source, cached);
         }
         return cached;
@@ -416,11 +420,11 @@ public class DzsDatabase implements Closeable {
         return list;
     }
 
-    private static void saveIndexCache(File dbFile, File cacheDir,
+    private static void saveIndexCache(File dbFile, String contentHash, File cacheDir,
                                        Map<String, RoIndexEntry> roByPairKey,
                                        List<GpsIndexEntry> gpsIndex,
                                        Map<String, Map<Integer, VyhybkaGpsCoords>> vyhybkaGpsByTudu) {
-        DzsIndexCache.save(dbFile, new File(cacheDir, "dzs_index"), toRoCache(roByPairKey),
+        DzsIndexCache.save(dbFile, contentHash, new File(cacheDir, "dzs_index"), toRoCache(roByPairKey),
                 toGpsCache(gpsIndex), flattenVyhybkaGpsIndex(vyhybkaGpsByTudu));
     }
 
@@ -816,81 +820,126 @@ public class DzsDatabase implements Closeable {
         return points;
     }
 
+    /** Kilometrický bod GPS tabulky – načtený hromadně pro párování v paměti. */
+    private static final class KmGpsPoint {
+        final double km;
+        final double latitude;
+        final double longitude;
+
+        KmGpsPoint(double km, double latitude, double longitude) {
+            this.km = km;
+            this.latitude = latitude;
+            this.longitude = longitude;
+        }
+    }
+
     /**
-     * GPS souřadnice po SUPER_Z_ID|SUPER_D_ID|KMK_INT – cílený dotaz na každou trojici
-     * (filtr ID + úzké km okno), ne načtení celého kilometrického průběhu úseku.
+     * GPS souřadnice po SUPER_Z_ID|SUPER_D_ID|KMK_INT – jeden SQL průchod GPS tabulky
+     * pro relevantní páry ID, párování km bodů pak probíhá v paměti.
      */
     private static Map<String, VyhybkaGpsCoords> buildGpsByTripleKey(
             SQLiteDatabase db, GpsColumns gpsColumns, List<RoVyhybkaRow> roRows) {
         Map<String, Set<Integer>> kmByPair = collectKmIntsByPair(roRows);
-        if (kmByPair.isEmpty()) return Collections.emptyMap();
+        if (kmByPair.isEmpty() || gpsColumns.kmInt == null) return Collections.emptyMap();
 
-        String kmExpr = kmIntExpr(null, gpsColumns.kmInt);
-        String latExpr = gpsColumns.latitudeExpr(null);
-        String lonExpr = gpsColumns.longitudeExpr(null);
-        String sqlExact = "SELECT " + latExpr + ", " + lonExpr + " FROM " + TABLE_GPS_KM
-                + " WHERE " + gpsColumns.superZId + " = ? AND " + gpsColumns.superDId + " = ?"
-                + " AND " + kmExpr + " = ? LIMIT 1";
-        String sqlRange = "SELECT " + latExpr + ", " + lonExpr + " FROM " + TABLE_GPS_KM
-                + " WHERE " + gpsColumns.superZId + " = ? AND " + gpsColumns.superDId + " = ?"
-                + " AND " + kmExpr + " >= ? AND " + kmExpr + " < ? LIMIT 1";
-        String sqlRound = "SELECT " + latExpr + ", " + lonExpr + " FROM " + TABLE_GPS_KM
-                + " WHERE " + gpsColumns.superZId + " = ? AND " + gpsColumns.superDId + " = ?"
-                + " AND CAST(ROUND(" + kmExpr + ") AS INTEGER) = ? LIMIT 1";
-        String sqlNearest = "SELECT " + latExpr + ", " + lonExpr + " FROM " + TABLE_GPS_KM
-                + " WHERE " + gpsColumns.superZId + " = ? AND " + gpsColumns.superDId + " = ?"
-                + " AND " + kmExpr + " IS NOT NULL"
-                + " ORDER BY ABS(" + kmExpr + " - ?) LIMIT 1";
+        Map<String, List<KmGpsPoint>> gpsByPair = loadGpsKmPointsByPair(db, gpsColumns, kmByPair.keySet());
+        if (gpsByPair.isEmpty()) return Collections.emptyMap();
 
         Map<String, VyhybkaGpsCoords> result = new HashMap<>();
-        db.beginTransaction();
-        try {
-            for (Map.Entry<String, Set<Integer>> entry : kmByPair.entrySet()) {
-                String[] ids = splitPairKey(entry.getKey());
-                for (int kmkInt : entry.getValue()) {
-                    String triple = tripleKey(ids[0], ids[1], kmkInt);
-                    if (result.containsKey(triple)) continue;
-
-                    VyhybkaGpsCoords coords = queryTripleGps(
-                            db, sqlExact, ids[0], ids[1], String.valueOf(kmkInt));
-                    if (coords == null) {
-                        coords = queryTripleGps(db, sqlRange, ids[0], ids[1],
-                                String.valueOf(kmkInt - 0.5), String.valueOf(kmkInt + 0.5));
-                    }
-                    if (coords == null) {
-                        coords = queryTripleGps(db, sqlRound, ids[0], ids[1], String.valueOf(kmkInt));
-                    }
-                    if (coords == null) {
-                        coords = queryTripleGps(db, sqlNearest, ids[0], ids[1], String.valueOf(kmkInt));
-                    }
-                    if (coords != null) {
-                        result.put(triple, coords);
-                    }
+        for (Map.Entry<String, Set<Integer>> entry : kmByPair.entrySet()) {
+            List<KmGpsPoint> points = gpsByPair.get(entry.getKey());
+            if (points == null || points.isEmpty()) continue;
+            String[] ids = splitPairKey(entry.getKey());
+            for (int kmkInt : entry.getValue()) {
+                String triple = tripleKey(ids[0], ids[1], kmkInt);
+                if (result.containsKey(triple)) continue;
+                VyhybkaGpsCoords coords = findKmCoords(points, kmkInt);
+                if (coords != null) {
+                    result.put(triple, coords);
                 }
             }
-            db.setTransactionSuccessful();
-        } finally {
-            db.endTransaction();
         }
         return result;
     }
 
-    private static VyhybkaGpsCoords queryTripleGps(SQLiteDatabase db, String sql,
-                                                 String superZId, String superDId,
-                                                 String... extraArgs) {
-        String[] args = new String[2 + extraArgs.length];
-        args[0] = superZId;
-        args[1] = superDId;
-        System.arraycopy(extraArgs, 0, args, 2, extraArgs.length);
-        try (Cursor c = db.rawQuery(sql, args)) {
-            if (!c.moveToFirst()) return null;
-            Double lat = readDouble(c, 0);
-            Double lon = readDouble(c, 1);
-            if (lat == null || lon == null) return null;
-            return new VyhybkaGpsCoords(lat, lon);
-        } catch (Exception ignored) {
-            return null;
+    /** Načte všechny km body pro páry z RO indexu jedním dotazem (místo dotazu na každou trojici). */
+    private static Map<String, List<KmGpsPoint>> loadGpsKmPointsByPair(
+            SQLiteDatabase db, GpsColumns gpsColumns, Set<String> pairKeys) {
+        if (pairKeys.isEmpty()) return Collections.emptyMap();
+
+        Map<String, RoIndexEntry> pairMap = new HashMap<>(pairKeys.size());
+        for (String key : pairKeys) {
+            pairMap.put(key, new RoIndexEntry("", 0));
         }
+        if (!populateRoPairsTempTable(db, pairMap)) {
+            return Collections.emptyMap();
+        }
+
+        String kmExpr = kmIntExpr("g", gpsColumns.kmInt);
+        String latExpr = gpsColumns.latitudeExpr("g");
+        String lonExpr = gpsColumns.longitudeExpr("g");
+        String sql = "SELECT g." + gpsColumns.superZId + ", g." + gpsColumns.superDId
+                + ", " + kmExpr + ", " + latExpr + ", " + lonExpr
+                + " FROM " + TABLE_GPS_KM + " g"
+                + " INNER JOIN " + TEMP_RO_PAIRS + " rp"
+                + "   ON g." + gpsColumns.superZId + " = rp.super_z_id"
+                + "   AND g." + gpsColumns.superDId + " = rp.super_d_id"
+                + " WHERE " + kmExpr + " IS NOT NULL"
+                + " ORDER BY g." + gpsColumns.superZId + ", g." + gpsColumns.superDId + ", " + kmExpr;
+
+        Map<String, List<KmGpsPoint>> result = new HashMap<>();
+        try (Cursor c = db.rawQuery(sql, null)) {
+            while (c.moveToNext()) {
+                String superZId = readId(c, 0);
+                String superDId = readId(c, 1);
+                Double km = readDouble(c, 2);
+                Double lat = readDouble(c, 3);
+                Double lon = readDouble(c, 4);
+                if (superZId == null || superDId == null || km == null || lat == null || lon == null) {
+                    continue;
+                }
+                result.computeIfAbsent(pairKey(superZId, superDId), k -> new ArrayList<>())
+                        .add(new KmGpsPoint(km, lat, lon));
+            }
+        } catch (Exception ignored) {
+            return Collections.emptyMap();
+        }
+        return result;
+    }
+
+    /** Stejná logika jako dřívější SQL fallbacky: přesná shoda → okno → zaokrouhlení → nejbližší km. */
+    private static VyhybkaGpsCoords findKmCoords(List<KmGpsPoint> points, int kmkInt) {
+        double target = kmkInt;
+        KmGpsPoint exact = null;
+        KmGpsPoint inRange = null;
+        KmGpsPoint rounded = null;
+        KmGpsPoint nearest = null;
+        double nearestDiff = Double.MAX_VALUE;
+
+        for (KmGpsPoint p : points) {
+            if (p.km == target) {
+                exact = p;
+                break;
+            }
+            if (p.km >= target - 0.5 && p.km < target + 0.5) {
+                inRange = p;
+            }
+            if (Math.round(p.km) == kmkInt) {
+                rounded = p;
+            }
+            double diff = Math.abs(p.km - target);
+            if (diff < nearestDiff) {
+                nearestDiff = diff;
+                nearest = p;
+            }
+        }
+
+        KmGpsPoint hit = exact != null ? exact
+                : inRange != null ? inRange
+                : rounded != null ? rounded
+                : nearest;
+        if (hit == null) return null;
+        return new VyhybkaGpsCoords(hit.latitude, hit.longitude);
     }
 
     private static Map<String, Set<Integer>> collectKmIntsByPair(List<RoVyhybkaRow> roRows) {

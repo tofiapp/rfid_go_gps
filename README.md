@@ -37,7 +37,7 @@ Hlavní obrazovka vede operátora třemi kroky (**TUDU → Načtení → Hotovo*
 
 Vzorová databáze je ve složce [`sample_data/`](sample_data).
 
-**Předindexace (rychlejší start):** Index lze připravit na PC **bez Pythonu** – stačí Java 17+ a `preindex-dzs.jar` (viz [`docs/INDEXACE_DZS.md`](docs/INDEXACE_DZS.md)). Alternativně [`tools/preindex_dzs.py`](tools/preindex_dzs.py) s Pythonem 3.
+**Indexace a cache:** Při prvním otevření databáze aplikace sama sestaví index (výhybky, GPS body, souřadnice výhybek). Výsledek uloží do cache podle otisku obsahu souboru – po restartu aplikace se index znovu načte během desítek sekund, bez opakovaného skenování tabulek. Podrobnosti viz [`docs/INDEXACE_DZS.md`](docs/INDEXACE_DZS.md).
 
 **Nápověda k části výhybky** – u výhybek se třemi částmi (1–3) se pod výběrem zobrazí textová nápověda:
 - část 1 → *jazyk*

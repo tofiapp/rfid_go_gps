@@ -8,23 +8,25 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
 /**
  * Disková cache paměťových indexů DZS databáze.
- * Klíč platnosti: velikost a čas změny <b>zdrojového</b> SQLite souboru – při stejném
- * obsahu se přeskočí pomalé skenování tabulek. Umožňuje předpřipravit .idx na PC
- * (viz docs/INDEXACE_DZS.md a tools/preindex_dzs.py).
+ * Platnost indexu je vázaná na velikost a SHA-256 obsahu databáze – přežije
+ * kopírování souboru a restart aplikace (na rozdíl od lastModified).
  */
 final class DzsIndexCache {
 
     private static final int MAGIC = 0x445A5349; // "DZSI"
-    private static final int VERSION = 5;
+    private static final int VERSION = 6;
+    private static final int HASH_HEX_LEN = 64;
 
     static final class RoEntry {
         final String tudu;
@@ -79,38 +81,45 @@ final class DzsIndexCache {
     private DzsIndexCache() {
     }
 
+    /** SHA-256 celého souboru databáze (hex, lowercase). */
+    static String computeContentHash(File dbFile) throws IOException {
+        if (dbFile == null || !dbFile.isFile()) {
+            throw new IOException("Databáze nenalezena");
+        }
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buf = new byte[65536];
+            try (InputStream in = new FileInputStream(dbFile)) {
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    digest.update(buf, 0, n);
+                }
+            }
+            byte[] hash = digest.digest();
+            StringBuilder sb = new StringBuilder(HASH_HEX_LEN);
+            for (byte b : hash) {
+                sb.append(String.format(Locale.ROOT, "%02x", b));
+            }
+            return sb.toString();
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("Nelze spočítat otisk databáze", e);
+        }
+    }
+
     /**
-     * Načte platný index z cache aplikace, ze složky databáze nebo ze sidecar souboru
-     * {@code databaze.sqlite.idx}.
+     * Načte platný index z cache aplikace podle otisku obsahu databáze.
      */
-    static LoadedIndex tryLoad(File dbFile, File cacheDir) {
-        if (dbFile == null || !dbFile.isFile()) return null;
-
-        File appCacheFile = cacheDir != null ? cacheFileFor(dbFile, cacheDir) : null;
-        if (appCacheFile != null && appCacheFile.isFile()) {
-            LoadedIndex loaded = readIndex(dbFile, appCacheFile);
-            if (loaded != null) return loaded;
+    static LoadedIndex tryLoad(File dbFile, String contentHash, File cacheDir) {
+        if (dbFile == null || !dbFile.isFile() || contentHash == null || contentHash.isEmpty()) {
+            return null;
         }
+        if (cacheDir == null) return null;
 
-        File parent = dbFile.getParentFile();
-        if (parent != null) {
-            File sibling = new File(parent, cacheFileName(dbFile));
-            LoadedIndex loaded = readIndex(dbFile, sibling);
-            if (loaded != null) {
-                importToAppCache(dbFile, cacheDir, sibling);
-                return loaded;
-            }
-        }
-
-        File sidecar = new File(dbFile.getAbsolutePath() + ".idx");
-        if (sidecar.isFile()) {
-            LoadedIndex loaded = readIndex(dbFile, sidecar);
-            if (loaded != null) {
-                importToAppCache(dbFile, cacheDir, sidecar);
-                return loaded;
-            }
-        }
-        return null;
+        File cacheFile = cacheFileFor(contentHash, cacheDir);
+        if (!cacheFile.isFile()) return null;
+        return readIndex(dbFile.length(), contentHash, cacheFile);
     }
 
     @FunctionalInterface
@@ -118,9 +127,9 @@ final class DzsIndexCache {
         void write(DataOutputStream out) throws IOException;
     }
 
-    static void save(File dbFile, File cacheDir, Map<String, RoEntry> roByPairKey,
+    static void save(File dbFile, String contentHash, File cacheDir, Map<String, RoEntry> roByPairKey,
                      List<GpsEntry> gpsIndex, List<VyhybkaGpsEntry> vyhybkaGpsIndex) {
-        saveBody(dbFile, cacheDir, out -> {
+        saveBody(dbFile, contentHash, cacheDir, out -> {
             out.writeInt(roByPairKey.size());
             for (Map.Entry<String, RoEntry> e : roByPairKey.entrySet()) {
                 out.writeUTF(e.getKey());
@@ -144,16 +153,17 @@ final class DzsIndexCache {
     }
 
     /** Zápis indexu bez mezilehlých kopií v paměti (pouze stream). */
-    static void saveBody(File dbFile, File cacheDir, IndexBodyWriter bodyWriter) {
+    static void saveBody(File dbFile, String contentHash, File cacheDir, IndexBodyWriter bodyWriter) {
         if (dbFile == null || cacheDir == null || !dbFile.isFile() || bodyWriter == null) return;
+        if (contentHash == null || contentHash.length() != HASH_HEX_LEN) return;
         if (!cacheDir.exists() && !cacheDir.mkdirs()) return;
-        File cacheFile = cacheFileFor(dbFile, cacheDir);
+        File cacheFile = cacheFileFor(contentHash, cacheDir);
         File tmp = new File(cacheDir, cacheFile.getName() + ".tmp");
         try (DataOutputStream out = new DataOutputStream(new GZIPOutputStream(new FileOutputStream(tmp)))) {
             out.writeInt(MAGIC);
             out.writeInt(VERSION);
             out.writeLong(dbFile.length());
-            out.writeLong(dbFile.lastModified());
+            out.writeUTF(contentHash);
             bodyWriter.write(out);
             out.flush();
         } catch (Exception ignored) {
@@ -165,13 +175,13 @@ final class DzsIndexCache {
         }
     }
 
-    private static LoadedIndex readIndex(File dbFile, File indexFile) {
+    private static LoadedIndex readIndex(long dbSize, String contentHash, File indexFile) {
         if (indexFile == null || !indexFile.isFile()) return null;
         try (DataInputStream in = new DataInputStream(new GZIPInputStream(new FileInputStream(indexFile)))) {
             if (in.readInt() != MAGIC || in.readInt() != VERSION) return null;
             long cachedSize = in.readLong();
-            long cachedMtime = in.readLong();
-            if (cachedSize != dbFile.length() || cachedMtime != dbFile.lastModified()) {
+            String cachedHash = in.readUTF();
+            if (cachedSize != dbSize || !contentHash.equals(cachedHash)) {
                 return null;
             }
             int roCount = in.readInt();
@@ -197,34 +207,7 @@ final class DzsIndexCache {
         }
     }
 
-    private static void importToAppCache(File dbFile, File cacheDir, File sourceIndex) {
-        if (cacheDir == null || sourceIndex == null) return;
-        File dest = cacheFileFor(dbFile, cacheDir);
-        if (dest.isFile() && dest.length() == sourceIndex.length()) return;
-        if (!cacheDir.exists() && !cacheDir.mkdirs()) return;
-        try {
-            copyFile(sourceIndex, dest);
-        } catch (IOException ignored) {
-        }
-    }
-
-    private static void copyFile(File source, File dest) throws IOException {
-        try (InputStream in = new FileInputStream(source);
-             OutputStream out = new FileOutputStream(dest)) {
-            byte[] buf = new byte[8192];
-            int n;
-            while ((n = in.read(buf)) > 0) {
-                out.write(buf, 0, n);
-            }
-        }
-    }
-
-    private static File cacheFileFor(File dbFile, File cacheDir) {
-        return new File(cacheDir, cacheFileName(dbFile));
-    }
-
-    private static String cacheFileName(File dbFile) {
-        return "dzs_" + Long.toHexString(dbFile.length())
-                + "_" + Long.toHexString(dbFile.lastModified()) + ".idx";
+    private static File cacheFileFor(String contentHash, File cacheDir) {
+        return new File(cacheDir, "dzs_" + contentHash + ".idx");
     }
 }
