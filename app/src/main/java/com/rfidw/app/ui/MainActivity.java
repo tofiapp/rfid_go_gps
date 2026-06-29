@@ -541,13 +541,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String formatNearbyTuduLabel(DzsDatabase.GpsMatch match) {
-        String dist;
-        if (match.distanceM < 1000) {
-            dist = String.format(Locale.ROOT, "%.0f m", match.distanceM);
-        } else {
-            dist = String.format(Locale.ROOT, "%.1f km", match.distanceM / 1000.0);
-        }
-        return match.tudu + " · " + dist;
+        return match.tudu;
     }
 
     private void showFullTuduPicker() {
@@ -681,7 +675,7 @@ public class MainActivity extends AppCompatActivity {
                 showVyhybkaPickerDialog(null);
             }
         };
-        if (currentTudu.vyhybky.isEmpty() && dzsDatabase != null) {
+        if (dzsDatabase != null) {
             ensureTuduDetailsLoaded(currentTudu.code, showPicker);
         } else {
             showPicker.run();
