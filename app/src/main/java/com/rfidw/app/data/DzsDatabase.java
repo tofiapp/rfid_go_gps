@@ -45,14 +45,41 @@ public class DzsDatabase implements Closeable {
         }
     }
 
+    private static final class RoIndexEntry {
+        final String tudu;
+        final int vyhybka;
+
+        RoIndexEntry(String tudu, int vyhybka) {
+            this.tudu = tudu;
+            this.vyhybka = vyhybka;
+        }
+    }
+
+    private static final class GpsIndexEntry {
+        final String pairKey;
+        final double latitude;
+        final double longitude;
+
+        GpsIndexEntry(String pairKey, double latitude, double longitude) {
+            this.pairKey = pairKey;
+            this.latitude = latitude;
+            this.longitude = longitude;
+        }
+    }
+
     private final SQLiteDatabase db;
     private final GpsColumns gpsColumns;
     private final RoColumns roColumns;
+    private final Map<String, RoIndexEntry> roByPairKey;
+    private final List<GpsIndexEntry> gpsIndex;
 
-    private DzsDatabase(SQLiteDatabase db, GpsColumns gpsColumns, RoColumns roColumns) {
+    private DzsDatabase(SQLiteDatabase db, GpsColumns gpsColumns, RoColumns roColumns,
+                        Map<String, RoIndexEntry> roByPairKey, List<GpsIndexEntry> gpsIndex) {
         this.db = db;
         this.gpsColumns = gpsColumns;
         this.roColumns = roColumns;
+        this.roByPairKey = roByPairKey;
+        this.gpsIndex = gpsIndex;
     }
 
     public static DzsDatabase open(String path) throws Exception {
@@ -61,7 +88,9 @@ public class DzsDatabase implements Closeable {
         try {
             GpsColumns gpsColumns = GpsColumns.resolve(db, TABLE_GPS_KM);
             RoColumns roColumns = RoColumns.resolve(db, TABLE_RO_TPI);
-            return new DzsDatabase(db, gpsColumns, roColumns);
+            Map<String, RoIndexEntry> roByPairKey = buildRoIndex(db, roColumns);
+            List<GpsIndexEntry> gpsIndex = buildGpsIndex(db, gpsColumns, roByPairKey);
+            return new DzsDatabase(db, gpsColumns, roColumns, roByPairKey, gpsIndex);
         } catch (Exception e) {
             db.close();
             throw e;
@@ -110,87 +139,94 @@ public class DzsDatabase implements Closeable {
     }
 
     /**
-     * Najde nejbližší bod v DZS_SUPERTRA_GPS_KM podle sloupců LAT/LON (nebo ekvivalent),
-     * který má odpovídající schodu v DZS_SUPER_RO_TPI (SUPER_Z_ID + SUPER_D_ID).
-     * JOIN používá stejnou normalizaci ID na obou stranách – jinak lookup často selže.
+     * Najde nejbližší bod v paměťovém indexu GPS bodů, který má odpovídající záznam
+     * v DZS_SUPER_RO_TPI (SUPER_Z_ID + SUPER_D_ID). Index se sestaví při otevření DB.
      */
     public GpsMatch findNearest(double latitude, double longitude) {
-        String latExpr = gpsColumns.latitudeExpr("gps");
-        String lonExpr = gpsColumns.longitudeExpr("gps");
-        String vyhybkaExpr = roColumns.vyhybkaSelectExpr("ro");
-        String joinOn = idJoinCondition("gps", "ro");
+        if (gpsIndex.isEmpty()) return null;
 
-        String nearestSql = "SELECT ro." + roColumns.tudu + ", " + vyhybkaExpr + ", "
-                + latExpr + ", " + lonExpr + ", "
-                + "gps." + gpsColumns.superZId + ", gps." + gpsColumns.superDId
-                + " FROM " + TABLE_GPS_KM + " gps"
-                + " INNER JOIN " + TABLE_RO_TPI + " ro ON " + joinOn
-                + " WHERE " + latExpr + " IS NOT NULL AND " + lonExpr + " IS NOT NULL"
-                + " AND ro." + roColumns.tudu + " IS NOT NULL AND ro." + roColumns.tudu + " <> ''"
-                + " AND " + vyhybkaExpr + " IS NOT NULL"
-                + " ORDER BY ((" + latExpr + " - ?) * (" + latExpr + " - ?)"
-                + " + (" + lonExpr + " - ?) * (" + lonExpr + " - ?))"
-                + " LIMIT 1";
+        GpsIndexEntry bestGps = null;
+        RoIndexEntry bestRo = null;
+        double bestDistSq = Double.MAX_VALUE;
+        double cosLat = Math.cos(Math.toRadians(latitude));
 
-        String[] args = {
-                String.valueOf(latitude), String.valueOf(latitude),
-                String.valueOf(longitude), String.valueOf(longitude)
-        };
-
-        try (Cursor c = db.rawQuery(nearestSql, args)) {
-            if (!c.moveToFirst()) return null;
-            String tudu = c.getString(0);
-            Integer vyhybka = readInt(c, 1);
-            Double bestLat = readDouble(c, 2);
-            Double bestLon = readDouble(c, 3);
-            String superZId = readId(c, 4);
-            String superDId = readId(c, 5);
-            if (tudu == null || tudu.isEmpty() || vyhybka == null
-                    || superZId == null || superDId == null
-                    || bestLat == null || bestLon == null) {
-                return null;
+        for (GpsIndexEntry gps : gpsIndex) {
+            RoIndexEntry ro = roByPairKey.get(gps.pairKey);
+            if (ro == null) continue;
+            double dLat = gps.latitude - latitude;
+            double dLon = (gps.longitude - longitude) * cosLat;
+            double distSq = dLat * dLat + dLon * dLon;
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                bestGps = gps;
+                bestRo = ro;
             }
-            double dist = haversineM(latitude, longitude, bestLat, bestLon);
-            return new GpsMatch(superZId, superDId, tudu, vyhybka, bestLat, bestLon, dist);
         }
+        if (bestGps == null || bestRo == null) return null;
+
+        String[] ids = splitPairKey(bestGps.pairKey);
+        double dist = haversineM(latitude, longitude, bestGps.latitude, bestGps.longitude);
+        return new GpsMatch(ids[0], ids[1], bestRo.tudu, bestRo.vyhybka,
+                bestGps.latitude, bestGps.longitude, dist);
     }
 
-    private String idJoinCondition(String gpsAlias, String roAlias) {
-        return idExpr(gpsAlias, gpsColumns.superZId) + " = " + idExpr(roAlias, roColumns.superZId)
-                + " AND " + idExpr(gpsAlias, gpsColumns.superDId) + " = "
-                + idExpr(roAlias, roColumns.superDId);
-    }
-
-    private GpsMatch lookupTuduVyhybka(String superZId, String superDId,
-                                       double pointLat, double pointLon,
-                                       double queryLat, double queryLon) {
-        String vyhybkaExpr = roColumns.vyhybkaSelectExpr("ro");
-        String lookupSql = "SELECT ro." + roColumns.tudu + ", " + vyhybkaExpr
-                + " FROM " + TABLE_RO_TPI + " ro"
-                + " WHERE " + idExpr("ro", roColumns.superZId) + " = " + idBindExpr()
-                + " AND " + idExpr("ro", roColumns.superDId) + " = " + idBindExpr()
-                + " AND ro." + roColumns.tudu + " IS NOT NULL AND ro." + roColumns.tudu + " <> ''"
-                + " AND " + vyhybkaExpr + " IS NOT NULL"
-                + " LIMIT 1";
-        try (Cursor c = db.rawQuery(lookupSql, new String[]{superZId, superDId})) {
-            if (!c.moveToFirst()) return null;
-            String tudu = c.getString(0);
-            Integer vyhybka = readInt(c, 1);
-            if (tudu == null || tudu.isEmpty() || vyhybka == null) return null;
-            double dist = haversineM(queryLat, queryLon, pointLat, pointLon);
-            return new GpsMatch(superZId, superDId, tudu, vyhybka, pointLat, pointLon, dist);
+    private static Map<String, RoIndexEntry> buildRoIndex(SQLiteDatabase db, RoColumns roColumns) {
+        Map<String, RoIndexEntry> map = new HashMap<>();
+        StringBuilder sql = new StringBuilder("SELECT ")
+                .append(roColumns.superZId).append(", ").append(roColumns.superDId).append(", ")
+                .append(roColumns.tudu).append(", ").append(roColumns.vyhybka);
+        if (roColumns.vyhybkaFallback != null) {
+            sql.append(", ").append(roColumns.vyhybkaFallback);
         }
+        sql.append(" FROM ").append(TABLE_RO_TPI);
+
+        try (Cursor c = db.rawQuery(sql.toString(), null)) {
+            while (c.moveToNext()) {
+                String superZId = readId(c, 0);
+                String superDId = readId(c, 1);
+                String tudu = readTrimmedText(c, 2);
+                Integer vyhybka = readVyhybka(c, 3, roColumns.vyhybkaFallback != null ? 4 : -1);
+                if (superZId == null || superDId == null || tudu == null || vyhybka == null) {
+                    continue;
+                }
+                map.put(pairKey(superZId, superDId), new RoIndexEntry(tudu, vyhybka));
+            }
+        }
+        return map;
     }
 
-    /** Číselné ID – 5, 5.0 a "5" se shodují mezi GPS_KM a RO_TPI. */
-    private static String idExpr(String tableAlias, String column) {
-        return "CAST(CAST(REPLACE(TRIM(CAST(" + tableAlias + "." + column
-                + " AS TEXT)), ',', '.') AS REAL) AS INTEGER)";
+    private static List<GpsIndexEntry> buildGpsIndex(SQLiteDatabase db, GpsColumns gpsColumns,
+                                                     Map<String, RoIndexEntry> roByPairKey) {
+        List<GpsIndexEntry> out = new ArrayList<>();
+        String sql = "SELECT " + gpsColumns.superZId + ", " + gpsColumns.superDId + ", "
+                + gpsColumns.latitude + ", " + gpsColumns.longitude
+                + " FROM " + TABLE_GPS_KM;
+
+        try (Cursor c = db.rawQuery(sql, null)) {
+            while (c.moveToNext()) {
+                String superZId = readId(c, 0);
+                String superDId = readId(c, 1);
+                Double lat = readDouble(c, 2);
+                Double lon = readDouble(c, 3);
+                if (superZId == null || superDId == null || lat == null || lon == null) {
+                    continue;
+                }
+                String key = pairKey(superZId, superDId);
+                if (!roByPairKey.containsKey(key)) continue;
+                out.add(new GpsIndexEntry(key, lat, lon));
+            }
+        }
+        return out;
     }
 
-    /** Stejná normalizace pro bind parametr jako idExpr u sloupce. */
-    private static String idBindExpr() {
-        return "CAST(CAST(REPLACE(TRIM(?), ',', '.') AS REAL) AS INTEGER)";
+    private static String pairKey(String superZId, String superDId) {
+        return superZId + "|" + superDId;
+    }
+
+    private static String[] splitPairKey(String pairKey) {
+        int sep = pairKey.indexOf('|');
+        if (sep < 0) return new String[]{pairKey, ""};
+        return new String[]{pairKey.substring(0, sep), pairKey.substring(sep + 1)};
     }
 
     /**
@@ -210,44 +246,17 @@ public class DzsDatabase implements Closeable {
     }
 
     public List<GpsPoint> listGpsPoints() {
-        List<GpsPoint> out = new ArrayList<>();
-        String latExpr = gpsColumns.latitudeExpr(null);
-        String lonExpr = gpsColumns.longitudeExpr(null);
-        String sql = "SELECT " + gpsColumns.superZId + ", " + gpsColumns.superDId + ", "
-                + latExpr + ", " + lonExpr
-                + " FROM " + TABLE_GPS_KM
-                + " WHERE " + latExpr + " IS NOT NULL AND " + lonExpr + " IS NOT NULL"
-                + " ORDER BY " + latExpr + ", " + lonExpr;
-
-        try (Cursor c = db.rawQuery(sql, null)) {
-            while (c.moveToNext()) {
-                String superZId = readId(c, 0);
-                String superDId = readId(c, 1);
-                Double lat = readDouble(c, 2);
-                Double lon = readDouble(c, 3);
-                if (superZId == null || superDId == null || lat == null || lon == null) continue;
-                out.add(new GpsPoint(lat, lon, lookupTuduVyhybkaLabel(superZId, superDId)));
-            }
+        List<GpsPoint> out = new ArrayList<>(gpsIndex.size());
+        for (GpsIndexEntry gps : gpsIndex) {
+            RoIndexEntry ro = roByPairKey.get(gps.pairKey);
+            String label = ro == null ? "" : ro.tudu + " · výhybka " + ro.vyhybka;
+            out.add(new GpsPoint(gps.latitude, gps.longitude, label));
         }
+        out.sort((a, b) -> {
+            int latCmp = Double.compare(a.latitude, b.latitude);
+            return latCmp != 0 ? latCmp : Double.compare(a.longitude, b.longitude);
+        });
         return out;
-    }
-
-    private String lookupTuduVyhybkaLabel(String superZId, String superDId) {
-        String vyhybkaExpr = roColumns.vyhybkaSelectExpr("ro");
-        String lookupSql = "SELECT ro." + roColumns.tudu + ", " + vyhybkaExpr
-                + " FROM " + TABLE_RO_TPI + " ro"
-                + " WHERE " + idExpr("ro", roColumns.superZId) + " = " + idBindExpr()
-                + " AND " + idExpr("ro", roColumns.superDId) + " = " + idBindExpr()
-                + " AND ro." + roColumns.tudu + " IS NOT NULL AND ro." + roColumns.tudu + " <> ''"
-                + " AND " + vyhybkaExpr + " IS NOT NULL"
-                + " LIMIT 1";
-        try (Cursor c = db.rawQuery(lookupSql, new String[]{superZId, superDId})) {
-            if (!c.moveToFirst()) return "";
-            String tudu = c.getString(0);
-            Integer vyhybka = readInt(c, 1);
-            if (tudu == null || tudu.isEmpty() || vyhybka == null) return "";
-            return tudu + " · výhybka " + vyhybka;
-        }
     }
 
     @Override
@@ -283,6 +292,21 @@ public class DzsDatabase implements Closeable {
         } catch (NumberFormatException ignored) {
         }
         return trimmed;
+    }
+
+    private static String readTrimmedText(Cursor c, int index) {
+        if (c.isNull(index)) return null;
+        String raw = c.getString(index);
+        if (raw == null) return null;
+        raw = raw.trim();
+        return raw.isEmpty() ? null : raw;
+    }
+
+    private static Integer readVyhybka(Cursor c, int primaryIndex, int fallbackIndex) {
+        Integer primary = readInt(c, primaryIndex);
+        if (primary != null) return primary;
+        if (fallbackIndex < 0) return null;
+        return readInt(c, fallbackIndex);
     }
 
     private static Integer readInt(Cursor c, int index) {

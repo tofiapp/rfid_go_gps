@@ -89,6 +89,7 @@ public class MainActivity extends AppCompatActivity {
     private final EpcModel epc = new EpcModel();
     private LocationCache locationCache;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
+    private final ExecutorService gpsIo = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
 
     private List<Tudu> tuduList = new ArrayList<>();
@@ -105,6 +106,7 @@ public class MainActivity extends AppCompatActivity {
     private long lastGpsLookupTimeMs;
     private static final double GPS_LOOKUP_MIN_MOVE_M = 5.0;
     private static final long GPS_LOOKUP_MIN_INTERVAL_MS = 1000;
+    private static final long GPS_LOOKUP_TIMEOUT_MS = 10_000;
     private static final String PREF_GPS_TEST_MODE = "gpsTestMode";
     private static final String PREF_TEST_LAT = "testLat";
     private static final String PREF_TEST_LON = "testLon";
@@ -144,6 +146,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean showGpsStatus;
     private boolean gpsUnavailableToastShown;
     private int lastTopBarHeight = -1;
+    private Runnable gpsLookupTimeoutRunnable;
 
     // řádky šablony (kontejnery z include)
     private View[] rows = new View[7];
@@ -174,6 +177,7 @@ public class MainActivity extends AppCompatActivity {
         }
         refreshTemplate();
         updateSummary1();
+        updatePowerPresetUi();
         updateStepIndicators();
 
         setActionStatusReady();
@@ -589,9 +593,23 @@ public class MainActivity extends AppCompatActivity {
     private void updateStep1() {
         step1Done = currentTudu != null && currentVyhybka != null
                 && epc.tudu != null && !epc.tudu.isEmpty();
+        updatePowerPresetUi();
         updateStepIndicators();
         if (!workflowRunning) {
             setActionStatusReady();
+        }
+    }
+
+    private void updatePowerPresetUi() {
+        boolean enabled = step1Done && !gpsLookupInFlight;
+        powerPresetGroup.setEnabled(enabled);
+        for (int i = 0; i < powerPresetGroup.getChildCount(); i++) {
+            powerPresetGroup.getChildAt(i).setEnabled(enabled);
+        }
+        if (!enabled) {
+            powerPresetInKoleji = null;
+            powerPresetGroup.clearChecked();
+            powerPresetGroup.setSelectionRequired(false);
         }
     }
 
@@ -1515,6 +1533,10 @@ public class MainActivity extends AppCompatActivity {
                 lastGpsLookupLat = null;
                 lastGpsLookupLon = null;
                 lastGpsLookupTimeMs = 0;
+                powerPresetInKoleji = null;
+                powerPresetGroup.clearChecked();
+                powerPresetGroup.setSelectionRequired(false);
+                updatePowerPresetUi();
                 tuduList = loaded;
                 tvSourceFile.setText(displayName + "  •  TUDU: " + loaded.size());
                 collapseCard1Body();
@@ -1579,12 +1601,25 @@ public class MainActivity extends AppCompatActivity {
         forceNextGpsLookup = false;
         gpsLookupInFlight = true;
         gpsLookupNoMatch = false;
+        updatePowerPresetUi();
         if (!workflowRunning) {
             setActionStatusReady();
         }
         final double lat = snap.latitude;
         final double lon = snap.longitude;
-        io.execute(() -> {
+        cancelGpsLookupTimeout();
+        gpsLookupTimeoutRunnable = () -> {
+            if (!gpsLookupInFlight) return;
+            gpsLookupInFlight = false;
+            gpsLookupNoMatch = true;
+            updatePowerPresetUi();
+            Log.w(TAG, "GPS TUDU lookup timeout po " + GPS_LOOKUP_TIMEOUT_MS + " ms");
+            if (!workflowRunning) {
+                setActionStatusReady();
+            }
+        };
+        ui.postDelayed(gpsLookupTimeoutRunnable, GPS_LOOKUP_TIMEOUT_MS);
+        gpsIo.execute(() -> {
             DzsDatabase.GpsMatch match = null;
             try {
                 if (dzsDatabase != null) {
@@ -1596,7 +1631,9 @@ public class MainActivity extends AppCompatActivity {
             }
             final DzsDatabase.GpsMatch result = match;
             ui.post(() -> {
+                cancelGpsLookupTimeout();
                 gpsLookupInFlight = false;
+                updatePowerPresetUi();
                 if (!gpsAutoSelection || dzsDatabase == null) return;
                 if (result == null) {
                     gpsLookupNoMatch = locationCache != null && locationCache.hasFix();
@@ -1615,6 +1652,13 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
         });
+    }
+
+    private void cancelGpsLookupTimeout() {
+        if (gpsLookupTimeoutRunnable != null) {
+            ui.removeCallbacks(gpsLookupTimeoutRunnable);
+            gpsLookupTimeoutRunnable = null;
+        }
     }
 
     private void applyGpsMatch(DzsDatabase.GpsMatch match) {
@@ -1819,6 +1863,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void onPowerPresetSelected(boolean inKoleji) {
+        if (!step1Done) return;
         powerPresetInKoleji = inKoleji;
         int power = inKoleji ? POWER_PRESET_KOLEJI_DBM : POWER_PRESET_RUCE_DBM;
         etPower.setText(String.valueOf(power));
@@ -2270,11 +2315,13 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        cancelGpsLookupTimeout();
         if (locationCache != null) locationCache.stop();
         closeDzsDatabase();
         super.onDestroy();
         io.execute(uhf::free);
         io.shutdown();
+        gpsIo.shutdown();
     }
 
     // ---------- pomocné ----------
