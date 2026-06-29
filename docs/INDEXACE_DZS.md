@@ -221,7 +221,7 @@ Plný průchod GPS indexem, pro každý TUDU kód nejlepší bod, seřazeno podl
 
 ### Vzdálenosti výhybek v TUDU (`findVyhybkaDistancesForTudu`)
 
-Plný průchod GPS indexem filtrovaný podle TUDU – pro řazení výhybek v dialogu výběru.
+Dotaz do `DZS_SUPER_RO_TPI` pro daný TUDU. Pokud tabulky obsahují sloupce **KMK_INT** (RO) a **KM_INT** (GPS), spojí se s `DZS_SUPERTRA_GPS_KM` podle `SUPER_Z_ID`, `SUPER_D_ID` a shody kilometrického bodu – výhybky se stejným párem ID, ale jiným číslem, tak dostanou odlišné souřadnice a vzdálenost. Bez těchto sloupců se použije jeden GPS bod na pár ID (záložní režim).
 
 ### Ruční výběr TUDU (`loadAllTudu`)
 
