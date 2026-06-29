@@ -181,6 +181,27 @@ Příklad: DB 524 288 000 B, mtime `1719561600000` → `dzs_1f4000000_18ff3c
 
 ## Předindexace na PC
 
+Nástroj **nepotřebuje** grafické SQLite GUI – stačí Python 3 a soubor databáze.
+
+### Windows (PowerShell / CMD)
+
+```powershell
+# 1. Stáhněte repozitář nebo jen složku tools/ (minimálně tools/preindex_dzs.py)
+# 2. Zkopírujte DZS_PASPORT_TPI.sqlite do stejné složky (nebo uveďte celou cestu)
+
+python tools\preindex_dzs.py "C:\cesta\k\DZS_PASPORT_TPI.sqlite" --stats --verify
+```
+
+Výstup vedle databáze:
+- `dzs_{velikost_hex}_{mtime_hex}.idx`
+- `DZS_PASPORT_TPI.sqlite.idx` (sidecar – aplikace ho najde automaticky)
+
+### Linux / macOS
+
+```bash
+python3 tools/preindex_dzs.py /cesta/k/DZS_PASPORT_TPI.sqlite --stats --verify
+```
+
 ### Nástroj v repozitáři
 
 ```bash
@@ -286,7 +307,7 @@ flowchart TD
 | Cache se ignoruje | Jiná velikost/mtime DB na zařízení | Znovu vygenerujte `.idx` pro aktuální soubor |
 | Prázdný GPS index | Žádné shody ID mezi tabulkami | Zkontrolujte `SUPER_Z_ID` / `SUPER_D_ID` |
 | OOM při indexaci | Příliš velká DB pro RAM zařízení | Předindexace + cache; menší DB |
-| Špatné souřadnice | Text s čárkou místo tečky | Aplikace používá `REPLACE(col, ',', '.')` |
+| Špatné souřadnice výhybek (stejná vzdálenost u všech výhybek v úseku) | Párování KMK_INT / KM_INT selhalo → záložní jeden bod na pár ID | Přegenerujte index (verze ≥ 3.25); ověřte sloupce KMK_INT v RO a KM/KM_INT v GPS |
 
 ---
 
