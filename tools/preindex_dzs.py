@@ -23,6 +23,9 @@ import sys
 import time
 from typing import Dict, List, Optional, Tuple
 
+# (tudu, vyhybka, super_z_id, super_d_id, kmk_int)
+RoVyhybkaRow = Tuple[str, int, str, str, Optional[int]]
+
 MAGIC = 0x445A5349  # "DZSI"
 VERSION = 5
 
@@ -181,16 +184,22 @@ def poloha_filter(cols: dict) -> str:
     )
 
 
-def build_ro_index(conn: sqlite3.Connection, cols: dict) -> Dict[str, Tuple[str, int]]:
+def build_ro_index_and_rows(conn: sqlite3.Connection, cols: dict) -> Tuple[Dict[str, Tuple[str, int]], List[RoVyhybkaRow]]:
     vyhybka = vyhybka_expr(cols)
+    kmk_col = cols["ro_kmk_int"]
+    select_cols = (
+        f"{cols['ro_super_z']}, {cols['ro_super_d']}, {cols['ro_tudu']}, {vyhybka}"
+        + (f", {kmk_col}" if kmk_col else "")
+    )
     sql = f"""
-        SELECT {cols['ro_super_z']}, {cols['ro_super_d']}, {cols['ro_tudu']}, {vyhybka}
+        SELECT {select_cols}
         FROM {TABLE_RO}
         WHERE {cols['ro_tudu']} IS NOT NULL AND {cols['ro_tudu']} <> ''
           AND {vyhybka} IS NOT NULL
         {poloha_filter(cols)}
     """
     ro: Dict[str, Tuple[str, int]] = {}
+    rows: List[RoVyhybkaRow] = []
     for row in conn.execute(sql):
         super_z = normalize_id(row[0])
         super_d = normalize_id(row[1])
@@ -199,6 +208,13 @@ def build_ro_index(conn: sqlite3.Connection, cols: dict) -> Dict[str, Tuple[str,
         if not super_z or not super_d or not tudu or vyhybka_num is None:
             continue
         ro[pair_key(super_z, super_d)] = (tudu, vyhybka_num)
+        kmk = read_int(row[4]) if kmk_col else None
+        rows.append((tudu, vyhybka_num, super_z, super_d, kmk))
+    return ro, rows
+
+
+def build_ro_index(conn: sqlite3.Connection, cols: dict) -> Dict[str, Tuple[str, int]]:
+    ro, _ = build_ro_index_and_rows(conn, cols)
     return ro
 
 
@@ -211,30 +227,33 @@ def triple_key(super_z_id: str, super_d_id: str, km: int) -> str:
 
 
 def build_gps_by_triple_key(conn: sqlite3.Connection, cols: dict,
-                            ro: Dict[str, Tuple[str, int]]) -> Dict[str, Tuple[float, float]]:
+                            ro_rows: List[RoVyhybkaRow]) -> Dict[str, Tuple[float, float]]:
     km_col = cols["gps_km_int"]
-    if not km_col or not ro:
+    if not km_col or not ro_rows:
         return {}
 
-    conn.execute("CREATE TEMP TABLE IF NOT EXISTS _dzs_ro_pairs ("
-                 "super_z_id TEXT NOT NULL, super_d_id TEXT NOT NULL,"
-                 "PRIMARY KEY (super_z_id, super_d_id))")
-    conn.execute("DELETE FROM _dzs_ro_pairs")
+    conn.execute("CREATE TEMP TABLE IF NOT EXISTS _dzs_ro_km_triples ("
+                 "super_z_id TEXT NOT NULL, super_d_id TEXT NOT NULL, km_int INTEGER NOT NULL,"
+                 "PRIMARY KEY (super_z_id, super_d_id, km_int))")
+    conn.execute("DELETE FROM _dzs_ro_km_triples")
+    triples = [(super_z, super_d, kmk) for _, _, super_z, super_d, kmk in ro_rows if kmk is not None]
+    if not triples:
+        return {}
     conn.executemany(
-        "INSERT OR IGNORE INTO _dzs_ro_pairs (super_z_id, super_d_id) VALUES (?, ?)",
-        [split_pair_key(k) for k in ro.keys()],
+        "INSERT OR IGNORE INTO _dzs_ro_km_triples (super_z_id, super_d_id, km_int) VALUES (?, ?, ?)",
+        triples,
     )
 
     lat_expr = f"CAST(REPLACE(g.{cols['gps_lat']}, ',', '.') AS REAL)"
     lon_expr = f"CAST(REPLACE(g.{cols['gps_lon']}, ',', '.') AS REAL)"
     km_expr = km_int_expr("g", km_col)
     sql = f"""
-        SELECT g.{cols['gps_super_z']}, g.{cols['gps_super_d']}, {km_expr}, {lat_expr}, {lon_expr}
+        SELECT g.{cols['gps_super_z']}, g.{cols['gps_super_d']}, rt.km_int, {lat_expr}, {lon_expr}
         FROM {TABLE_GPS} g
-        INNER JOIN _dzs_ro_pairs rp
-          ON g.{cols['gps_super_z']} = rp.super_z_id
-         AND g.{cols['gps_super_d']} = rp.super_d_id
-        WHERE g.{km_col} IS NOT NULL
+        INNER JOIN _dzs_ro_km_triples rt
+          ON g.{cols['gps_super_z']} = rt.super_z_id
+         AND g.{cols['gps_super_d']} = rt.super_d_id
+         AND {km_expr} = rt.km_int
     """
     out: Dict[str, Tuple[float, float]] = {}
     try:
@@ -253,43 +272,20 @@ def build_gps_by_triple_key(conn: sqlite3.Connection, cols: dict,
 
 
 def build_vyhybka_gps_index(conn: sqlite3.Connection, cols: dict,
-                            ro: Dict[str, Tuple[str, int]],
+                            ro_rows: List[RoVyhybkaRow],
                             gps: List[Tuple[str, float, float]]) -> List[Tuple[str, int, float, float]]:
     gps_by_pair = {key: (lat, lon) for key, lat, lon in gps}
-    gps_by_triple = build_gps_by_triple_key(conn, cols, ro)
-
-    vyhybka = vyhybka_expr(cols)
-    kmk_col = cols["ro_kmk_int"]
-    select_cols = (
-        f"{cols['ro_tudu']}, {vyhybka}, {cols['ro_super_z']}, {cols['ro_super_d']}"
-        + (f", {kmk_col}" if kmk_col else "")
-    )
-    sql = f"""
-        SELECT {select_cols}
-        FROM {TABLE_RO}
-        WHERE {cols['ro_tudu']} IS NOT NULL AND {cols['ro_tudu']} <> ''
-          AND {vyhybka} IS NOT NULL
-        {poloha_filter(cols)}
-    """
+    gps_by_triple = build_gps_by_triple_key(conn, cols, ro_rows)
 
     seen: set = set()
     out: List[Tuple[str, int, float, float]] = []
-    for row in conn.execute(sql):
-        tudu = (row[0] or "").strip()
-        vyhybka_num = read_int(row[1])
-        super_z = normalize_id(row[2])
-        super_d = normalize_id(row[3])
-        if not tudu or vyhybka_num is None or not super_z or not super_d:
-            continue
-
+    for tudu, vyhybka_num, super_z, super_d, kmk in ro_rows:
         lat = None
         lon = None
-        if gps_by_triple and kmk_col:
-            kmk = read_int(row[4])
-            if kmk is not None:
-                coords = gps_by_triple.get(triple_key(super_z, super_d, kmk))
-                if coords is not None:
-                    lat, lon = coords
+        if gps_by_triple and kmk is not None:
+            coords = gps_by_triple.get(triple_key(super_z, super_d, kmk))
+            if coords is not None:
+                lat, lon = coords
         if lat is None or lon is None:
             coords = gps_by_pair.get(pair_key(super_z, super_d))
             if coords is None:
@@ -485,9 +481,9 @@ def main() -> int:
         cols = resolve_columns(conn)
         if args.stats:
             print("Sloupce:", cols)
-        ro = build_ro_index(conn, cols)
+        ro, ro_rows = build_ro_index_and_rows(conn, cols)
         gps = build_gps_index(conn, cols, ro)
-        vyhybka_gps = build_vyhybka_gps_index(conn, cols, ro, gps)
+        vyhybka_gps = build_vyhybka_gps_index(conn, cols, ro_rows, gps)
     finally:
         conn.close()
 
