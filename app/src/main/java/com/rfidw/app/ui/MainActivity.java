@@ -800,10 +800,18 @@ public class MainActivity extends AppCompatActivity {
         for (int i = 0; i < powerPresetGroup.getChildCount(); i++) {
             powerPresetGroup.getChildAt(i).setEnabled(enabled);
         }
-        if (!enabled) {
+        if (!step1Done) {
             powerPresetInKoleji = null;
             powerPresetGroup.clearChecked();
             powerPresetGroup.setSelectionRequired(false);
+        } else if (powerPresetInKoleji != null) {
+            int checkedId = powerPresetInKoleji
+                    ? R.id.btnPowerPresetKoleji
+                    : R.id.btnPowerPresetRuce;
+            if (powerPresetGroup.getCheckedButtonId() != checkedId) {
+                powerPresetGroup.check(checkedId);
+            }
+            powerPresetGroup.setSelectionRequired(true);
         }
     }
 
@@ -1116,6 +1124,10 @@ public class MainActivity extends AppCompatActivity {
         }
         if (!isPowerPresetSelected()) {
             setActionStatus(getString(R.string.power_preset_select_status), COLOR_STATUS_ERROR);
+            if (gpsAutoSelection) {
+                showGpsStatus = true;
+                refreshGpsStatus(false);
+            }
             updateStepIndicators();
             return;
         }
