@@ -649,42 +649,60 @@ public class MainActivity extends AppCompatActivity {
             expandCard1Body();
             return;
         }
-        Runnable showPicker = () -> {
-            if (currentTudu == null || currentTudu.vyhybky.isEmpty()) {
+        final String tuduCode = currentTudu.code;
+        if (dzsDatabase == null) {
+            if (currentTudu.vyhybky.isEmpty()) {
                 toast(getString(R.string.db_select_required));
                 expandCard1Body();
                 return;
             }
-            if (gpsAutoSelection && locationCache != null && locationCache.getSnapshot().valid) {
-                final double lat = locationCache.getSnapshot().latitude;
-                final double lon = locationCache.getSnapshot().longitude;
-                final String tuduCode = currentTudu.code;
-                gpsIo.execute(() -> {
-                    Map<Integer, Double> distances = Collections.emptyMap();
-                    try {
-                        if (dzsDatabase != null) {
-                            distances = dzsDatabase.findVyhybkaDistancesForTudu(tuduCode, lat, lon);
-                        }
-                    } catch (Exception e) {
-                        Log.w(TAG, "Vzdálenosti výhybek selhaly", e);
-                    }
-                    final Map<Integer, Double> result = distances;
-                    ui.post(() -> showVyhybkaPickerDialog(result));
-                });
-            } else {
-                showVyhybkaPickerDialog(null);
-            }
-        };
-        if (dzsDatabase != null) {
-            ensureTuduDetailsLoaded(currentTudu.code, showPicker);
-        } else {
-            showPicker.run();
+            showVyhybkaPickerDialog(tuduCode, currentTudu.vyhybky, null);
+            return;
         }
+
+        final boolean withDistances = gpsAutoSelection
+                && locationCache != null && locationCache.getSnapshot().valid;
+        final double lat = withDistances ? locationCache.getSnapshot().latitude : 0;
+        final double lon = withDistances ? locationCache.getSnapshot().longitude : 0;
+
+        io.execute(() -> {
+            List<Tudu.Vyhybka> loadedVyhybky = Collections.emptyList();
+            Map<Integer, Double> distances = null;
+            try {
+                List<Tudu> loaded = dzsDatabase.loadTuduForCodes(Collections.singleton(tuduCode));
+                if (!loaded.isEmpty()) {
+                    loadedVyhybky = new ArrayList<>(loaded.get(0).vyhybky);
+                }
+                if (withDistances && !loadedVyhybky.isEmpty()) {
+                    distances = dzsDatabase.findVyhybkaDistancesForTudu(tuduCode, lat, lon);
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Načtení výhybek pro picker selhalo", e);
+            }
+            final List<Tudu.Vyhybka> vyhybkySnapshot = loadedVyhybky;
+            final Map<Integer, Double> distancesSnapshot = distances;
+            ui.post(() -> {
+                if (!vyhybkySnapshot.isEmpty()) {
+                    mergeLoadedTuduVyhybky(tuduCode, vyhybkySnapshot);
+                    syncCurrentVyhybkaAfterReload();
+                }
+                List<Tudu.Vyhybka> pickerVyhybky = !vyhybkySnapshot.isEmpty()
+                        ? vyhybkySnapshot
+                        : (currentTudu != null
+                                ? new ArrayList<>(currentTudu.vyhybky) : Collections.emptyList());
+                if (pickerVyhybky.isEmpty()) {
+                    toast(getString(R.string.db_select_required));
+                    expandCard1Body();
+                    return;
+                }
+                showVyhybkaPickerDialog(tuduCode, pickerVyhybky, distancesSnapshot);
+            });
+        });
     }
 
-    private void showVyhybkaPickerDialog(Map<Integer, Double> distancesM) {
-        final String tuduCode = currentTudu.code;
-        final List<Tudu.Vyhybka> vyhybky = sortVyhybkyForPicker(currentTudu.vyhybky, distancesM);
+    private void showVyhybkaPickerDialog(String tuduCode, List<Tudu.Vyhybka> vyhybkySource,
+                                         Map<Integer, Double> distancesM) {
+        final List<Tudu.Vyhybka> vyhybky = sortVyhybkyForPicker(vyhybkySource, distancesM);
 
         ListView listView = new ListView(this);
         listView.setChoiceMode(ListView.CHOICE_MODE_SINGLE);
@@ -716,8 +734,7 @@ public class MainActivity extends AppCompatActivity {
         };
         listView.setAdapter(adapter);
 
-        int checked = currentVyhybka != null ? vyhybky.indexOf(currentVyhybka) : 0;
-        if (checked < 0) checked = 0;
+        int checked = findVyhybkaPickerCheckedIndex(vyhybky);
         listView.setItemChecked(checked, true);
 
         AlertDialog dialog = new AlertDialog.Builder(this)
@@ -807,44 +824,72 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         io.execute(() -> {
-            List<Tudu> loaded = Collections.emptyList();
+            List<Tudu.Vyhybka> loadedVyhybky = Collections.emptyList();
             try {
-                if (dzsDatabase != null) {
-                    loaded = dzsDatabase.loadTuduForCodes(Collections.singleton(tuduCode));
+                List<Tudu> loaded = dzsDatabase.loadTuduForCodes(Collections.singleton(tuduCode));
+                if (!loaded.isEmpty()) {
+                    loadedVyhybky = new ArrayList<>(loaded.get(0).vyhybky);
                 }
             } catch (Exception e) {
                 Log.w(TAG, "Načtení TUDU " + tuduCode + " selhalo", e);
             }
-            final List<Tudu> result = loaded;
+            final List<Tudu.Vyhybka> result = loadedVyhybky;
             ui.post(() -> {
-                if (result.isEmpty()) {
-                    onReady.run();
-                    return;
-                }
-                Tudu loadedTudu = result.get(0);
-                Tudu existing = null;
-                for (Tudu t : tuduList) {
-                    if (t.code.equals(tuduCode)) {
-                        existing = t;
-                        break;
-                    }
-                }
-                if (existing != null) {
-                    existing.vyhybky.clear();
-                    existing.vyhybky.addAll(loadedTudu.vyhybky);
-                } else {
-                    tuduList.add(loadedTudu);
-                }
-                if (currentTudu != null && currentTudu.code.equals(tuduCode)) {
-                    if (existing != null) {
-                        currentTudu = existing;
-                    } else {
-                        currentTudu = loadedTudu;
-                    }
+                if (!result.isEmpty()) {
+                    mergeLoadedTuduVyhybky(tuduCode, result);
+                    syncCurrentVyhybkaAfterReload();
                 }
                 onReady.run();
             });
         });
+    }
+
+    private void mergeLoadedTuduVyhybky(String tuduCode, List<Tudu.Vyhybka> loadedVyhybky) {
+        if (tuduCode == null || tuduCode.isEmpty() || loadedVyhybky == null || loadedVyhybky.isEmpty()) {
+            return;
+        }
+        Tudu existing = null;
+        for (Tudu t : tuduList) {
+            if (t.code.equals(tuduCode)) {
+                existing = t;
+                break;
+            }
+        }
+        if (existing != null) {
+            existing.vyhybky.clear();
+            existing.vyhybky.addAll(loadedVyhybky);
+        } else {
+            Tudu loadedTudu = new Tudu(tuduCode);
+            loadedTudu.vyhybky.addAll(loadedVyhybky);
+            tuduList.add(loadedTudu);
+            existing = loadedTudu;
+        }
+        if (currentTudu != null && currentTudu.code.equals(tuduCode)) {
+            currentTudu = existing;
+        }
+    }
+
+    private void syncCurrentVyhybkaAfterReload() {
+        if (currentTudu == null) return;
+        int cislo = currentVyhybka != null ? currentVyhybka.cislo : epc.vyhybka;
+        if (cislo <= 0) return;
+        currentVyhybka = null;
+        for (Tudu.Vyhybka v : currentTudu.vyhybky) {
+            if (v.cislo == cislo) {
+                currentVyhybka = v;
+                break;
+            }
+        }
+    }
+
+    private int findVyhybkaPickerCheckedIndex(List<Tudu.Vyhybka> vyhybky) {
+        int cislo = currentVyhybka != null ? currentVyhybka.cislo : epc.vyhybka;
+        if (cislo > 0) {
+            for (int i = 0; i < vyhybky.size(); i++) {
+                if (vyhybky.get(i).cislo == cislo) return i;
+            }
+        }
+        return 0;
     }
 
     private void setupCollapsibles() {

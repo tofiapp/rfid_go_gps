@@ -21,7 +21,7 @@ import java.util.zip.GZIPOutputStream;
 final class DzsIndexCache {
 
     private static final int MAGIC = 0x445A5349; // "DZSI"
-    private static final int VERSION = 3;
+    private static final int VERSION = 4;
 
     static final class RoEntry {
         final String tudu;

@@ -485,14 +485,14 @@ public class DzsDatabase implements Closeable {
 
     private static Map<String, RoIndexEntry> buildRoIndex(SQLiteDatabase db, RoColumns roColumns) {
         Map<String, RoIndexEntry> map = new HashMap<>();
+        String vyhybkaExpr = roColumns.vyhybkaSelectExpr(null);
         StringBuilder sql = new StringBuilder("SELECT ")
                 .append(roColumns.superZId).append(", ").append(roColumns.superDId).append(", ")
-                .append(roColumns.tudu).append(", ").append(roColumns.vyhybka);
-        if (roColumns.vyhybkaFallback != null) {
-            sql.append(", ").append(roColumns.vyhybkaFallback);
-        }
-        sql.append(" FROM ").append(TABLE_RO_TPI)
-                .append(" WHERE 1=1");
+                .append(roColumns.tudu).append(", ").append(vyhybkaExpr)
+                .append(" FROM ").append(TABLE_RO_TPI)
+                .append(" WHERE ").append(roColumns.tudu).append(" IS NOT NULL AND ")
+                .append(roColumns.tudu).append(" <> ''")
+                .append(" AND ").append(vyhybkaExpr).append(" IS NOT NULL");
         roColumns.appendPolohaFilter(sql, null);
 
         try (Cursor c = db.rawQuery(sql.toString(), null)) {
@@ -500,7 +500,7 @@ public class DzsDatabase implements Closeable {
                 String superZId = readId(c, 0);
                 String superDId = readId(c, 1);
                 String tudu = readTrimmedText(c, 2);
-                Integer vyhybka = readVyhybka(c, 3, roColumns.vyhybkaFallback != null ? 4 : -1);
+                Integer vyhybka = readInt(c, 3);
                 if (superZId == null || superDId == null || tudu == null || vyhybka == null) {
                     continue;
                 }
