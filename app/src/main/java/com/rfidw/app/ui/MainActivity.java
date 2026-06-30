@@ -431,9 +431,10 @@ public class MainActivity extends AppCompatActivity {
     private void updateCard1DbProgress(String phase, int percent, boolean force) {
         int clamped = Math.max(0, Math.min(100, percent));
         if (!force && clamped < card1DbProgressPercent) {
-            return;
+            clamped = card1DbProgressPercent;
+        } else {
+            card1DbProgressPercent = clamped;
         }
-        card1DbProgressPercent = clamped;
         String label = getString(R.string.db_loading_progress, phase, clamped);
         if (tvCard1DbProgress != null) {
             tvCard1DbProgress.setText(label);

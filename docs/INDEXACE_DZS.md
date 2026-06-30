@@ -76,11 +76,13 @@ Všechny GPS km body pro páry ID z RO indexu (dočasná tabulka `_dzs_ro_pairs`
 - `SUPER_Z_ID`, `SUPER_D_ID`, `KM_EXT`, souřadnice
 - **žádná deduplikace** – každý km bod je samostatný záznam
 - SQL bez `ORDER BY` a bez `CAST` výrazů – parsování km/souřadnic v Javě (rychlejší na velkých tabulkách)
+- před načtením se spočítá `COUNT(*)` pro reálný průběh 50–84 % (ne zamrznutí na 84 %)
+- text fáze zobrazuje počet zpracovaných bodů (např. „2,3 mil.“)
 - záložní postup: jeden sekvenční průchod GPS tabulkou s filtrem párů v paměti (nikdy dotaz po jednom páru)
 
 ### Fáze 3 – Uložení cache
 
-Index se zapíše do gzip souboru `.idx` (formát verze 7).
+Index se zapíše do gzip souboru `.idx` (formát verze 8).
 
 ### Fáze 4 – Prostorová mřížka (pouze v paměti)
 
@@ -88,20 +90,24 @@ Buňka ~0,005° (~500 m), hledání rozšiřujícími prstenci.
 
 ---
 
-## Formát souboru `.idx` (verze 7)
+## Formát souboru `.idx` (verze 8)
 
 Soubor je **gzip** komprimovaný binární stream ve formátu Java `DataOutputStream` (big-endian).
 
 | Pořadí | Typ | Hodnota |
 |--------|-----|---------|
 | 1 | `int32` | Magic `0x445A5349` (`"DZSI"`) |
-| 2 | `int32` | Verze `7` |
+| 2 | `int32` | Verze `8` |
 | 3 | `int64` | Velikost databáze v bajtech |
 | 4 | `utf` | SHA-256 obsahu DB (64 hex znaků) |
 | 5 | `int32` | Počet záznamů RO indexu (všechny výhybky) |
 | 6… | opakování | `pairKey`, `tudu`, `vyhybka`, `midKm` |
-| N | `int32` | Počet GPS záznamů |
-| … | opakování | `pairKey`, `kmExt`, `latitude`, `longitude` |
+| N | `int32` | Počet unikátních párů ID (`pairKey`) |
+| … | opakování | `pairKey` UTF |
+| M | `int32` | Počet GPS záznamů |
+| … | opakování | `pairId` int32, `kmExt` double, `lat` float, `lon` float |
+
+Verze 7 (starší) se stále načte – každý GPS bod nese celý `pairKey` UTF. Při uložení se zapíše verze 8 (úspornější).
 
 Název souboru: `dzs_{sha256}.idx`
 
@@ -117,7 +123,7 @@ Starší cache (verze 6 a níže) se ignorují – při prvním spuštění po a
 | Cache se po restartu nenačte | Stará verze cache nebo jiný obsah DB | Aktualizujte aplikaci; cache v7 používá hash obsahu |
 | Prázdný GPS index | Žádné shody ID mezi tabulkami | Zkontrolujte `SUPER_Z_ID` / `SUPER_D_ID` |
 | Špatná výhybka při více na stejném páru | Chybí nebo nesedí `OD`/`DO` nebo `KM_EXT` | Zkontrolujte sloupce a hodnoty kilometrického středu |
-| OOM při indexaci | Příliš velká DB pro RAM zařízení | Menší DB nebo zařízení s více RAM |
+| OOM při indexaci | Příliš mnoho GPS bodů pro RAM zařízení | Aktualizujte aplikaci (kompaktní úložiště v8); při opakovaném selhání menší DB |
 
 ---
 
