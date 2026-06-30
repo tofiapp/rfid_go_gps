@@ -27,8 +27,10 @@ import java.util.Set;
  *
  * Při otevření se indexuje jen tabulka výhybek (RO) – řádově sekundy.
  * GPS km body se neprocházejí: vyhledávání podle aktuální polohy proběhne až
- * při GPS dotazu (bounding box + index na lat/lon). Výhybka se určí přes
- * SUPER_Z_ID + SUPER_D_ID + RO_ID z nejbližšího GPS bodu.
+ * při GPS dotazu (bounding box + lazy index na lat/lon). SQLite indexy na GPS
+ * tabulce se vytváří také lazy (při prvním dotazu), aby otevření DB neblokovalo
+ * na „Kontrola schématu“. Výhybka se určí přes SUPER_Z_ID + SUPER_D_ID + RO_ID
+ * z nejbližšího GPS bodu.
  */
 public class DzsDatabase implements Closeable {
 
@@ -107,6 +109,7 @@ public class DzsDatabase implements Closeable {
     private final Map<String, List<RoIndexEntry>> roByPairKey;
     private final Map<String, RoIndexEntry> roByRoKey;
     private final Map<String, double[]> coordMemo = new HashMap<>();
+    private volatile boolean gpsRoLookupIndexReady;
     private volatile boolean gpsLatLonIndexReady;
 
     private DzsDatabase(SQLiteDatabase db, GpsColumns gpsColumns, RoColumns roColumns,
@@ -133,7 +136,6 @@ public class DzsDatabase implements Closeable {
             report(listener, "Kontrola schématu", 5);
             GpsColumns gpsColumns = GpsColumns.resolve(db, TABLE_GPS_KM);
             RoColumns roColumns = RoColumns.resolve(db, TABLE_RO_TPI);
-            ensureGpsIndexes(db, gpsColumns);
 
             String contentHash = null;
             DzsIndexCache.LoadedIndex cached = null;
@@ -222,14 +224,19 @@ public class DzsDatabase implements Closeable {
         }
     }
 
-    private static void ensureGpsIndexes(SQLiteDatabase db, GpsColumns gpsColumns) {
-        try {
-            db.execSQL("CREATE INDEX IF NOT EXISTS _dzs_gps_zd ON " + TABLE_GPS_KM
-                    + " (" + gpsColumns.superZId + ", " + gpsColumns.superDId + ")");
-            db.execSQL("CREATE INDEX IF NOT EXISTS _dzs_gps_ro ON " + TABLE_GPS_KM
-                    + " (" + gpsColumns.superZId + ", " + gpsColumns.superDId
-                    + ", " + gpsColumns.roId + ")");
-        } catch (Exception ignored) {
+    private void ensureGpsRoLookupIndex() {
+        if (gpsRoLookupIndexReady) return;
+        synchronized (this) {
+            if (gpsRoLookupIndexReady) return;
+            try {
+                db.execSQL("CREATE INDEX IF NOT EXISTS _dzs_gps_zd ON " + TABLE_GPS_KM
+                        + " (" + gpsColumns.superZId + ", " + gpsColumns.superDId + ")");
+                db.execSQL("CREATE INDEX IF NOT EXISTS _dzs_gps_ro ON " + TABLE_GPS_KM
+                        + " (" + gpsColumns.superZId + ", " + gpsColumns.superDId
+                        + ", " + gpsColumns.roId + ")");
+                gpsRoLookupIndexReady = true;
+            } catch (Exception ignored) {
+            }
         }
     }
 
@@ -540,6 +547,7 @@ public class DzsDatabase implements Closeable {
 
     private double[] resolveVyhybkaCoord(String pairKey, RoIndexEntry ro) {
         if (ro.roId == null) return null;
+        ensureGpsRoLookupIndex();
         String key = memoKey(pairKey, ro.tudu, ro.vyhybka);
         double[] cached = coordMemo.get(key);
         if (cached != null) return cached;
