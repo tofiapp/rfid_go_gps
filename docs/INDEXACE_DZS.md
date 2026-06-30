@@ -66,6 +66,7 @@ Po první úspěšné indexaci:
 Jeden SQL průchod tabulky `DZS_SUPER_RO_TPI`:
 
 - `SUPER_Z_ID`, `SUPER_D_ID`, `TUDU`, `COBJEKT` (číslo výhybky)
+- volitelně `CAST_MIN` / `CAST_MAX`; pokud chybí `CAST_MAX`, odvodí se z prvního písmene `POLOHA` (**J** = 3 části, **C** = 4 části)
 - střed `(OD + DO) / 2` jako kilometrický rozlišovač
 - **více výhybek na stejný pár ID** je povoleno (uloží se jako seznam)
 

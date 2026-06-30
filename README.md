@@ -31,7 +31,7 @@ Hlavní obrazovka vede operátora třemi kroky (**TUDU → Načtení → Hotovo*
 
 `DZS_SUPERTRA_GPS_KM`: `SUPER_Z_ID`, `SUPER_D_ID`, `KM_EXT`, souřadnice (`LAT`/`LON` primárně, alternativně `LATITUDE`/`LONGITUDE`, …)
 
-`DZS_SUPER_RO_TPI`: `SUPER_Z_ID`, `SUPER_D_ID`, `TUDU`, `COBJEKT` (číslo výhybky; alternativně `VYHYBKA`, …), `OD`, `DO` (volitelně `CAST_MIN`, `CAST_MAX`, `POLOHA`). Řádky s prázdnou `POLOHA` nebo textem `NULL` se při indexaci vyřazují.
+`DZS_SUPER_RO_TPI`: `SUPER_Z_ID`, `SUPER_D_ID`, `TUDU`, `COBJEKT` (číslo výhybky; alternativně `VYHYBKA`, …), `OD`, `DO` (volitelně `CAST_MIN`, `CAST_MAX`, `POLOHA`). Řádky s prázdnou `POLOHA` nebo textem `NULL` se při indexaci vyřazují. Pokud chybí `CAST_MAX`, aplikace ho odvodí z prvního písmene `POLOHA`: **J** = 3částová výhybka (2 řádky v DB), **C** = 4částová (4 řádky).
 
 Výhybky se stejným `SUPER_Z_ID`/`SUPER_D_ID` se rozliší středem `(OD+DO)/2` oproti `KM_EXT` v GPS tabulce.
 
