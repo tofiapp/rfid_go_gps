@@ -255,8 +255,9 @@ final class DzsIndexCache {
 
     private static File hashSidecarFile(File dbFile, File cacheDir) {
         String key = Long.toHexString(dbFile.length()) + "_"
+                + Long.toHexString(dbFile.lastModified()) + "_"
                 + Integer.toHexString(dbFile.getAbsolutePath().hashCode());
-        return new File(cacheDir, "hash_" + key + ".txt");
+        return new File(cacheDir, "hash2_" + key + ".txt");
     }
 
     private static String readStoredHash(File dbFile, File cacheDir) {
@@ -265,8 +266,11 @@ final class DzsIndexCache {
         if (!sidecar.isFile()) return null;
         try (DataInputStream in = new DataInputStream(new FileInputStream(sidecar))) {
             long storedSize = in.readLong();
+            long storedModified = in.readLong();
             String hash = in.readUTF();
-            if (storedSize != dbFile.length() || hash.length() != HASH_HEX_LEN) {
+            if (storedSize != dbFile.length()
+                    || storedModified != dbFile.lastModified()
+                    || hash.length() != HASH_HEX_LEN) {
                 return null;
             }
             return hash;
@@ -282,6 +286,7 @@ final class DzsIndexCache {
         File tmp = new File(cacheDir, sidecar.getName() + ".tmp");
         try (DataOutputStream out = new DataOutputStream(new FileOutputStream(tmp))) {
             out.writeLong(dbFile.length());
+            out.writeLong(dbFile.lastModified());
             out.writeUTF(hash);
             out.flush();
         } catch (Exception ignored) {

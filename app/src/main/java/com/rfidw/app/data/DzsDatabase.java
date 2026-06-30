@@ -362,7 +362,8 @@ public class DzsDatabase implements Closeable {
         File cached = new File(cacheDir, "sqlite_"
                 + Long.toHexString(source.length()) + "_"
                 + Long.toHexString(source.lastModified()) + ".db");
-        if (!cached.isFile() || cached.length() != source.length()) {
+        if (!cached.isFile() || cached.length() != source.length()
+                || cached.lastModified() < source.lastModified()) {
             copyFile(source, cached);
         }
         return cached;
