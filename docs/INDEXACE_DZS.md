@@ -73,10 +73,10 @@ Jeden SQL průchod tabulky `DZS_SUPER_RO_TPI`:
 
 Jeden SQL průchod GPS km bodů pro páry z RO indexu (dočasná tabulka `_dzs_ro_pairs`):
 
-- data seřazená podle `SUPER_Z_ID`, `SUPER_D_ID` – v paměti se drží km body jen aktuálního páru
-- pro každou výhybku na páru: najít km bod s nejbližším `KM_EXT` k `(OD+DO)/2`
+- **bez ORDER BY** – sekvenční čtení; SQLite nemusí řadit miliony řádků před odesláním kurzoru
+- data se načtou do dočasného kompaktního bufferu, párování KM_EXT ↔ (OD+DO)/2 proběhne v paměti
 - do výsledku jde **jen souřadnice výhybek**, ne celá km tabulka
-- před načtením se spočítá `COUNT(*)` pro reálný průběh 50–84 %
+- před načtením se spočítá `COUNT(*)` pro reálný průběh 50–80 % (načítání), 82–84 % (párování)
 - záložní postup: sekvenční průchod GPS tabulkou s filtrem párů v paměti
 
 ### Fáze 3 – Uložení cache
