@@ -507,10 +507,11 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center"
+            android:minHeight="24dp"
             android:paddingBottom="6dp"
             android:textColor="@color/text_muted"
             android:textSize="13sp"
-            android:visibility="gone"/>
+            android:visibility="invisible"/>
 
         <LinearLayout
             android:id="@+id/stepIndicator"

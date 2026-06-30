@@ -97,6 +97,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int COLOR_STATUS_READY = 0xFF2E7D32;
     private static final int COLOR_STATUS_BUSY = 0xFF5F6A76;
     private static final int COLOR_STATUS_ERROR = 0xFFC62828;
+    private static final int COLOR_STATUS_WARNING = 0xFFE65100;
     private static final int COLOR_STATUS_GPS_WAIT = 0xFFE65100;
     private static final int COLOR_STATUS_GPS_STALE = 0xFFF57C00;
     private static final int WORKFLOW_DONE_DELAY_MS = 1500;
@@ -311,6 +312,9 @@ public class MainActivity extends AppCompatActivity {
                 if (topInset == lastTopBarHeight) return;
                 lastTopBarHeight = topInset;
                 applyMainScrollTopPadding(topInset);
+                if (isOverlayDialogVisible()) {
+                    applyOverlayScrimTopMargin();
+                }
             }
         });
     }
@@ -394,15 +398,24 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showOverlayScrimBehindTopBar() {
-        ViewGroup.MarginLayoutParams scrimLp =
-                (ViewGroup.MarginLayoutParams) scanDoneScrim.getLayoutParams();
-        scrimLp.topMargin = topBar.getHeight();
-        scanDoneScrim.setLayoutParams(scrimLp);
         scanDoneScrim.setElevation(TypedValue.applyDimension(
                 TypedValue.COMPLEX_UNIT_DIP, SCAN_DONE_SCRIM_ELEVATION_OVER_SHEET_DP,
                 getResources().getDisplayMetrics()));
         scanDoneScrim.setVisibility(View.VISIBLE);
         scanDoneScrim.setAlpha(1f);
+        applyOverlayScrimTopMargin();
+    }
+
+    private void applyOverlayScrimTopMargin() {
+        topBar.post(() -> {
+            ViewGroup.MarginLayoutParams scrimLp =
+                    (ViewGroup.MarginLayoutParams) scanDoneScrim.getLayoutParams();
+            int topInset = topBar.getHeight();
+            if (scrimLp.topMargin != topInset) {
+                scrimLp.topMargin = topInset;
+                scanDoneScrim.setLayoutParams(scrimLp);
+            }
+        });
     }
 
     private void resetOverlayScrimElevation() {
@@ -991,22 +1004,33 @@ public class MainActivity extends AppCompatActivity {
     // ---------- indikátor kroků ----------
 
     private void updateStepIndicators() {
-        boolean step1Error = !step1Done;
-        setStepCircle(step1Circle, step1Done, activeStep == 1 && !step1Error, step1Error, "1");
+        boolean step1Warning = !step1Done;
+        setStepCircle(step1Circle, step1Done, activeStep == 1 && !step1Warning,
+                step1Warning, false, "1");
         boolean modeMissing = step1Done && !isPowerPresetSelected();
-        boolean step2Error = step2Failed || modeMissing;
         setStepCircle(step2Circle, step2Done && !modeMissing, activeStep == 2 && !modeMissing,
-                step2Error, "2");
-        setStepCircle(step3Circle, step3Done, activeStep == 3, false, "3");
+                modeMissing, step2Failed, "2");
+        setStepCircle(step3Circle, step3Done, activeStep == 3, false, false, "3");
         int muted = ContextCompat.getColor(this, R.color.text_muted);
-        step1Label.setTextColor(step1Error ? COLOR_STATUS_ERROR : muted);
-        step2Label.setTextColor(step2Error ? COLOR_STATUS_ERROR : muted);
+        step1Label.setTextColor(step1Warning ? COLOR_STATUS_WARNING : muted);
+        if (step2Failed) {
+            step2Label.setTextColor(COLOR_STATUS_ERROR);
+        } else if (modeMissing) {
+            step2Label.setTextColor(COLOR_STATUS_WARNING);
+        } else {
+            step2Label.setTextColor(muted);
+        }
     }
 
-    private void setStepCircle(TextView circle, boolean done, boolean active, boolean failed, String number) {
+    private void setStepCircle(TextView circle, boolean done, boolean active,
+            boolean warning, boolean failed, String number) {
         if (failed) {
             circle.setText(number);
             circle.setBackgroundResource(R.drawable.step_circle_error);
+            circle.setTextColor(0xFFFFFFFF);
+        } else if (warning) {
+            circle.setText(number);
+            circle.setBackgroundResource(R.drawable.step_circle_warning);
             circle.setTextColor(0xFFFFFFFF);
         } else if (done) {
             circle.setText("✓");
@@ -1328,8 +1352,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setActionStatus(String text, int color) {
-        showGpsStatus = false;
-        tvGpsStatus.setVisibility(View.GONE);
         tvReaderStatus.setText(text);
         tvReaderStatus.setTextColor(color);
     }
@@ -1361,16 +1383,21 @@ public class MainActivity extends AppCompatActivity {
                 }
                 refreshGpsStatus(false);
             } else {
-                setActionStatus(getString(R.string.tudu_select_status), COLOR_STATUS_ERROR);
+                showGpsStatus = false;
+                tvGpsStatus.setVisibility(View.INVISIBLE);
+                setActionStatus(getString(R.string.tudu_select_status), COLOR_STATUS_WARNING);
             }
             return;
         }
         if (!isPowerPresetSelected()) {
-            setActionStatus(getString(R.string.power_preset_select_status), COLOR_STATUS_ERROR);
             if (gpsAutoSelection) {
                 showGpsStatus = true;
                 refreshGpsStatus(false);
+            } else {
+                showGpsStatus = false;
+                tvGpsStatus.setVisibility(View.INVISIBLE);
             }
+            setActionStatus(getString(R.string.power_preset_select_status), COLOR_STATUS_WARNING);
             updateStepIndicators();
             return;
         }
@@ -1384,7 +1411,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void refreshGpsStatus(boolean setReadyStatus) {
-        if (!showGpsStatus || locationCache == null) return;
+        if (!showGpsStatus || locationCache == null) {
+            if (showGpsStatus) {
+                tvGpsStatus.setVisibility(View.INVISIBLE);
+            }
+            return;
+        }
         tvGpsStatus.setVisibility(View.VISIBLE);
         int color;
         if (!locationCache.hasFix()) {
