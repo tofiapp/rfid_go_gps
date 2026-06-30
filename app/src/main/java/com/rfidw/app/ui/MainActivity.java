@@ -13,6 +13,7 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.graphics.Typeface;
+import android.provider.DocumentsContract;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.text.Editable;
@@ -123,6 +124,9 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREF_TUDU_MODE_GPS = "tuduModeGps";
     private static final String PREF_TEST_LAT = "testLat";
     private static final String PREF_TEST_LON = "testLon";
+    private static final String PREF_DB_SOURCE_PATH = "dbSourcePath";
+    private static final String PREF_DB_DISPLAY_NAME = "dbDisplayName";
+    private static final String PREF_DB_URI = "dbSourceUri";
 
     private CsvStore csvStore;
     private CsvAdapter csvAdapter;
@@ -1889,15 +1893,41 @@ public class MainActivity extends AppCompatActivity {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         i.addCategory(Intent.CATEGORY_OPENABLE);
         i.setType("*/*");
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        i.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         picker.launch(i);
     }
 
     private void tryAutoLoadDefaultDatabase() {
-        beginCard1DbLoad(DEFAULT_DB_NAME);
+        String savedName = prefs.getString(PREF_DB_DISPLAY_NAME, DEFAULT_DB_NAME);
+        beginCard1DbLoad(savedName);
         io.execute(() -> {
+            String savedPath = prefs.getString(PREF_DB_SOURCE_PATH, null);
+            if (savedPath != null) {
+                File saved = new File(savedPath);
+                if (saved.isFile() && saved.canRead()) {
+                    loadDatabaseFromPath(savedPath, savedName, false);
+                    return;
+                }
+            }
+            File dzsDir = getDzsStorageDir();
+            for (String internalName : new String[]{"dzs_source.db", "dzs_auto_source.db"}) {
+                File internal = new File(dzsDir, internalName);
+                if (internal.isFile() && internal.canRead()) {
+                    String display = "dzs_auto_source.db".equals(internalName)
+                            ? DEFAULT_DB_NAME
+                            : (savedName != null ? savedName : internal.getName());
+                    loadDatabaseFromPath(internal.getAbsolutePath(), display, false);
+                    return;
+                }
+            }
             File found = findDefaultDatabaseFile();
             if (found != null) {
                 loadDatabaseFromPath(found.getAbsolutePath(), DEFAULT_DB_NAME, false);
+                return;
+            }
+            String uriStr = prefs.getString(PREF_DB_URI, null);
+            if (uriStr != null && tryLoadFromPersistedUri(Uri.parse(uriStr))) {
                 return;
             }
             if (needsStoragePermission()) {
@@ -1964,10 +1994,40 @@ public class MainActivity extends AppCompatActivity {
         Uri uri = findDefaultDatabaseUriViaMediaStore();
         if (uri == null) return null;
         try {
-            return copyUriToCache(uri, "dzs_auto_source.db");
+            return copyUriToCache(uri, "dzs_auto_source.db", false);
         } catch (Exception ignored) {
             return null;
         }
+    }
+
+    /** Znovu načte databázi z trvale uložené URI (po restartu aplikace). */
+    private boolean tryLoadFromPersistedUri(Uri uri) {
+        try {
+            getContentResolver().takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (Exception ignored) {
+        }
+        try {
+            String name = queryName(uri);
+            File dbFile = copyUriToCache(uri, "dzs_source.db", true);
+            loadDatabaseFromPath(dbFile.getAbsolutePath(), name, false);
+            return true;
+        } catch (Exception e) {
+            Log.w(TAG, "Auto-načtení z uložené URI selhalo", e);
+            return false;
+        }
+    }
+
+    private void persistDbSource(String path, String displayName, Uri uri) {
+        SharedPreferences.Editor editor = prefs.edit()
+                .putString(PREF_DB_SOURCE_PATH, path)
+                .putString(PREF_DB_DISPLAY_NAME, displayName);
+        if (uri != null) {
+            editor.putString(PREF_DB_URI, uri.toString());
+        } else {
+            editor.remove(PREF_DB_URI);
+        }
+        editor.apply();
     }
 
     private Uri findDefaultDatabaseUriViaMediaStore() {
@@ -1996,14 +2056,19 @@ public class MainActivity extends AppCompatActivity {
         String name = queryName(uri);
         final String fileTypeError = getString(R.string.db_file_type_error);
         beginCard1DbLoad(name);
+        try {
+            getContentResolver().takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (Exception ignored) {
+        }
         io.execute(() -> {
             try {
                 String lower = name.toLowerCase(Locale.ROOT);
                 if (!lower.endsWith(".db") && !lower.endsWith(".sqlite") && !lower.endsWith(".sqlite3")) {
                     throw new Exception(fileTypeError);
                 }
-                File dbFile = copyUriToCache(uri, "dzs_source.db");
-                loadDatabaseFromPath(dbFile.getAbsolutePath(), name, true);
+                File dbFile = copyUriToCache(uri, "dzs_source.db", true);
+                loadDatabaseFromPath(dbFile.getAbsolutePath(), name, true, uri);
             } catch (Exception e) {
                 runOnUiThreadIfAlive(0, () -> {
                     endCard1DbLoad();
@@ -2016,6 +2081,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void loadDatabaseFromPath(String path, String displayName, boolean showErrorToast) {
+        loadDatabaseFromPath(path, displayName, showErrorToast, null);
+    }
+
+    private void loadDatabaseFromPath(String path, String displayName, boolean showErrorToast, Uri sourceUri) {
         final long loadId = ++dbLoadGeneration;
         runOnUiThreadIfAlive(loadId, () -> beginCard1DbLoad(displayName));
         DzsDatabase previous;
@@ -2078,6 +2147,7 @@ public class MainActivity extends AppCompatActivity {
                 tvSourceFile.setText(gpsAutoSelection
                         ? getString(R.string.db_loaded_gps, displayName, tuduCount)
                         : getString(R.string.db_loaded_manual, displayName, tuduCount));
+                persistDbSource(path, displayName, sourceUri);
                 endCard1DbLoad();
                 collapseCard1Body();
                 scrollToCard1();
@@ -2281,8 +2351,11 @@ public class MainActivity extends AppCompatActivity {
         File legacyIndex = new File(getCacheDir(), "dzs_index");
         if (!legacyIndex.isDirectory()) return;
         File targetIndex = new File(targetDir, "dzs_index");
-        if (targetIndex.exists()) return;
-        copyDirectory(legacyIndex, targetIndex);
+        if (!targetIndex.exists()) {
+            copyDirectory(legacyIndex, targetIndex);
+        } else {
+            mergeMissingCacheFiles(legacyIndex, targetIndex);
+        }
         for (String name : new String[]{"dzs_source.db", "dzs_auto_source.db"}) {
             File legacyFile = new File(getCacheDir(), name);
             if (!legacyFile.isFile()) continue;
@@ -2317,11 +2390,32 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private File copyUriToCache(Uri uri, String fileName) throws Exception {
+    /** Přesune chybějící .idx a hash soubory ze starého cache adresáře. */
+    private static void mergeMissingCacheFiles(File legacyDir, File targetDir) {
+        if (!legacyDir.isDirectory()) return;
+        if (!targetDir.exists() && !targetDir.mkdirs()) return;
+        File[] children = legacyDir.listFiles();
+        if (children == null) return;
+        for (File child : children) {
+            if (!child.isFile()) continue;
+            String name = child.getName();
+            if (!name.endsWith(".idx") && !name.startsWith("hash")) continue;
+            File dest = new File(targetDir, name);
+            if (!dest.exists()) {
+                child.renameTo(dest);
+            }
+        }
+    }
+
+    private File copyUriToCache(Uri uri, String fileName, boolean forceCopy) throws Exception {
         File out = new File(getDzsStorageDir(), fileName);
-        long expectedSize = querySize(uri);
-        if (expectedSize > 0 && out.isFile() && out.length() == expectedSize) {
-            return out;
+        if (!forceCopy) {
+            long expectedSize = querySize(uri);
+            long expectedModified = queryLastModified(uri);
+            if (expectedSize > 0 && out.isFile() && out.length() == expectedSize
+                    && (expectedModified <= 0 || out.lastModified() >= expectedModified)) {
+                return out;
+            }
         }
         try (InputStream in = getContentResolver().openInputStream(uri);
              FileOutputStream fos = new FileOutputStream(out, false)) {
@@ -2340,6 +2434,29 @@ public class MainActivity extends AppCompatActivity {
                 return c.getLong(0);
             }
         } catch (Exception ignored) {
+        }
+        return -1;
+    }
+
+    private long queryLastModified(Uri uri) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            try (Cursor c = getContentResolver().query(uri,
+                    new String[]{DocumentsContract.Document.COLUMN_LAST_MODIFIED},
+                    null, null, null)) {
+                if (c != null && c.moveToFirst() && !c.isNull(0)) {
+                    return c.getLong(0);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try (Cursor c = getContentResolver().query(uri,
+                    new String[]{MediaStore.MediaColumns.DATE_MODIFIED}, null, null, null)) {
+                if (c != null && c.moveToFirst() && !c.isNull(0)) {
+                    return c.getLong(0) * 1000L;
+                }
+            } catch (Exception ignored) {
+            }
         }
         return -1;
     }
