@@ -27,7 +27,7 @@ import java.util.function.IntConsumer;
  * SQLite zdroj TUDU / výhybek z tabulek DZS_SUPERTRA_GPS_KM a DZS_SUPER_RO_TPI.
  *
  * Při otevření se indexuje tabulka výhybek (RO) a předpočítají se GPS souřadnice
- * výhybek (jeden indexovaný dotaz na RO_ID). Výsledek se ukládá do diskové cache v15.
+ * výhybek (jeden indexovaný dotaz na RO_ID). Výsledek se ukládá do diskové cache v16.
  * Vyhledávání TUDU podle GPS pak probíhá nad tisíci předpočítaných bodů v paměti,
  * ne nad celou km tabulkou za běhu.
  */
@@ -76,6 +76,44 @@ public class DzsDatabase implements Closeable {
             this.castMin = castMin;
             this.castMax = castMax;
         }
+    }
+
+    private static final class CastRange {
+        final Integer castMin;
+        final Integer castMax;
+
+        CastRange(Integer castMin, Integer castMax) {
+            this.castMin = castMin;
+            this.castMax = castMax;
+        }
+    }
+
+    /**
+     * Určí rozsah částí výhybky. Explicitní CAST_MIN/CAST_MAX z DB má přednost;
+     * jinak podle prvního písmene POLOHA: J = 3 části, C = 4 části.
+     */
+    static CastRange resolveCastRange(Integer castMin, Integer castMax, String poloha) {
+        if (castMax != null) {
+            int min = castMin != null ? castMin : 1;
+            return new CastRange(min, castMax);
+        }
+        Integer fromPoloha = castMaxFromPoloha(poloha);
+        if (fromPoloha != null) {
+            return new CastRange(castMin != null ? castMin : 1, fromPoloha);
+        }
+        if (castMin != null) {
+            return new CastRange(castMin, null);
+        }
+        return new CastRange(null, null);
+    }
+
+    /** J = 3částová výhybka (2 řádky v DB), C = 4částová (4 řádky). */
+    static Integer castMaxFromPoloha(String poloha) {
+        if (poloha == null || poloha.isEmpty()) return null;
+        char first = Character.toUpperCase(poloha.trim().charAt(0));
+        if (first == 'J') return 3;
+        if (first == 'C') return 4;
+        return null;
     }
 
     private static final class SpatialGrid {
@@ -509,6 +547,7 @@ public class DzsDatabase implements Closeable {
                 .append(roColumns.tudu).append(", ").append(vyhybkaExpr);
         if (roColumns.castMin != null) sql.append(", ").append(roColumns.castMin);
         if (roColumns.castMax != null) sql.append(", ").append(roColumns.castMax);
+        if (roColumns.poloha != null) sql.append(", ").append(roColumns.poloha);
         sql.append(" FROM ").append(TABLE_RO_TPI)
                 .append(" WHERE ").append(roColumns.tudu).append(" IS NOT NULL AND ")
                 .append(roColumns.tudu).append(" <> ''")
@@ -539,14 +578,12 @@ public class DzsDatabase implements Closeable {
                 }
                 Tudu.Vyhybka v = tudu.findOrCreate(cislo);
                 int col = 2;
-                if (roColumns.castMin != null) {
-                    Integer cmin = readInt(c, col++);
-                    if (cmin != null) v.castMin = cmin;
-                }
-                if (roColumns.castMax != null) {
-                    Integer cmax = readInt(c, col);
-                    if (cmax != null) v.castMax = cmax;
-                }
+                Integer cmin = roColumns.castMin != null ? readInt(c, col++) : null;
+                Integer cmax = roColumns.castMax != null ? readInt(c, col++) : null;
+                String poloha = roColumns.poloha != null ? readTrimmedText(c, col++) : null;
+                CastRange cast = resolveCastRange(cmin, cmax, poloha);
+                if (cast.castMin != null) v.castMin = cast.castMin;
+                if (cast.castMax != null) v.castMax = cast.castMax;
             }
         }
         return new ArrayList<>(map.values());
@@ -827,6 +864,7 @@ public class DzsDatabase implements Closeable {
                 .append(roColumns.roId);
         if (roColumns.castMin != null) sql.append(", ").append(roColumns.castMin);
         if (roColumns.castMax != null) sql.append(", ").append(roColumns.castMax);
+        if (roColumns.poloha != null) sql.append(", ").append(roColumns.poloha);
         sql.append(" FROM ").append(TABLE_RO_TPI)
                 .append(" WHERE ").append(roColumns.tudu).append(" IS NOT NULL AND ")
                 .append(roColumns.tudu).append(" <> ''")
@@ -848,8 +886,10 @@ public class DzsDatabase implements Closeable {
                 }
                 int col = 5;
                 Integer castMin = roColumns.castMin != null ? readInt(c, col++) : null;
-                Integer castMax = roColumns.castMax != null ? readInt(c, col) : null;
-                RoIndexEntry entry = new RoIndexEntry(tudu, vyhybka, roId, castMin, castMax);
+                Integer castMax = roColumns.castMax != null ? readInt(c, col++) : null;
+                String poloha = roColumns.poloha != null ? readTrimmedText(c, col++) : null;
+                CastRange cast = resolveCastRange(castMin, castMax, poloha);
+                RoIndexEntry entry = new RoIndexEntry(tudu, vyhybka, roId, cast.castMin, cast.castMax);
                 String key = pairKey(superZId, superDId);
                 byPairKey.computeIfAbsent(key, k -> new ArrayList<>()).add(entry);
                 byRoKey.put(roKey(superZId, superDId, roId), entry);

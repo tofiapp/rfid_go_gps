@@ -21,13 +21,13 @@ import java.util.zip.GZIPOutputStream;
  * Disková cache paměťových indexů DZS databáze.
  * Platnost indexu je vázaná na velikost a SHA-256 obsahu databáze.
  *
- * Verze 15 ukládá RO index (RO_ID) a předpočítané GPS souřadnice výhybek
- * pro rychlé vyhledávání bez průchodu km tabulkou za běhu.
+ * Verze 16 ukládá RO index (RO_ID) včetně rozsahu částí odvozeného z POLOHA
+ * (J = 3, C = 4) a předpočítané GPS souřadnice výhybek.
  */
 final class DzsIndexCache {
 
     private static final int MAGIC = 0x445A5349; // "DZSI"
-    private static final int VERSION = 15;
+    private static final int VERSION = 16;
     private static final int VERSION_LEGACY_V14 = 14;
     private static final int VERSION_LEGACY_V13 = 13;
     private static final int HASH_HEX_LEN = 64;
