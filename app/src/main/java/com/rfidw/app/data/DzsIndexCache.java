@@ -25,7 +25,7 @@ import java.util.zip.GZIPOutputStream;
 final class DzsIndexCache {
 
     private static final int MAGIC = 0x445A5349; // "DZSI"
-    private static final int VERSION = 8;
+    private static final int VERSION = 9;
     private static final int HASH_HEX_LEN = 64;
 
     static final class RoEntry {
@@ -43,11 +43,11 @@ final class DzsIndexCache {
 
     static final class LoadedIndex {
         final Map<String, List<RoEntry>> roByPairKey;
-        final GpsPointStore gpsStore;
+        final VyhybkaGpsStore vyhybkaGpsStore;
 
-        LoadedIndex(Map<String, List<RoEntry>> roByPairKey, GpsPointStore gpsStore) {
+        LoadedIndex(Map<String, List<RoEntry>> roByPairKey, VyhybkaGpsStore vyhybkaGpsStore) {
             this.roByPairKey = roByPairKey;
-            this.gpsStore = gpsStore;
+            this.vyhybkaGpsStore = vyhybkaGpsStore;
         }
     }
 
@@ -102,11 +102,11 @@ final class DzsIndexCache {
 
     @FunctionalInterface
     interface SaveProgressListener {
-        void onGpsWritten(int written, int total);
+        void onWritten(int written, int total);
     }
 
     static void save(File dbFile, String contentHash, File cacheDir,
-                     Map<String, List<RoEntry>> roByPairKey, GpsPointStore gpsStore,
+                     Map<String, List<RoEntry>> roByPairKey, VyhybkaGpsStore vyhybkaGpsStore,
                      SaveProgressListener progress) {
         saveBody(dbFile, contentHash, cacheDir, out -> {
             int roCount = 0;
@@ -122,26 +122,22 @@ final class DzsIndexCache {
                     out.writeDouble(ro.midKm);
                 }
             }
-            writeGpsStore(out, gpsStore, progress);
+            writeVyhybkaGpsStore(out, vyhybkaGpsStore, progress);
         });
     }
 
-    private static void writeGpsStore(DataOutputStream out, GpsPointStore store,
-                                      SaveProgressListener progress) throws IOException {
-        String[] pairKeys = store.pairKeyTable();
-        out.writeInt(pairKeys.length);
-        for (String key : pairKeys) {
-            out.writeUTF(key);
-        }
-        int gpsTotal = store.size();
-        out.writeInt(gpsTotal);
-        for (int i = 0; i < gpsTotal; i++) {
-            out.writeInt(store.pairIdAt(i));
-            out.writeDouble(store.kmExtAt(i));
+    private static void writeVyhybkaGpsStore(DataOutputStream out, VyhybkaGpsStore store,
+                                           SaveProgressListener progress) throws IOException {
+        int total = store.size();
+        out.writeInt(total);
+        for (int i = 0; i < total; i++) {
+            out.writeUTF(store.pairKeyAt(i));
+            out.writeUTF(store.tuduAt(i));
+            out.writeInt(store.vyhybkaAt(i));
             out.writeFloat((float) store.latitudeAt(i));
             out.writeFloat((float) store.longitudeAt(i));
-            if (progress != null && ((i + 1) % 100_000 == 0 || i + 1 == gpsTotal)) {
-                progress.onGpsWritten(i + 1, gpsTotal);
+            if (progress != null && ((i + 1) % 10_000 == 0 || i + 1 == total)) {
+                progress.onWritten(i + 1, total);
             }
         }
     }
@@ -174,7 +170,7 @@ final class DzsIndexCache {
         try (DataInputStream in = new DataInputStream(new GZIPInputStream(new FileInputStream(indexFile)))) {
             if (in.readInt() != MAGIC) return null;
             int version = in.readInt();
-            if (version != VERSION && version != 7) return null;
+            if (version != VERSION) return null;
             long cachedSize = in.readLong();
             String cachedHash = in.readUTF();
             if (cachedSize != dbSize || !contentHash.equals(cachedHash)) {
@@ -187,10 +183,8 @@ final class DzsIndexCache {
                 RoEntry entry = new RoEntry(in.readUTF(), in.readInt(), in.readDouble());
                 ro.computeIfAbsent(pairKey, k -> new ArrayList<>()).add(entry);
             }
-            GpsPointStore gpsStore = version == VERSION
-                    ? readGpsStoreV8(in)
-                    : readGpsStoreV7(in);
-            return new LoadedIndex(ro, gpsStore);
+            VyhybkaGpsStore vyhybkaGpsStore = readVyhybkaGpsStore(in);
+            return new LoadedIndex(ro, vyhybkaGpsStore);
         } catch (OutOfMemoryError e) {
             throw e;
         } catch (Exception ignored) {
@@ -198,45 +192,19 @@ final class DzsIndexCache {
         }
     }
 
-    private static GpsPointStore readGpsStoreV8(DataInputStream in) throws IOException {
-        int pairCount = in.readInt();
-        String[] pairKeys = new String[pairCount];
-        for (int i = 0; i < pairCount; i++) {
-            pairKeys[i] = in.readUTF();
-        }
-        int gpsCount = in.readInt();
-        GpsPointStore.Builder builder = GpsPointStore.builder(Math.max(gpsCount, 256));
-        for (int i = 0; i < gpsCount; i++) {
-            int pairId = in.readInt();
-            double km = in.readDouble();
+    private static VyhybkaGpsStore readVyhybkaGpsStore(DataInputStream in) throws IOException {
+        int count = in.readInt();
+        if (count <= 0) return VyhybkaGpsStore.empty();
+        VyhybkaGpsStore.Builder builder = VyhybkaGpsStore.builder();
+        for (int i = 0; i < count; i++) {
+            String pairKey = in.readUTF();
+            String tudu = in.readUTF();
+            int vyhybka = in.readInt();
             float lat = in.readFloat();
             float lon = in.readFloat();
-            if (pairId < 0 || pairId >= pairCount) continue;
-            String[] ids = splitPairKey(pairKeys[pairId]);
-            builder.addPoint(ids[0], ids[1], km, lat, lon);
+            builder.add(pairKey, tudu, vyhybka, lat, lon);
         }
         return builder.build();
-    }
-
-    /** v7: každý bod nese celý pairKey UTF – načte se přímo do kompaktního úložiště. */
-    private static GpsPointStore readGpsStoreV7(DataInputStream in) throws IOException {
-        int gpsCount = in.readInt();
-        GpsPointStore.Builder builder = GpsPointStore.builder(Math.max(gpsCount, 256));
-        for (int i = 0; i < gpsCount; i++) {
-            String pairKey = in.readUTF();
-            double km = in.readDouble();
-            double lat = in.readDouble();
-            double lon = in.readDouble();
-            String[] ids = splitPairKey(pairKey);
-            builder.addPoint(ids[0], ids[1], km, lat, lon);
-        }
-        return builder.build();
-    }
-
-    private static String[] splitPairKey(String pairKey) {
-        int sep = pairKey.indexOf('|');
-        if (sep < 0) return new String[]{pairKey, ""};
-        return new String[]{pairKey.substring(0, sep), pairKey.substring(sep + 1)};
     }
 
     private static File cacheFileFor(String contentHash, File cacheDir) {

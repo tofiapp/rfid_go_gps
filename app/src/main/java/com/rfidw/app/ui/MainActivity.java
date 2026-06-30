@@ -2057,7 +2057,7 @@ public class MainActivity extends AppCompatActivity {
             runOnUiThreadIfAlive(loadId, () -> {
                 endCard1DbLoad();
                 expandCard1Body();
-                tvSourceFile.setText("Chyba načtení: nedostatek paměti (index GPS bodů je příliš velký)");
+                tvSourceFile.setText("Chyba načtení: nedostatek paměti při indexaci databáze");
                 if (showErrorToast) toast("Chyba načtení databáze – nedostatek paměti");
             });
         } catch (Exception e) {
