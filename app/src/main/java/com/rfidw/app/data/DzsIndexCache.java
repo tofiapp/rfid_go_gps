@@ -18,15 +18,17 @@ import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
 /**
- * Disková cache paměťového RO indexu DZS databáze.
+ * Disková cache paměťových indexů DZS databáze.
  * Platnost indexu je vázaná na velikost a SHA-256 obsahu databáze.
  *
- * Verze 14 ukládá výhybky indexované přes RO_ID (bez KM_EXT a předpočtu GPS).
+ * Verze 15 ukládá RO index (RO_ID) a předpočítané GPS souřadnice výhybek
+ * pro rychlé vyhledávání bez průchodu km tabulkou za běhu.
  */
 final class DzsIndexCache {
 
     private static final int MAGIC = 0x445A5349; // "DZSI"
-    private static final int VERSION = 14;
+    private static final int VERSION = 15;
+    private static final int VERSION_LEGACY_V14 = 14;
     private static final int VERSION_LEGACY_V13 = 13;
     private static final int HASH_HEX_LEN = 64;
     /** {@link RoEntry#castMin} / {@link RoEntry#castMax} pokud sloupec v DB chybí. */
@@ -50,9 +52,11 @@ final class DzsIndexCache {
 
     static final class LoadedIndex {
         final Map<String, List<RoEntry>> roByPairKey;
+        final VyhybkaGpsStore vyhybkaGpsStore;
 
-        LoadedIndex(Map<String, List<RoEntry>> roByPairKey) {
+        LoadedIndex(Map<String, List<RoEntry>> roByPairKey, VyhybkaGpsStore vyhybkaGpsStore) {
             this.roByPairKey = roByPairKey;
+            this.vyhybkaGpsStore = vyhybkaGpsStore != null ? vyhybkaGpsStore : VyhybkaGpsStore.empty();
         }
     }
 
@@ -118,6 +122,7 @@ final class DzsIndexCache {
 
     static void save(File dbFile, String contentHash, File cacheDir,
                      Map<String, List<RoEntry>> roByPairKey,
+                     VyhybkaGpsStore vyhybkaGpsStore,
                      SaveProgressListener progress) {
         if (dbFile == null || cacheDir == null || !dbFile.isFile()) return;
         if (contentHash == null || contentHash.length() != HASH_HEX_LEN) return;
@@ -149,6 +154,7 @@ final class DzsIndexCache {
                     }
                 }
             }
+            writeVyhybkaGpsStore(out, vyhybkaGpsStore);
             out.flush();
         } catch (Exception ignored) {
             tmp.delete();
@@ -164,7 +170,7 @@ final class DzsIndexCache {
         try (DataInputStream in = new DataInputStream(new GZIPInputStream(new FileInputStream(indexFile)))) {
             if (in.readInt() != MAGIC) return null;
             int version = in.readInt();
-            if (version != VERSION && version != VERSION_LEGACY_V13) {
+            if (version != VERSION && version != VERSION_LEGACY_V14 && version != VERSION_LEGACY_V13) {
                 return null;
             }
             long cachedSize = in.readLong();
@@ -182,7 +188,7 @@ final class DzsIndexCache {
                 String roId;
                 int castMin = CAST_UNSPECIFIED;
                 int castMax = CAST_UNSPECIFIED;
-                if (version >= VERSION) {
+                if (version >= VERSION_LEGACY_V14) {
                     roId = in.readUTF();
                     castMin = in.readInt();
                     castMax = in.readInt();
@@ -197,11 +203,13 @@ final class DzsIndexCache {
                 RoEntry entry = new RoEntry(tudu, vyhybka, roId, castMin, castMax);
                 ro.computeIfAbsent(pairKey, k -> new ArrayList<>()).add(entry);
             }
-            if (version == VERSION_LEGACY_V13) {
-                skipLegacyVyhybkaGpsStore(in);
-            }
             if (!hasRoId) return null;
-            return new LoadedIndex(ro);
+
+            VyhybkaGpsStore vyhybkaGpsStore = VyhybkaGpsStore.empty();
+            if (version == VERSION || version == VERSION_LEGACY_V13) {
+                vyhybkaGpsStore = readVyhybkaGpsStore(in);
+            }
+            return new LoadedIndex(ro, vyhybkaGpsStore);
         } catch (OutOfMemoryError e) {
             throw e;
         } catch (Exception ignored) {
@@ -209,15 +217,34 @@ final class DzsIndexCache {
         }
     }
 
-    private static void skipLegacyVyhybkaGpsStore(DataInputStream in) throws IOException {
-        int count = in.readInt();
-        for (int i = 0; i < count; i++) {
-            in.readUTF();
-            in.readUTF();
-            in.readInt();
-            in.readFloat();
-            in.readFloat();
+    private static void writeVyhybkaGpsStore(DataOutputStream out, VyhybkaGpsStore store) throws IOException {
+        if (store == null || store.isEmpty()) {
+            out.writeInt(0);
+            return;
         }
+        out.writeInt(store.size());
+        for (int i = 0; i < store.size(); i++) {
+            out.writeUTF(store.pairKeyAt(i));
+            out.writeUTF(store.tuduAt(i));
+            out.writeInt(store.vyhybkaAt(i));
+            out.writeFloat((float) store.latitudeAt(i));
+            out.writeFloat((float) store.longitudeAt(i));
+        }
+    }
+
+    private static VyhybkaGpsStore readVyhybkaGpsStore(DataInputStream in) throws IOException {
+        int count = in.readInt();
+        if (count <= 0) return VyhybkaGpsStore.empty();
+        VyhybkaGpsStore.Builder builder = VyhybkaGpsStore.builder();
+        for (int i = 0; i < count; i++) {
+            String pairKey = in.readUTF();
+            String tudu = in.readUTF();
+            int vyhybka = in.readInt();
+            float lat = in.readFloat();
+            float lon = in.readFloat();
+            builder.add(pairKey, tudu, vyhybka, lat, lon);
+        }
+        return builder.build();
     }
 
     private static File cacheFileFor(String contentHash, File cacheDir) {
