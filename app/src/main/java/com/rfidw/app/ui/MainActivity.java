@@ -553,7 +553,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String formatNearbyTuduLabel(DzsDatabase.GpsMatch match) {
-        return match.tudu;
+        return match.tudu + " · " + formatDistanceM(match.distanceM);
     }
 
     private void showFullTuduPicker() {
