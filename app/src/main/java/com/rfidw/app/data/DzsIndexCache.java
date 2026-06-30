@@ -22,26 +22,37 @@ import java.util.zip.GZIPOutputStream;
  * Platnost indexu je vázaná na velikost a SHA-256 obsahu databáze – přežije
  * kopírování souboru a restart aplikace (na rozdíl od lastModified).
  *
- * Verze 10 ukládá jen RO index (výhybky). GPS km body se neindexují –
- * vyhledávání probíhá až při GPS dotazu.
+ * Verze 11 ukládá RO index (výhybky včetně částí) a předpočítané GPS souřadnice
+ * výhybek pro rychlé vyhledávání bez průchodu km tabulkou.
  */
 final class DzsIndexCache {
 
     private static final int MAGIC = 0x445A5349; // "DZSI"
-    private static final int VERSION = 10;
+    private static final int VERSION = 11;
+    private static final int VERSION_LEGACY_V10 = 10;
     private static final int VERSION_LEGACY_V9 = 9;
     private static final int HASH_HEX_LEN = 64;
+    /** {@link RoEntry#castMin} / {@link RoEntry#castMax} pokud sloupec v DB chybí. */
+    static final int CAST_UNSPECIFIED = -1;
 
     static final class RoEntry {
         final String tudu;
         final int vyhybka;
         /** Střed OD a DO; {@link Double#NaN} pokud není k dispozici. */
         final double midKm;
+        final int castMin;
+        final int castMax;
 
         RoEntry(String tudu, int vyhybka, double midKm) {
+            this(tudu, vyhybka, midKm, CAST_UNSPECIFIED, CAST_UNSPECIFIED);
+        }
+
+        RoEntry(String tudu, int vyhybka, double midKm, int castMin, int castMax) {
             this.tudu = tudu;
             this.vyhybka = vyhybka;
             this.midKm = midKm;
+            this.castMin = castMin;
+            this.castMax = castMax;
         }
     }
 
@@ -57,6 +68,25 @@ final class DzsIndexCache {
     }
 
     private DzsIndexCache() {
+    }
+
+    /**
+     * Vrátí SHA-256 databáze – použije uložený otisk, pokud sedí velikost souboru;
+     * jinak přepočítá a uloží pro další start.
+     */
+    static String resolveContentHash(File dbFile, File cacheDir) throws IOException {
+        if (dbFile == null || !dbFile.isFile()) {
+            throw new IOException("Databáze nenalezena");
+        }
+        if (cacheDir != null) {
+            String cached = readStoredHash(dbFile, cacheDir);
+            if (cached != null) return cached;
+        }
+        String hash = computeContentHash(dbFile);
+        if (cacheDir != null) {
+            storeHash(dbFile, hash, cacheDir);
+        }
+        return hash;
     }
 
     /** SHA-256 celého souboru databáze (hex, lowercase). */
@@ -112,6 +142,7 @@ final class DzsIndexCache {
 
     static void save(File dbFile, String contentHash, File cacheDir,
                      Map<String, List<RoEntry>> roByPairKey,
+                     VyhybkaGpsStore vyhybkaGpsStore,
                      SaveProgressListener progress) {
         saveBody(dbFile, contentHash, cacheDir, out -> {
             int roCount = 0;
@@ -126,12 +157,15 @@ final class DzsIndexCache {
                     out.writeUTF(ro.tudu);
                     out.writeInt(ro.vyhybka);
                     out.writeDouble(ro.midKm);
+                    out.writeInt(ro.castMin);
+                    out.writeInt(ro.castMax);
                     written++;
                     if (progress != null && (written % 10_000 == 0 || written == roCount)) {
                         progress.onWritten(written, roCount);
                     }
                 }
             }
+            writeVyhybkaGpsStore(out, vyhybkaGpsStore);
         });
     }
 
@@ -163,7 +197,10 @@ final class DzsIndexCache {
         try (DataInputStream in = new DataInputStream(new GZIPInputStream(new FileInputStream(indexFile)))) {
             if (in.readInt() != MAGIC) return null;
             int version = in.readInt();
-            if (version != VERSION && version != VERSION_LEGACY_V9) return null;
+            if (version != VERSION && version != VERSION_LEGACY_V9
+                    && version != VERSION_LEGACY_V10) {
+                return null;
+            }
             long cachedSize = in.readLong();
             String cachedHash = in.readUTF();
             if (cachedSize != dbSize || !contentHash.equals(cachedHash)) {
@@ -173,11 +210,20 @@ final class DzsIndexCache {
             Map<String, List<RoEntry>> ro = new HashMap<>(Math.max(roCount / 2, 16));
             for (int i = 0; i < roCount; i++) {
                 String pairKey = in.readUTF();
-                RoEntry entry = new RoEntry(in.readUTF(), in.readInt(), in.readDouble());
+                String tudu = in.readUTF();
+                int vyhybka = in.readInt();
+                double midKm = in.readDouble();
+                int castMin = CAST_UNSPECIFIED;
+                int castMax = CAST_UNSPECIFIED;
+                if (version >= VERSION) {
+                    castMin = in.readInt();
+                    castMax = in.readInt();
+                }
+                RoEntry entry = new RoEntry(tudu, vyhybka, midKm, castMin, castMax);
                 ro.computeIfAbsent(pairKey, k -> new ArrayList<>()).add(entry);
             }
             VyhybkaGpsStore vyhybkaGpsStore = VyhybkaGpsStore.empty();
-            if (version == VERSION_LEGACY_V9) {
+            if (version == VERSION_LEGACY_V9 || version == VERSION) {
                 vyhybkaGpsStore = readVyhybkaGpsStore(in);
             }
             return new LoadedIndex(ro, vyhybkaGpsStore);
@@ -185,6 +231,21 @@ final class DzsIndexCache {
             throw e;
         } catch (Exception ignored) {
             return null;
+        }
+    }
+
+    private static void writeVyhybkaGpsStore(DataOutputStream out, VyhybkaGpsStore store) throws IOException {
+        if (store == null || store.isEmpty()) {
+            out.writeInt(0);
+            return;
+        }
+        out.writeInt(store.size());
+        for (int i = 0; i < store.size(); i++) {
+            out.writeUTF(store.pairKeyAt(i));
+            out.writeUTF(store.tuduAt(i));
+            out.writeInt(store.vyhybkaAt(i));
+            out.writeFloat((float) store.latitudeAt(i));
+            out.writeFloat((float) store.longitudeAt(i));
         }
     }
 
@@ -205,5 +266,45 @@ final class DzsIndexCache {
 
     private static File cacheFileFor(String contentHash, File cacheDir) {
         return new File(cacheDir, "dzs_" + contentHash + ".idx");
+    }
+
+    private static File hashSidecarFile(File dbFile, File cacheDir) {
+        String key = Long.toHexString(dbFile.length()) + "_"
+                + Integer.toHexString(dbFile.getAbsolutePath().hashCode());
+        return new File(cacheDir, "hash_" + key + ".txt");
+    }
+
+    private static String readStoredHash(File dbFile, File cacheDir) {
+        if (cacheDir == null) return null;
+        File sidecar = hashSidecarFile(dbFile, cacheDir);
+        if (!sidecar.isFile()) return null;
+        try (DataInputStream in = new DataInputStream(new FileInputStream(sidecar))) {
+            long storedSize = in.readLong();
+            String hash = in.readUTF();
+            if (storedSize != dbFile.length() || hash.length() != HASH_HEX_LEN) {
+                return null;
+            }
+            return hash;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static void storeHash(File dbFile, String hash, File cacheDir) {
+        if (cacheDir == null || hash == null || hash.length() != HASH_HEX_LEN) return;
+        if (!cacheDir.exists() && !cacheDir.mkdirs()) return;
+        File sidecar = hashSidecarFile(dbFile, cacheDir);
+        File tmp = new File(cacheDir, sidecar.getName() + ".tmp");
+        try (DataOutputStream out = new DataOutputStream(new FileOutputStream(tmp))) {
+            out.writeLong(dbFile.length());
+            out.writeUTF(hash);
+            out.flush();
+        } catch (Exception ignored) {
+            tmp.delete();
+            return;
+        }
+        if (!tmp.renameTo(sidecar)) {
+            tmp.delete();
+        }
     }
 }
