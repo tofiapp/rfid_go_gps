@@ -120,13 +120,13 @@ final class DzsIndexCache {
         void onWritten(int written, int total);
     }
 
-    static void save(File dbFile, String contentHash, File cacheDir,
+    static boolean save(File dbFile, String contentHash, File cacheDir,
                      Map<String, List<RoEntry>> roByPairKey,
                      VyhybkaGpsStore vyhybkaGpsStore,
                      SaveProgressListener progress) {
-        if (dbFile == null || cacheDir == null || !dbFile.isFile()) return;
-        if (contentHash == null || contentHash.length() != HASH_HEX_LEN) return;
-        if (!cacheDir.exists() && !cacheDir.mkdirs()) return;
+        if (dbFile == null || cacheDir == null || !dbFile.isFile()) return false;
+        if (contentHash == null || contentHash.length() != HASH_HEX_LEN) return false;
+        if (!cacheDir.exists() && !cacheDir.mkdirs()) return false;
         File cacheFile = cacheFileFor(contentHash, cacheDir);
         File tmp = new File(cacheDir, cacheFile.getName() + ".tmp");
         try (DataOutputStream out = new DataOutputStream(new GZIPOutputStream(new FileOutputStream(tmp)))) {
@@ -158,11 +158,13 @@ final class DzsIndexCache {
             out.flush();
         } catch (Exception ignored) {
             tmp.delete();
-            return;
+            return false;
         }
         if (!tmp.renameTo(cacheFile)) {
             tmp.delete();
+            return false;
         }
+        return true;
     }
 
     private static LoadedIndex readIndex(long dbSize, String contentHash, File indexFile) {

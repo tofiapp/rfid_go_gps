@@ -9,6 +9,7 @@
     <string name="workflow_sheet_title">Pokročilé</string>
     <string name="epc_preview_label">EPC náhled</string>
     <string name="tudu_search_hint">Hledat TUDU…</string>
+    <string name="vyhybka_search_hint">Hledat výhybku…</string>
     <string name="cast_hint_prefix">Načtěte\u00A0</string>
     <string name="cast_hint_chip">čip\u00A0</string>
     <string name="cast_hint_comma_vyhybky">,\u00A0výhybky\u00A0</string>

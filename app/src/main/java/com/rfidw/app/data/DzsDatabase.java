@@ -2,6 +2,7 @@ package com.rfidw.app.data;
 
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteStatement;
 
 import java.io.Closeable;
 import java.io.File;
@@ -35,6 +36,7 @@ public class DzsDatabase implements Closeable {
 
     public static final String TABLE_GPS_KM = "DZS_SUPERTRA_GPS_KM";
     public static final String TABLE_RO_TPI = "DZS_SUPER_RO_TPI";
+    private static final String TEMP_RO_GPS_LOOKUP = "_dzs_ro_gps_lookup";
 
     /** Průběh otevírání databáze (fáze + odhad procent 0–100, nebo -1). */
     public interface OpenProgressListener {
@@ -252,24 +254,6 @@ public class DzsDatabase implements Closeable {
         return grid;
     }
 
-    private void ensureSpatialIndex(OpenProgressListener listener) {
-        if (vyhybkaGpsStore.isEmpty()) {
-            report(listener, "Hotovo", 100);
-            return;
-        }
-        report(listener, "Připravuji vyhledávání", 93);
-        spatialGrid();
-        report(listener, "Hotovo", 100);
-    }
-
-    private void preloadCoordsFromStore(VyhybkaGpsStore store) {
-        if (store == null || store.isEmpty()) return;
-        for (int i = 0; i < store.size(); i++) {
-            coordMemo.put(memoKey(store.pairKeyAt(i), store.tuduAt(i), store.vyhybkaAt(i)),
-                    new double[]{store.latitudeAt(i), store.longitudeAt(i)});
-        }
-    }
-
     public static DzsDatabase open(String path) throws Exception {
         return open(path, null, null);
     }
@@ -310,6 +294,14 @@ public class DzsDatabase implements Closeable {
                 RoIndexBuildResult built = buildRoIndex(db, roColumns);
                 roByPairKey = built.byPairKey;
                 roByRoKey = built.byRoKey;
+                if (cacheDir != null) {
+                    if (contentHash == null) {
+                        contentHash = DzsIndexCache.resolveContentHash(sourceFile, indexCacheDir);
+                    }
+                    report(listener, "Ukládám cache (výhybky)", 40);
+                    saveIndexCache(sourceFile, contentHash, cacheDir, roByPairKey,
+                            VyhybkaGpsStore.empty(), listener);
+                }
             }
 
             if (roByRoKey.isEmpty()) {
@@ -317,25 +309,26 @@ public class DzsDatabase implements Closeable {
             }
 
             DzsDatabase opened = new DzsDatabase(db, gpsColumns, roColumns, roByPairKey, roByRoKey, gpsStore);
-            boolean needsSave = cached == null;
+            boolean needsFullSave = false;
 
             if (gpsStore.isEmpty()) {
                 report(listener, "Indexuji souřadnice výhybek", 50);
                 gpsStore = opened.buildVyhybkaGpsStore(roByRoKey, listener);
                 opened = new DzsDatabase(db, gpsColumns, roColumns, roByPairKey, roByRoKey, gpsStore);
-                needsSave = cacheDir != null;
+                needsFullSave = cacheDir != null && !gpsStore.isEmpty();
             }
 
-            if (needsSave && cacheDir != null) {
+            if (needsFullSave && cacheDir != null) {
                 if (contentHash == null) {
                     contentHash = DzsIndexCache.resolveContentHash(sourceFile, indexCacheDir);
                 }
                 report(listener, "Ukládám cache", 85);
-                saveIndexCache(sourceFile, contentHash, cacheDir, roByPairKey, gpsStore, listener);
+                if (!saveIndexCache(sourceFile, contentHash, cacheDir, roByPairKey, gpsStore, listener)) {
+                    report(listener, "Varování: cache indexu se nepodařilo uložit", -1);
+                }
             }
 
-            opened.preloadCoordsFromStore(gpsStore);
-            opened.ensureSpatialIndex(listener);
+            report(listener, "Hotovo", 100);
             return opened;
         } catch (OutOfMemoryError e) {
             db.close();
@@ -459,11 +452,11 @@ public class DzsDatabase implements Closeable {
         }
     }
 
-    private static void saveIndexCache(File dbFile, String contentHash, File cacheDir,
-                                       Map<String, List<RoIndexEntry>> roByPairKey,
-                                       VyhybkaGpsStore vyhybkaGpsStore,
-                                       OpenProgressListener listener) {
-        DzsIndexCache.save(dbFile, contentHash, new File(cacheDir, "dzs_index"),
+    private static boolean saveIndexCache(File dbFile, String contentHash, File cacheDir,
+                                          Map<String, List<RoIndexEntry>> roByPairKey,
+                                          VyhybkaGpsStore vyhybkaGpsStore,
+                                          OpenProgressListener listener) {
+        return DzsIndexCache.save(dbFile, contentHash, new File(cacheDir, "dzs_index"),
                 toRoCache(roByPairKey), vyhybkaGpsStore,
                 (written, total) -> {
                     int pct = 85 + (int) ((written * 10L) / Math.max(total, 1));
@@ -786,6 +779,96 @@ public class DzsDatabase implements Closeable {
     private VyhybkaGpsStore buildVyhybkaGpsStore(Map<String, RoIndexEntry> roByRoKey,
                                                  OpenProgressListener listener) {
         ensureGpsRoLookupIndex();
+        VyhybkaGpsStore batch = buildVyhybkaGpsStoreBatch(roByRoKey, listener);
+        if (!batch.isEmpty()) {
+            return batch;
+        }
+        return buildVyhybkaGpsStorePerEntry(roByRoKey, listener);
+    }
+
+    private boolean populateRoGpsLookupTempTable(Map<String, RoIndexEntry> roByRoKey) {
+        try {
+            db.execSQL("CREATE TEMP TABLE IF NOT EXISTS " + TEMP_RO_GPS_LOOKUP
+                    + " (super_z_id TEXT NOT NULL, super_d_id TEXT NOT NULL, ro_id TEXT NOT NULL,"
+                    + " tudu TEXT NOT NULL, vyhybka INTEGER NOT NULL,"
+                    + " PRIMARY KEY (super_z_id, super_d_id, ro_id))");
+            db.execSQL("DELETE FROM " + TEMP_RO_GPS_LOOKUP);
+        } catch (Exception ignored) {
+            return false;
+        }
+
+        SQLiteStatement insert = db.compileStatement(
+                "INSERT OR IGNORE INTO " + TEMP_RO_GPS_LOOKUP
+                        + " (super_z_id, super_d_id, ro_id, tudu, vyhybka) VALUES (?, ?, ?, ?, ?)");
+        db.beginTransaction();
+        try {
+            for (Map.Entry<String, RoIndexEntry> e : roByRoKey.entrySet()) {
+                String[] ids = splitRoKey(e.getKey());
+                RoIndexEntry ro = e.getValue();
+                if (ro.roId == null) continue;
+                insert.clearBindings();
+                insert.bindString(1, ids[0]);
+                insert.bindString(2, ids[1]);
+                insert.bindString(3, ro.roId);
+                insert.bindString(4, ro.tudu);
+                insert.bindLong(5, ro.vyhybka);
+                insert.executeInsert();
+            }
+            db.setTransactionSuccessful();
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    private VyhybkaGpsStore buildVyhybkaGpsStoreBatch(Map<String, RoIndexEntry> roByRoKey,
+                                                      OpenProgressListener listener) {
+        if (!populateRoGpsLookupTempTable(roByRoKey)) {
+            return VyhybkaGpsStore.empty();
+        }
+        String roIdExpr = "TRIM(CAST(" + gpsColumns.roId + " AS TEXT))";
+        String sql = "SELECT ro.tudu, ro.vyhybka, gps." + gpsColumns.latitude + ", gps."
+                + gpsColumns.longitude + ", ro.super_z_id, ro.super_d_id, ro.ro_id"
+                + " FROM " + TEMP_RO_GPS_LOOKUP + " ro"
+                + " INNER JOIN " + TABLE_GPS_KM + " gps"
+                + " ON gps." + gpsColumns.superZId + " = ro.super_z_id"
+                + " AND gps." + gpsColumns.superDId + " = ro.super_d_id"
+                + " AND " + roIdExpr + " = ro.ro_id";
+
+        VyhybkaGpsStore.Builder builder = VyhybkaGpsStore.builder();
+        HashSet<String> seen = new HashSet<>();
+        int matched = 0;
+        try (Cursor c = db.rawQuery(sql, null)) {
+            while (c.moveToNext()) {
+                String tudu = c.getString(0);
+                Integer vyhybka = readInt(c, 1);
+                Double lat = readDouble(c, 2);
+                Double lon = readDouble(c, 3);
+                String superZId = readId(c, 4);
+                String superDId = readId(c, 5);
+                String roId = readId(c, 6);
+                if (tudu == null || vyhybka == null || lat == null || lon == null) continue;
+                if (superZId == null || superDId == null || roId == null) continue;
+                if (!seen.add(roKey(superZId, superDId, roId))) continue;
+                builder.add(pairKey(superZId, superDId), tudu, vyhybka, lat, lon);
+                matched++;
+            }
+        } catch (Exception ignored) {
+            return VyhybkaGpsStore.empty();
+        }
+        if (matched == 0) {
+            report(listener, "Varování: žádné GPS souřadnice výhybek", 80);
+        } else {
+            report(listener, String.format(Locale.ROOT,
+                    "Indexuji souřadnice výhybek (%d/%d)", matched, roByRoKey.size()), 80);
+        }
+        return builder.build();
+    }
+
+    private VyhybkaGpsStore buildVyhybkaGpsStorePerEntry(Map<String, RoIndexEntry> roByRoKey,
+                                                        OpenProgressListener listener) {
         VyhybkaGpsStore.Builder builder = VyhybkaGpsStore.builder();
         String sql = "SELECT " + gpsColumns.latitude + ", " + gpsColumns.longitude
                 + " FROM " + TABLE_GPS_KM
@@ -803,10 +886,7 @@ public class DzsDatabase implements Closeable {
                     Double lat = readDouble(c, 0);
                     Double lon = readDouble(c, 1);
                     if (lat != null && lon != null) {
-                        String pairKey = pairKey(ids[0], ids[1]);
-                        builder.add(pairKey, ro.tudu, ro.vyhybka, lat, lon);
-                        coordMemo.put(memoKey(pairKey, ro.tudu, ro.vyhybka),
-                                new double[]{lat, lon});
+                        builder.add(pairKey(ids[0], ids[1]), ro.tudu, ro.vyhybka, lat, lon);
                         matched++;
                     }
                 }
