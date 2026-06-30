@@ -50,6 +50,7 @@
     <string name="gps_reload_location">Načíst polohu</string>
     <string name="gps_tudu_wait">Čekám na GPS pro určení TUDU a výhybky…</string>
     <string name="gps_tudu_lookup">Určuji TUDU a výhybku podle GPS…</string>
+    <string name="gps_latlon_index_loading">Načítám index souřadnic LAT a LON…</string>
     <string name="gps_tudu_not_found">U aktuální GPS polohy nelze určit TUDU – vyberte ručně</string>
     <string name="gps_test_mode_label">Testovací režim GPS (simulovaná poloha)</string>
     <string name="gps_test_mode_hint">Bez signálu GPS nebo z libovolné vzdálenosti – vyberte simulovanou polohu z databáze. TUDU a výhybka se doplní automaticky stejně jako u skutečné GPS.</string>

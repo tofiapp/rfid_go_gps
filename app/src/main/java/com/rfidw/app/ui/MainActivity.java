@@ -486,6 +486,13 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private String gpsLookupStatusText() {
+        if (dzsDatabase != null && !dzsDatabase.isGpsLatLonIndexReady()) {
+            return getString(R.string.gps_latlon_index_loading);
+        }
+        return getString(R.string.gps_tudu_lookup);
+    }
+
     private void showNearbyTuduPicker() {
         if (locationCache == null || !locationCache.getSnapshot().valid) {
             toast(getString(R.string.tudu_picker_no_gps));
@@ -493,6 +500,9 @@ public class MainActivity extends AppCompatActivity {
         }
         final double lat = locationCache.getSnapshot().latitude;
         final double lon = locationCache.getSnapshot().longitude;
+        if (dzsDatabase != null && !dzsDatabase.isGpsLatLonIndexReady()) {
+            toast(getString(R.string.gps_latlon_index_loading));
+        }
         gpsIo.execute(() -> {
             List<DzsDatabase.GpsMatch> matches = Collections.emptyList();
             try {
@@ -1281,13 +1291,13 @@ public class MainActivity extends AppCompatActivity {
                         tvReaderStatus.setText(getString(R.string.gps_tudu_not_found));
                         tvReaderStatus.setTextColor(COLOR_STATUS_ERROR);
                     } else if (gpsLookupInFlight) {
-                        tvReaderStatus.setText(getString(R.string.gps_tudu_lookup));
+                        tvReaderStatus.setText(gpsLookupStatusText());
                         tvReaderStatus.setTextColor(COLOR_STATUS_GPS_WAIT);
                     } else if (dzsDatabase == null) {
                         tvReaderStatus.setText(getString(R.string.gps_tudu_wait));
                         tvReaderStatus.setTextColor(COLOR_STATUS_GPS_WAIT);
                     } else {
-                        tvReaderStatus.setText(getString(R.string.gps_tudu_lookup));
+                        tvReaderStatus.setText(gpsLookupStatusText());
                         tvReaderStatus.setTextColor(COLOR_STATUS_GPS_WAIT);
                     }
                 } else {

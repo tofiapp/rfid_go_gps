@@ -240,6 +240,11 @@ public class DzsDatabase implements Closeable {
         }
     }
 
+    /** Zda je připraven index na sloupce LAT/LON (první GPS dotaz ho může vytvářet). */
+    public boolean isGpsLatLonIndexReady() {
+        return gpsLatLonIndexReady;
+    }
+
     private static void report(OpenProgressListener listener, String phase, int percent) {
         if (listener != null) listener.onProgress(phase, percent);
     }
