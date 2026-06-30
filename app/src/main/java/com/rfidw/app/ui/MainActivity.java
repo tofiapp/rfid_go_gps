@@ -2040,7 +2040,7 @@ public class MainActivity extends AppCompatActivity {
                     updateCard1DbProgress(phase, percent);
                 });
             };
-            DzsDatabase opened = DzsDatabase.open(path, getCacheDir(), progress);
+            DzsDatabase opened = DzsDatabase.open(path, getDzsStorageDir(), progress);
             if (loadId != dbLoadGeneration) {
                 opened.close();
                 return;
@@ -2266,8 +2266,59 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /** Trvalé úložiště indexu a kopií DB – nesmí být v getCacheDir() (systém ho může smazat). */
+    private File getDzsStorageDir() {
+        File dir = new File(getFilesDir(), "dzs");
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
+        migrateLegacyDzsCache(dir);
+        return dir;
+    }
+
+    /** Jednorázový přesun indexu z getCacheDir(), který Android při úsporách místa maže. */
+    private void migrateLegacyDzsCache(File targetDir) {
+        File legacyIndex = new File(getCacheDir(), "dzs_index");
+        if (!legacyIndex.isDirectory()) return;
+        File targetIndex = new File(targetDir, "dzs_index");
+        if (targetIndex.exists()) return;
+        copyDirectory(legacyIndex, targetIndex);
+        for (String name : new String[]{"dzs_source.db", "dzs_auto_source.db"}) {
+            File legacyFile = new File(getCacheDir(), name);
+            if (!legacyFile.isFile()) continue;
+            File targetFile = new File(targetDir, name);
+            if (!targetFile.exists()) {
+                legacyFile.renameTo(targetFile);
+            }
+        }
+        for (File legacy : getCacheDir().listFiles()) {
+            if (legacy == null || !legacy.isFile()) continue;
+            String n = legacy.getName();
+            if (!n.startsWith("sqlite_") || !n.endsWith(".db")) continue;
+            File targetFile = new File(targetDir, n);
+            if (!targetFile.exists()) {
+                legacy.renameTo(targetFile);
+            }
+        }
+    }
+
+    private static void copyDirectory(File source, File target) {
+        if (!source.isDirectory()) return;
+        if (!target.exists() && !target.mkdirs()) return;
+        File[] children = source.listFiles();
+        if (children == null) return;
+        for (File child : children) {
+            File dest = new File(target, child.getName());
+            if (child.isDirectory()) {
+                copyDirectory(child, dest);
+            } else if (!dest.exists()) {
+                child.renameTo(dest);
+            }
+        }
+    }
+
     private File copyUriToCache(Uri uri, String fileName) throws Exception {
-        File out = new File(getCacheDir(), fileName);
+        File out = new File(getDzsStorageDir(), fileName);
         long expectedSize = querySize(uri);
         if (expectedSize > 0 && out.isFile() && out.length() == expectedSize) {
             return out;
