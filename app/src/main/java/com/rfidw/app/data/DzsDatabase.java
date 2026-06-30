@@ -145,29 +145,11 @@ public class DzsDatabase implements Closeable {
 
         void forEachNearest(double latitude, double longitude, IntConsumer consumer) {
             if (store.isEmpty()) return;
-            int latCell = (int) Math.floor(latitude / CELL_DEG);
-            int lonCell = (int) Math.floor(longitude / CELL_DEG);
             double bestDistSq = Double.MAX_VALUE;
-            double cosLat = Math.cos(Math.toRadians(latitude));
 
             for (int ring = 0; ring <= MAX_RING; ring++) {
-                for (int dLat = -ring; dLat <= ring; dLat++) {
-                    for (int dLon = -ring; dLon <= ring; dLon++) {
-                        if (ring > 0 && Math.abs(dLat) < ring && Math.abs(dLon) < ring) {
-                            continue;
-                        }
-                        long key = packCell(latCell + dLat, lonCell + dLon);
-                        int[] bucket = cells.get(key);
-                        if (bucket == null) continue;
-                        for (int idx : bucket) {
-                            double dLatM = store.latitudeAt(idx) - latitude;
-                            double dLonM = (store.longitudeAt(idx) - longitude) * cosLat;
-                            double distSq = dLatM * dLatM + dLonM * dLonM;
-                            if (distSq < bestDistSq) bestDistSq = distSq;
-                            consumer.accept(idx);
-                        }
-                    }
-                }
+                bestDistSq = Math.min(bestDistSq,
+                        forEachInRing(latitude, longitude, ring, consumer));
                 if (bestDistSq < Double.MAX_VALUE) {
                     double ringBoundDeg = (ring + 1) * CELL_DEG;
                     if (bestDistSq < ringBoundDeg * ringBoundDeg) return;
@@ -175,6 +157,32 @@ public class DzsDatabase implements Closeable {
             }
             if (bestDistSq < Double.MAX_VALUE) return;
             for (int idx : allIndices) consumer.accept(idx);
+        }
+
+        double forEachInRing(double latitude, double longitude, int ring, IntConsumer consumer) {
+            if (store.isEmpty()) return Double.MAX_VALUE;
+            int latCell = (int) Math.floor(latitude / CELL_DEG);
+            int lonCell = (int) Math.floor(longitude / CELL_DEG);
+            double cosLat = Math.cos(Math.toRadians(latitude));
+            double bestDistSq = Double.MAX_VALUE;
+            for (int dLat = -ring; dLat <= ring; dLat++) {
+                for (int dLon = -ring; dLon <= ring; dLon++) {
+                    if (ring > 0 && Math.abs(dLat) < ring && Math.abs(dLon) < ring) {
+                        continue;
+                    }
+                    long key = packCell(latCell + dLat, lonCell + dLon);
+                    int[] bucket = cells.get(key);
+                    if (bucket == null) continue;
+                    for (int idx : bucket) {
+                        double dLatM = store.latitudeAt(idx) - latitude;
+                        double dLonM = (store.longitudeAt(idx) - longitude) * cosLat;
+                        double distSq = dLatM * dLatM + dLonM * dLonM;
+                        if (distSq < bestDistSq) bestDistSq = distSq;
+                        consumer.accept(idx);
+                    }
+                }
+            }
+            return bestDistSq;
         }
 
         private static int[] range(int size) {
@@ -636,19 +644,31 @@ public class DzsDatabase implements Closeable {
         if (!vyhybkaGpsStore.isEmpty()) {
             Map<String, GpsMatch> bestByTudu = new HashMap<>();
             double cosLat = Math.cos(Math.toRadians(latitude));
-            spatialGrid().forEachNearest(latitude, longitude, idx -> {
-                String tudu = vyhybkaGpsStore.tuduAt(idx);
-                double dLat = vyhybkaGpsStore.latitudeAt(idx) - latitude;
-                double dLon = (vyhybkaGpsStore.longitudeAt(idx) - longitude) * cosLat;
-                double distSq = dLat * dLat + dLon * dLon;
-                GpsMatch existing = bestByTudu.get(tudu);
-                if (existing != null) {
-                    double existingDistSq = approximateDistSq(
-                            latitude, longitude, existing.latitude, existing.longitude, cosLat);
-                    if (distSq >= existingDistSq) return;
+            SpatialGrid grid = spatialGrid();
+            for (int ring = 0; ring <= SpatialGrid.MAX_RING; ring++) {
+                grid.forEachInRing(latitude, longitude, ring, idx -> {
+                    String tudu = vyhybkaGpsStore.tuduAt(idx);
+                    double dLat = vyhybkaGpsStore.latitudeAt(idx) - latitude;
+                    double dLon = (vyhybkaGpsStore.longitudeAt(idx) - longitude) * cosLat;
+                    double distSq = dLat * dLat + dLon * dLon;
+                    GpsMatch existing = bestByTudu.get(tudu);
+                    if (existing != null) {
+                        double existingDistSq = approximateDistSq(
+                                latitude, longitude, existing.latitude, existing.longitude, cosLat);
+                        if (distSq >= existingDistSq) return;
+                    }
+                    bestByTudu.put(tudu, vyhybkaToMatch(idx, latitude, longitude));
+                });
+                if (bestByTudu.size() >= limit) {
+                    List<GpsMatch> candidates = new ArrayList<>(bestByTudu.values());
+                    candidates.sort(Comparator.comparingDouble(m -> m.distanceM));
+                    GpsMatch nth = candidates.get(limit - 1);
+                    double nthDistSq = approximateDistSq(
+                            latitude, longitude, nth.latitude, nth.longitude, cosLat);
+                    double ringBoundDeg = (ring + 1) * SpatialGrid.CELL_DEG;
+                    if (nthDistSq <= ringBoundDeg * ringBoundDeg) break;
                 }
-                bestByTudu.put(tudu, vyhybkaToMatch(idx, latitude, longitude));
-            });
+            }
             List<GpsMatch> sorted = new ArrayList<>(bestByTudu.values());
             sorted.sort(Comparator.comparingDouble(m -> m.distanceM));
             if (sorted.size() <= limit) return sorted;
