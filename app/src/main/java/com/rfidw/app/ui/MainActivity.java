@@ -2316,7 +2316,6 @@ public class MainActivity extends AppCompatActivity {
     private void applyGpsMatch(DzsDatabase.GpsMatch match) {
         pendingAdvanceFromCsv = false;
         boolean tuduChanged = epc.tudu == null || !match.tudu.equals(epc.tudu);
-        boolean vyhybkaChanged = epc.vyhybka != match.vyhybka;
 
         Tudu tudu = null;
         for (Tudu t : tuduList) {
@@ -2333,8 +2332,15 @@ public class MainActivity extends AppCompatActivity {
         currentTudu = tudu;
         epc.tudu = match.tudu;
         Tudu.Vyhybka v = tudu.findOrCreate(match.vyhybka);
+        if (gpsAutoSelection && isVyhybkaCompleteInCsv(tudu.code, v)) {
+            Tudu.Vyhybka nearestIncomplete = nearestIncompleteVyhybkaByGps(tudu);
+            if (nearestIncomplete != null) {
+                v = nearestIncomplete;
+            }
+        }
+        boolean vyhybkaChanged = epc.vyhybka != v.cislo;
         currentVyhybka = v;
-        epc.vyhybka = match.vyhybka;
+        epc.vyhybka = v.cislo;
         if (tuduChanged || vyhybkaChanged || epc.cast <= 0
                 || epc.cast < v.castMin || epc.cast > v.castMax) {
             epc.cast = firstMissingCast(tudu.code, v);
@@ -2522,7 +2528,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void selectFirstAvailableVyhybka(Tudu t) {
-        Tudu.Vyhybka first = firstAvailableVyhybka(t);
+        Tudu.Vyhybka first = gpsAutoSelection
+                ? nearestIncompleteVyhybkaByGps(t)
+                : null;
+        if (first == null) {
+            first = firstAvailableVyhybka(t);
+        }
         if (first != null) {
             selectVyhybka(first, true);
         } else if (!t.vyhybky.isEmpty()) {
@@ -2909,8 +2920,24 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void advanceToNextVyhybka() {
-        if (currentTudu == null || currentTudu.vyhybky.isEmpty()) return;
+        if (currentTudu == null) return;
         syncCurrentVyhybka();
+        int currentCislo = currentVyhybka != null ? currentVyhybka.cislo : epc.vyhybka;
+
+        if (gpsAutoSelection) {
+            Tudu.Vyhybka next = nearestIncompleteVyhybkaByGps(currentTudu);
+            if (next != null && next.cislo != currentCislo) {
+                selectVyhybka(next, true);
+                gpsVyhybkaLocked = true;
+                return;
+            }
+            if (next == null) {
+                toast("Poslední výhybka v TUDU – cyklus dokončen.");
+                return;
+            }
+        }
+
+        if (currentTudu.vyhybky.isEmpty()) return;
         int idx = currentVyhybka != null
                 ? findVyhybkaIndex(currentVyhybka.cislo)
                 : findVyhybkaIndex(epc.vyhybka);
@@ -2923,6 +2950,37 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         toast("Poslední výhybka v TUDU – cyklus dokončen.");
+    }
+
+    /** V GPS režimu vrátí nejbližší nedokončenou výhybku v rámci TUDU (podle vzdálenosti). */
+    private Tudu.Vyhybka nearestIncompleteVyhybkaByGps(Tudu tudu) {
+        if (tudu == null || !gpsAutoSelection || locationCache == null
+                || !locationCache.getSnapshot().valid || dzsDatabase == null) {
+            return null;
+        }
+        LocationCache.Snapshot snap = locationCache.getSnapshot();
+        Map<Integer, Double> distances;
+        try {
+            distances = dzsDatabase.findVyhybkaDistancesForTudu(
+                    tudu.code, snap.latitude, snap.longitude);
+        } catch (Exception e) {
+            Log.w(TAG, "Vzdálenosti výhybek selhaly", e);
+            return null;
+        }
+        if (distances == null || distances.isEmpty()) return null;
+
+        List<Integer> sortedCisla = new ArrayList<>(distances.keySet());
+        sortedCisla.sort((a, b) -> {
+            int cmp = Double.compare(distances.get(a), distances.get(b));
+            return cmp != 0 ? cmp : Integer.compare(a, b);
+        });
+        for (int cislo : sortedCisla) {
+            Tudu.Vyhybka v = tudu.findOrCreate(cislo);
+            if (!isVyhybkaCompleteInCsv(tudu.code, v)) {
+                return v;
+            }
+        }
+        return null;
     }
 
     private Tudu.Vyhybka firstAvailableVyhybka(Tudu t) {
