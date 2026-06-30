@@ -41,7 +41,7 @@ public class Tudu {
     /** Jedna výhybka v rámci TUDU. */
     public static class Vyhybka {
         public final int cislo;       // číslo výhybky (např. 10)
-        public final String iob;      // volitelné písmeno z DB (např. a)
+        public final String iob;      // volitelné písmeno z DB (např. A)
         public int castMin = 1;       // nejmenší část (obvykle 1)
         public int castMax = 3;       // největší část (obvykle 3, někdy 4)
 
@@ -54,7 +54,7 @@ public class Tudu {
             this.iob = normalizeIob(iob);
         }
 
-        /** Číslo výhybky s volitelným IOB pro náhled a CSV (např. 10a). */
+        /** Číslo výhybky s volitelným IOB pro náhled a CSV (např. 10A). */
         public String displayLabel() {
             return formatDisplay(cislo, iob);
         }
@@ -67,7 +67,7 @@ public class Tudu {
 
         static String normalizeIob(String iob) {
             if (iob == null) return "";
-            String trimmed = iob.trim().toLowerCase(Locale.ROOT);
+            String trimmed = iob.trim().toUpperCase(Locale.ROOT);
             if (trimmed.isEmpty() || "null".equalsIgnoreCase(trimmed)) return "";
             return trimmed.substring(0, 1);
         }
