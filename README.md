@@ -20,12 +20,12 @@ Hlavní obrazovka vede operátora třemi kroky (**TUDU → Načtení → Hotovo*
 ### 1. Zdroj dat – SQLite databáze a GPS
 - Načte databázi **SQLite** (`.db` / `.sqlite`) s tabulkami `DZS_SUPERTRA_GPS_KM` a `DZS_SUPER_RO_TPI`.
 - Po spuštění automaticky hledá a načte soubor **`DZS_PASPORT_TPI.sqlite`** (kořen úložiště, Stažené soubory, složka aplikace). Ruční výběr zůstává k dispozici.
-- Podle **aktuální GPS polohy** najde nejbližší km bod v `DZS_SUPERTRA_GPS_KM`, z něj vezme `SUPER_Z_ID`, `SUPER_D_ID` a `KM_EXT` a v `DZS_SUPER_RO_TPI` dohledá **TUDU** a **číslo výhybky** (při více výhybkách na stejném páru ID rozliší střed `OD`/`DO` oproti `KM_EXT`).
+- Podle **aktuální GPS polohy** najde nejbližší výhybku. Při indexaci se pro každou výhybku dopředu spáruje střed `OD`/`DO` s nejbližším `KM_EXT` v rámci páru `SUPER_Z_ID`/`SUPER_D_ID` – za běhu stačí hledat mezi předpočítanými souřadnicemi výhybek.
 - Hodnoty se automaticky doplní do **náhledového panelu** nahoře (TUDU / Výhybka / čip).
 - TUDU a výhybku lze kdykoli **ručně změnit** klepnutím na náhledový panel – tím se vypne automatická aktualizace z GPS.
 - Výběr výhybky zohledňuje **již zapsané části v CSV** – dokončené výhybky jsou v seznamu zašedlé a nevybíratelné.
 - Při výběru výhybky se automaticky nastaví **první chybějící část** podle CSV.
-- **Testovací režim GPS** (zaškrtávátko v kartě TUDU): simuluje polohu podle souřadnic z databáze – vhodné bez signálu GPS (např. v budově) nebo pro testování z libovolné vzdálenosti. Vyberte bod v dialogu *Simulovaná poloha*; **TUDU a výhybka se doplní automaticky** stejným postupem jako u skutečné GPS (nejblížší km bod → `KM_EXT` → výhybka). Do CSV se zapíší simulované souřadnice (řádek GPS stavu začíná `TEST`).
+- **Testovací režim GPS** (zaškrtávátko v kartě TUDU): simuluje polohu podle souřadnic výhybek z databáze – vhodné bez signálu GPS (např. v budově) nebo pro testování z libovolné vzdálenosti. Vyberte bod v dialogu *Simulovaná poloha*; **TUDU a výhybka se doplní automaticky** stejným postupem jako u skutečné GPS. Do CSV se zapíší simulované souřadnice (řádek GPS stavu začíná `TEST`).
 
 **Očekávané sloupce**
 
@@ -37,7 +37,7 @@ Výhybky se stejným `SUPER_Z_ID`/`SUPER_D_ID` se rozliší středem `(OD+DO)/2`
 
 Vzorová databáze je ve složce [`sample_data/`](sample_data).
 
-**Indexace a cache:** Při prvním otevření databáze aplikace sama sestaví index (výhybky + GPS km body). Výsledek uloží do cache podle otisku obsahu souboru – po restartu aplikace se index znovu načte během desítek sekund, bez opakovaného skenování tabulek. Podrobnosti viz [`docs/INDEXACE_DZS.md`](docs/INDEXACE_DZS.md).
+**Indexace a cache:** Při prvním otevření databáze aplikace sama sestaví index (výhybky + předpočítané souřadnice výhybek přes `KM_EXT`). Výsledek uloží do cache podle otisku obsahu souboru – po restartu aplikace se index znovu načte během desítek sekund, bez opakovaného skenování tabulek. Podrobnosti viz [`docs/INDEXACE_DZS.md`](docs/INDEXACE_DZS.md).
 
 **Nápověda k části výhybky** – u výhybek se třemi částmi (1–3) se pod výběrem zobrazí textová nápověda:
 - část 1 → *jazyk*
