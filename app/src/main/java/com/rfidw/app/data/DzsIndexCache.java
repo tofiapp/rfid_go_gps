@@ -22,13 +22,15 @@ import java.util.zip.GZIPOutputStream;
  * Platnost indexu je vázaná na velikost a SHA-256 obsahu databáze – přežije
  * kopírování souboru a restart aplikace (na rozdíl od lastModified).
  *
+ * Verze 13 ukládá RO index včetně RO_ID pro přímé párování výhybek s GPS body.
  * Verze 12 ukládá RO index (výhybky včetně částí) a předpočítané GPS souřadnice
  * výhybek (správné párování KM_EXT ↔ střed OD/DO pro stejný pár ID).
  */
 final class DzsIndexCache {
 
     private static final int MAGIC = 0x445A5349; // "DZSI"
-    private static final int VERSION = 12;
+    private static final int VERSION = 13;
+    private static final int VERSION_LEGACY_V12 = 12;
     private static final int VERSION_LEGACY_V11 = 11;
     private static final int VERSION_LEGACY_V10 = 10;
     private static final int VERSION_LEGACY_V9 = 9;
@@ -39,18 +41,25 @@ final class DzsIndexCache {
     static final class RoEntry {
         final String tudu;
         final int vyhybka;
+        /** Identifikátor výhybky společný s GPS tabulkou; null pokud chybí. */
+        final String roId;
         /** Střed OD a DO; {@link Double#NaN} pokud není k dispozici. */
         final double midKm;
         final int castMin;
         final int castMax;
 
         RoEntry(String tudu, int vyhybka, double midKm) {
-            this(tudu, vyhybka, midKm, CAST_UNSPECIFIED, CAST_UNSPECIFIED);
+            this(tudu, vyhybka, null, midKm, CAST_UNSPECIFIED, CAST_UNSPECIFIED);
         }
 
         RoEntry(String tudu, int vyhybka, double midKm, int castMin, int castMax) {
+            this(tudu, vyhybka, null, midKm, castMin, castMax);
+        }
+
+        RoEntry(String tudu, int vyhybka, String roId, double midKm, int castMin, int castMax) {
             this.tudu = tudu;
             this.vyhybka = vyhybka;
+            this.roId = roId;
             this.midKm = midKm;
             this.castMin = castMin;
             this.castMax = castMax;
@@ -157,6 +166,7 @@ final class DzsIndexCache {
                     out.writeUTF(e.getKey());
                     out.writeUTF(ro.tudu);
                     out.writeInt(ro.vyhybka);
+                    out.writeUTF(ro.roId != null ? ro.roId : "");
                     out.writeDouble(ro.midKm);
                     out.writeInt(ro.castMin);
                     out.writeInt(ro.castMax);
@@ -199,7 +209,8 @@ final class DzsIndexCache {
             if (in.readInt() != MAGIC) return null;
             int version = in.readInt();
             if (version != VERSION && version != VERSION_LEGACY_V9
-                    && version != VERSION_LEGACY_V10) {
+                    && version != VERSION_LEGACY_V10 && version != VERSION_LEGACY_V11
+                    && version != VERSION_LEGACY_V12) {
                 return null;
             }
             long cachedSize = in.readLong();
@@ -213,14 +224,24 @@ final class DzsIndexCache {
                 String pairKey = in.readUTF();
                 String tudu = in.readUTF();
                 int vyhybka = in.readInt();
-                double midKm = in.readDouble();
+                String roId = null;
+                double midKm;
                 int castMin = CAST_UNSPECIFIED;
                 int castMax = CAST_UNSPECIFIED;
-                if (version >= VERSION_LEGACY_V11) {
+                if (version >= VERSION) {
+                    String roIdRaw = in.readUTF();
+                    roId = roIdRaw.isEmpty() ? null : roIdRaw;
+                    midKm = in.readDouble();
                     castMin = in.readInt();
                     castMax = in.readInt();
+                } else {
+                    midKm = in.readDouble();
+                    if (version >= VERSION_LEGACY_V11) {
+                        castMin = in.readInt();
+                        castMax = in.readInt();
+                    }
                 }
-                RoEntry entry = new RoEntry(tudu, vyhybka, midKm, castMin, castMax);
+                RoEntry entry = new RoEntry(tudu, vyhybka, roId, midKm, castMin, castMax);
                 ro.computeIfAbsent(pairKey, k -> new ArrayList<>()).add(entry);
             }
             VyhybkaGpsStore vyhybkaGpsStore = VyhybkaGpsStore.empty();
