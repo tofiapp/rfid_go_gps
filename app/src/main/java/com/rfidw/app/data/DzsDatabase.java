@@ -67,13 +67,15 @@ public class DzsDatabase implements Closeable {
     private static final class RoIndexEntry {
         final String tudu;
         final int vyhybka;
+        final String iob;
         final String roId;
         final Integer castMin;
         final Integer castMax;
 
-        RoIndexEntry(String tudu, int vyhybka, String roId, Integer castMin, Integer castMax) {
+        RoIndexEntry(String tudu, int vyhybka, String iob, String roId, Integer castMin, Integer castMax) {
             this.tudu = tudu;
             this.vyhybka = vyhybka;
+            this.iob = iob != null ? iob : "";
             this.roId = roId;
             this.castMin = castMin;
             this.castMax = castMax;
@@ -430,7 +432,7 @@ public class DzsDatabase implements Closeable {
             for (DzsIndexCache.RoEntry ro : e.getValue()) {
                 Integer castMin = ro.castMin >= 0 ? ro.castMin : null;
                 Integer castMax = ro.castMax >= 0 ? ro.castMax : null;
-                entries.add(new RoIndexEntry(ro.tudu, ro.vyhybka, ro.roId, castMin, castMax));
+                entries.add(new RoIndexEntry(ro.tudu, ro.vyhybka, ro.iob, ro.roId, castMin, castMax));
             }
             map.put(e.getKey(), entries);
         }
@@ -481,7 +483,7 @@ public class DzsDatabase implements Closeable {
             for (RoIndexEntry ro : e.getValue()) {
                 int castMin = ro.castMin != null ? ro.castMin : DzsIndexCache.CAST_UNSPECIFIED;
                 int castMax = ro.castMax != null ? ro.castMax : DzsIndexCache.CAST_UNSPECIFIED;
-                entries.add(new DzsIndexCache.RoEntry(ro.tudu, ro.vyhybka, ro.roId, castMin, castMax));
+                entries.add(new DzsIndexCache.RoEntry(ro.tudu, ro.vyhybka, ro.iob, ro.roId, castMin, castMax));
             }
             map.put(e.getKey(), entries);
         }
@@ -532,7 +534,7 @@ public class DzsDatabase implements Closeable {
                     tudu = new Tudu(ro.tudu);
                     map.put(ro.tudu, tudu);
                 }
-                Tudu.Vyhybka v = tudu.findOrCreate(ro.vyhybka);
+                Tudu.Vyhybka v = tudu.findOrCreate(ro.vyhybka, ro.iob);
                 if (ro.castMin != null) v.castMin = ro.castMin;
                 if (ro.castMax != null) v.castMax = ro.castMax;
             }
@@ -550,6 +552,7 @@ public class DzsDatabase implements Closeable {
         if (roColumns.castMin != null) sql.append(", ").append(roColumns.castMin);
         if (roColumns.castMax != null) sql.append(", ").append(roColumns.castMax);
         if (roColumns.poloha != null) sql.append(", ").append(roColumns.poloha);
+        if (roColumns.iob != null) sql.append(", ").append(roColumns.iob);
         sql.append(" FROM ").append(TABLE_RO_TPI)
                 .append(" WHERE ").append(roColumns.tudu).append(" IS NOT NULL AND ")
                 .append(roColumns.tudu).append(" <> ''")
@@ -578,11 +581,12 @@ public class DzsDatabase implements Closeable {
                     tudu = new Tudu(tuduCode);
                     map.put(tuduCode, tudu);
                 }
-                Tudu.Vyhybka v = tudu.findOrCreate(cislo);
                 int col = 2;
                 Integer cmin = roColumns.castMin != null ? readInt(c, col++) : null;
                 Integer cmax = roColumns.castMax != null ? readInt(c, col++) : null;
                 String poloha = roColumns.poloha != null ? readTrimmedText(c, col++) : null;
+                String iob = roColumns.iob != null ? readIobLetter(c, col++) : null;
+                Tudu.Vyhybka v = tudu.findOrCreate(cislo, iob);
                 CastRange cast = resolveCastRange(cmin, cmax, poloha);
                 if (cast.castMin != null) v.castMin = cast.castMin;
                 if (cast.castMax != null) v.castMax = cast.castMax;
@@ -966,6 +970,7 @@ public class DzsDatabase implements Closeable {
         if (roColumns.castMin != null) sql.append(", ").append(roColumns.castMin);
         if (roColumns.castMax != null) sql.append(", ").append(roColumns.castMax);
         if (roColumns.poloha != null) sql.append(", ").append(roColumns.poloha);
+        if (roColumns.iob != null) sql.append(", ").append(roColumns.iob);
         sql.append(" FROM ").append(TABLE_RO_TPI)
                 .append(" WHERE ").append(roColumns.tudu).append(" IS NOT NULL AND ")
                 .append(roColumns.tudu).append(" <> ''")
@@ -989,8 +994,9 @@ public class DzsDatabase implements Closeable {
                 Integer castMin = roColumns.castMin != null ? readInt(c, col++) : null;
                 Integer castMax = roColumns.castMax != null ? readInt(c, col++) : null;
                 String poloha = roColumns.poloha != null ? readTrimmedText(c, col++) : null;
+                String iob = roColumns.iob != null ? readIobLetter(c, col++) : null;
                 CastRange cast = resolveCastRange(castMin, castMax, poloha);
-                RoIndexEntry entry = new RoIndexEntry(tudu, vyhybka, roId, cast.castMin, cast.castMax);
+                RoIndexEntry entry = new RoIndexEntry(tudu, vyhybka, iob, roId, cast.castMin, cast.castMax);
                 String key = pairKey(superZId, superDId);
                 byPairKey.computeIfAbsent(key, k -> new ArrayList<>()).add(entry);
                 byRoKey.put(roKey(superZId, superDId, roId), entry);
@@ -1114,6 +1120,11 @@ public class DzsDatabase implements Closeable {
         return trimmed;
     }
 
+    private static String readIobLetter(Cursor c, int index) {
+        String raw = readTrimmedText(c, index);
+        return Tudu.Vyhybka.normalizeIob(raw);
+    }
+
     private static String readTrimmedText(Cursor c, int index) {
         if (c.isNull(index)) return null;
         String raw = c.getString(index);
@@ -1209,11 +1220,12 @@ public class DzsDatabase implements Closeable {
         final String castMin;
         final String castMax;
         final String poloha;
+        final String iob;
         final String roId;
 
         RoColumns(String superZId, String superDId, String tudu, String vyhybka,
                   String vyhybkaFallback, String castMin, String castMax, String poloha,
-                  String roId) {
+                  String iob, String roId) {
             this.superZId = superZId;
             this.superDId = superDId;
             this.tudu = tudu;
@@ -1222,6 +1234,7 @@ public class DzsDatabase implements Closeable {
             this.castMin = castMin;
             this.castMax = castMax;
             this.poloha = poloha;
+            this.iob = iob;
             this.roId = roId;
         }
 
@@ -1267,6 +1280,7 @@ public class DzsDatabase implements Closeable {
                     findOptionalColumn(cols, "CAST_MIN", "CASTMIN"),
                     findOptionalColumn(cols, "CAST_MAX", "CASTMAX"),
                     findOptionalColumn(cols, "POLOHA"),
+                    findOptionalColumn(cols, "IOB"),
                     requireColumn(cols, "RO_ID")
             );
         }

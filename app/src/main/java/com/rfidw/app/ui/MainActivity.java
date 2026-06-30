@@ -792,7 +792,8 @@ public class MainActivity extends AppCompatActivity {
                 filteredVyhybky.addAll(allVyhybky);
             } else {
                 for (Tudu.Vyhybka vyhybka : allVyhybky) {
-                    if (String.valueOf(vyhybka.cislo).contains(q)) {
+                    if (vyhybka.displayLabel().contains(q)
+                            || String.valueOf(vyhybka.cislo).contains(q)) {
                         filteredVyhybky.add(vyhybka);
                     }
                 }
@@ -919,8 +920,15 @@ public class MainActivity extends AppCompatActivity {
     private void syncCurrentVyhybkaAfterReload() {
         if (currentTudu == null) return;
         int cislo = currentVyhybka != null ? currentVyhybka.cislo : epc.vyhybka;
+        String iob = currentVyhybka != null ? currentVyhybka.iob : "";
         if (cislo <= 0) return;
         currentVyhybka = null;
+        for (Tudu.Vyhybka v : currentTudu.vyhybky) {
+            if (v.cislo == cislo && (iob.isEmpty() || v.iob.equals(iob))) {
+                currentVyhybka = v;
+                return;
+            }
+        }
         for (Tudu.Vyhybka v : currentTudu.vyhybky) {
             if (v.cislo == cislo) {
                 currentVyhybka = v;
@@ -931,7 +939,12 @@ public class MainActivity extends AppCompatActivity {
 
     private int findVyhybkaPickerCheckedIndex(List<Tudu.Vyhybka> vyhybky) {
         int cislo = currentVyhybka != null ? currentVyhybka.cislo : epc.vyhybka;
+        String iob = currentVyhybka != null ? currentVyhybka.iob : "";
         if (cislo > 0) {
+            for (int i = 0; i < vyhybky.size(); i++) {
+                Tudu.Vyhybka v = vyhybky.get(i);
+                if (v.cislo == cislo && (iob.isEmpty() || v.iob.equals(iob))) return i;
+            }
             for (int i = 0; i < vyhybky.size(); i++) {
                 if (vyhybky.get(i).cislo == cislo) return i;
             }
@@ -1031,7 +1044,7 @@ public class MainActivity extends AppCompatActivity {
     private void updateSummary1() {
         tvSummaryTudu.setText(epc.tudu == null || epc.tudu.isEmpty() ? "—" : epc.tudu);
         if (epc.vyhybka > 0) {
-            String vyhStr = String.valueOf(epc.vyhybka);
+            String vyhStr = vyhybkaDisplayLabel();
             SpannableString vyhSpan = new SpannableString(vyhStr);
             applyVyhybkaAccent(vyhSpan, 0, vyhStr.length());
             tvSummaryVyhybka.setText(vyhSpan);
@@ -1076,7 +1089,9 @@ public class MainActivity extends AppCompatActivity {
 
         String vyhPrefix = getString(R.string.last_record_vyhybka_prefix);
         String castPrefix = getString(R.string.last_record_cast_prefix);
-        String vyhStr = String.valueOf(vyhybka);
+        String vyhStr = last.vyhybka != null && !last.vyhybka.isEmpty()
+                ? last.vyhybka
+                : Tudu.Vyhybka.formatDisplay(vyhybka, "");
         int total = castTotalForRow(last);
         String current = String.valueOf(cast);
         String rest = "/" + total;
@@ -1125,7 +1140,7 @@ public class MainActivity extends AppCompatActivity {
         String chipLabel = getString(R.string.cast_hint_chip);
         String commaVyhybky = getString(R.string.cast_hint_comma_vyhybky);
         String castStr = String.valueOf(epc.cast);
-        String vyhybkaStr = String.valueOf(epc.vyhybka);
+        String vyhybkaStr = vyhybkaDisplayLabel();
         SpannableString span = new SpannableString(
                 prefix + chipLabel + castStr + commaVyhybky + vyhybkaStr);
 
@@ -1161,7 +1176,9 @@ public class MainActivity extends AppCompatActivity {
     private void showScanDoneNotification(int vyhybka, int cast) {
         String vyhPrefix = getString(R.string.scan_done_vyhybka_prefix);
         String castPrefix = getString(R.string.scan_done_cast_prefix);
-        String vyhStr = String.valueOf(vyhybka);
+        String vyhStr = currentVyhybka != null && currentVyhybka.cislo == vyhybka
+                ? currentVyhybka.displayLabel()
+                : Tudu.Vyhybka.formatDisplay(vyhybka, "");
         String castStr = String.valueOf(cast);
 
         SpannableString vyhSpan = new SpannableString(vyhPrefix + vyhStr);
@@ -2818,7 +2835,7 @@ public class MainActivity extends AppCompatActivity {
             row.tid = tid == null ? "" : tid;
             row.rok = d.rok;
             row.tudu = d.tudu;
-            row.vyhybka = d.vyhybka;
+            row.vyhybka = csvVyhybkaLabel(d.vyhybka);
             row.cast = d.cast;
             LocationCache.Snapshot gps = locationCache != null ? locationCache.getSnapshot() : LocationCache.Snapshot.empty();
             if (gps.valid) {
@@ -2942,6 +2959,20 @@ public class MainActivity extends AppCompatActivity {
         return written > 0 && written < v.castMax - v.castMin + 1;
     }
 
+    private String vyhybkaDisplayLabel() {
+        if (currentVyhybka != null) return currentVyhybka.displayLabel();
+        if (epc.vyhybka > 0) return Tudu.Vyhybka.formatDisplay(epc.vyhybka, "");
+        return "";
+    }
+
+    private String csvVyhybkaLabel(String epcVyhybka) {
+        int cislo = parseInt(epcVyhybka, -1);
+        if (currentVyhybka != null && currentVyhybka.cislo == cislo) {
+            return currentVyhybka.displayLabel();
+        }
+        return epcVyhybka;
+    }
+
     private CharSequence formatVyhybkaPickerLabel(String tuduCode, Tudu.Vyhybka v) {
         return formatVyhybkaPickerLabel(tuduCode, v, null);
     }
@@ -2961,7 +2992,7 @@ public class MainActivity extends AppCompatActivity {
 
     private CharSequence formatVyhybkaPickerLabelCore(String tuduCode, Tudu.Vyhybka v) {
         String prefix = getString(R.string.vyhybka_picker_prefix);
-        String cisloStr = String.valueOf(v.cislo);
+        String cisloStr = v.displayLabel();
         if (!isVyhybkaPartialInCsv(tuduCode, v)) {
             SpannableString span = new SpannableString(prefix + cisloStr);
             applyVyhybkaAccent(span, prefix.length(), prefix.length() + cisloStr.length());
