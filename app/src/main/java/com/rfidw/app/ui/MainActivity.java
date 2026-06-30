@@ -81,6 +81,19 @@ public class MainActivity extends AppCompatActivity {
     private static final int REQUEST_STORAGE_PERMISSION = 1002;
     private static final String DEFAULT_DB_NAME = "DZS_PASPORT_TPI.sqlite";
 
+    /** Výsledek automatického vyhledání DB ve Stažených / úložišti. */
+    private static final class AutoDiscoveredDb {
+        final File localFile;
+        final Uri contentUri;
+        final String displayName;
+
+        AutoDiscoveredDb(File localFile, Uri contentUri, String displayName) {
+            this.localFile = localFile;
+            this.contentUri = contentUri;
+            this.displayName = displayName;
+        }
+    }
+
     private static final int COLOR_STATUS_READY = 0xFF2E7D32;
     private static final int COLOR_STATUS_BUSY = 0xFF5F6A76;
     private static final int COLOR_STATUS_ERROR = 0xFFC62828;
@@ -1918,6 +1931,10 @@ public class MainActivity extends AppCompatActivity {
     private void tryAutoLoadDefaultDatabase() {
         String savedName = prefs.getString(PREF_DB_DISPLAY_NAME, DEFAULT_DB_NAME);
         beginCard1DbLoad(savedName);
+        if (isFreshInstallDbState() && needsStoragePermission()) {
+            pendingAutoLoadAfterStorage = true;
+            ui.post(this::requestStoragePermissionIfNeeded);
+        }
         io.execute(() -> {
             String savedPath = prefs.getString(PREF_DB_SOURCE_PATH, null);
             if (savedPath != null) {
@@ -1938,9 +1955,13 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
             }
-            File found = findDefaultDatabaseFile();
-            if (found != null) {
-                loadDatabaseFromPath(found.getAbsolutePath(), DEFAULT_DB_NAME, false);
+            AutoDiscoveredDb discovered = findDefaultDatabase();
+            if (discovered != null) {
+                loadDatabaseFromPath(
+                        discovered.localFile.getAbsolutePath(),
+                        discovered.displayName,
+                        false,
+                        discovered.contentUri);
                 return;
             }
             String uriStr = prefs.getString(PREF_DB_URI, null);
@@ -1960,8 +1981,38 @@ public class MainActivity extends AppCompatActivity {
                 endCard1DbLoad();
                 expandCard1Body();
                 tvSourceFile.setText(R.string.db_none);
+                if (isFreshInstallDbState()) {
+                    toast(getString(R.string.db_fresh_install_hint));
+                }
             });
         });
+    }
+
+    /** Po přeinstalaci aplikace nejsou uložené cesty ani URI – spoléháme na Stažené soubory. */
+    private boolean isFreshInstallDbState() {
+        return prefs.getString(PREF_DB_SOURCE_PATH, null) == null
+                && prefs.getString(PREF_DB_URI, null) == null;
+    }
+
+    private static boolean isSqliteDatabaseFileName(String name) {
+        if (name == null) return false;
+        String lower = name.toLowerCase(Locale.ROOT);
+        return lower.endsWith(".sqlite") || lower.endsWith(".sqlite3") || lower.endsWith(".db");
+    }
+
+    private static boolean isDefaultDatabaseFileName(String name) {
+        return name != null && DEFAULT_DB_NAME.equalsIgnoreCase(name);
+    }
+
+    /** Preferované jméno souboru, případně jiná SQLite s DZS / PASPORT v názvu. */
+    private static int scoreDatabaseFileName(String name) {
+        if (isDefaultDatabaseFileName(name)) return 100;
+        if (name == null || !isSqliteDatabaseFileName(name)) return 0;
+        String lower = name.toLowerCase(Locale.ROOT);
+        int score = 10;
+        if (lower.contains("dzs") && lower.contains("pasport")) score = 80;
+        else if (lower.contains("dzs") || lower.contains("pasport")) score = 50;
+        return score;
     }
 
     private boolean needsStoragePermission() {
@@ -1979,7 +2030,23 @@ public class MainActivity extends AppCompatActivity {
                 REQUEST_STORAGE_PERMISSION);
     }
 
-    private File findDefaultDatabaseFile() {
+    /**
+     * Hledá výchozí SQLite databázi – po přeinstalaci aplikace spoléhá na soubor ve Stažených.
+     * Na Androidu 10+ je MediaStore první (funguje bez oprávnění ke čtení úložiště).
+     */
+    private AutoDiscoveredDb findDefaultDatabase() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            AutoDiscoveredDb fromMediaStore = discoverDefaultDatabaseFromMediaStore();
+            if (fromMediaStore != null) return fromMediaStore;
+        }
+        File fromFilesystem = findDefaultDatabaseOnFilesystem();
+        if (fromFilesystem != null) {
+            return new AutoDiscoveredDb(fromFilesystem, null, fromFilesystem.getName());
+        }
+        return null;
+    }
+
+    private File findDefaultDatabaseOnFilesystem() {
         List<File> dirs = new ArrayList<>();
         File ext = getExternalFilesDir(null);
         if (ext != null) dirs.add(ext);
@@ -1994,24 +2061,34 @@ public class MainActivity extends AppCompatActivity {
             dirs.add(new File("/storage/emulated/0"));
             dirs.add(new File("/storage/emulated/0/Download"));
         }
+        File best = null;
+        int bestScore = 0;
         for (File dir : dirs) {
             if (dir == null || !dir.isDirectory()) continue;
-            File candidate = new File(dir, DEFAULT_DB_NAME);
-            if (candidate.isFile() && candidate.canRead()) return candidate;
+            File exact = new File(dir, DEFAULT_DB_NAME);
+            if (exact.isFile() && exact.canRead()) return exact;
+            File[] files = dir.listFiles();
+            if (files == null) continue;
+            for (File candidate : files) {
+                if (!candidate.isFile() || !candidate.canRead()) continue;
+                int score = scoreDatabaseFileName(candidate.getName());
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = candidate;
+                }
+            }
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            File fromMediaStore = copyDefaultDatabaseFromMediaStore();
-            if (fromMediaStore != null) return fromMediaStore;
-        }
-        return null;
+        return bestScore > 0 ? best : null;
     }
 
-    /** Android 10+ – hledání v Stažených souborech přes MediaStore (funguje i bez READ_EXTERNAL_STORAGE). */
-    private File copyDefaultDatabaseFromMediaStore() {
+    /** Android 10+ – Stažené soubory přes MediaStore (funguje i bez READ_EXTERNAL_STORAGE). */
+    private AutoDiscoveredDb discoverDefaultDatabaseFromMediaStore() {
         Uri uri = findDefaultDatabaseUriViaMediaStore();
         if (uri == null) return null;
         try {
-            return copyUriToCache(uri, "dzs_auto_source.db", false);
+            String displayName = queryName(uri);
+            File local = copyUriToCache(uri, "dzs_auto_source.db", false);
+            return new AutoDiscoveredDb(local, uri, displayName);
         } catch (Exception ignored) {
             return null;
         }
@@ -2050,16 +2127,37 @@ public class MainActivity extends AppCompatActivity {
     private Uri findDefaultDatabaseUriViaMediaStore() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null;
         Uri collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI;
-        String[] projection = { MediaStore.Downloads._ID };
-        String selection = MediaStore.Downloads.DISPLAY_NAME + "=?";
-        String[] args = { DEFAULT_DB_NAME };
-        try (Cursor c = getContentResolver().query(collection, projection, selection, args, null)) {
-            if (c != null && c.moveToFirst()) {
-                long id = c.getLong(0);
-                return ContentUris.withAppendedId(collection, id);
+        String[] projection = { MediaStore.Downloads._ID, MediaStore.Downloads.DISPLAY_NAME };
+        Uri bestUri = null;
+        int bestScore = 0;
+        long bestModified = 0;
+        String selection = MediaStore.Downloads.DISPLAY_NAME + " LIKE ? OR "
+                + MediaStore.Downloads.DISPLAY_NAME + " LIKE ? OR "
+                + MediaStore.Downloads.DISPLAY_NAME + " LIKE ?";
+        String[] args = {"%.sqlite", "%.sqlite3", "%.db"};
+        String sort = MediaStore.Downloads.DATE_MODIFIED + " DESC";
+        try (Cursor c = getContentResolver().query(collection, projection, selection, args, sort)) {
+            if (c == null) return null;
+            int idCol = c.getColumnIndexOrThrow(MediaStore.Downloads._ID);
+            int nameCol = c.getColumnIndexOrThrow(MediaStore.Downloads.DISPLAY_NAME);
+            while (c.moveToNext()) {
+                String name = c.getString(nameCol);
+                int score = scoreDatabaseFileName(name);
+                if (score <= 0) continue;
+                long modified = 0;
+                int modCol = c.getColumnIndex(MediaStore.Downloads.DATE_MODIFIED);
+                if (modCol >= 0 && !c.isNull(modCol)) {
+                    modified = c.getLong(modCol);
+                }
+                if (score > bestScore || (score == bestScore && modified > bestModified)) {
+                    bestScore = score;
+                    bestModified = modified;
+                    bestUri = ContentUris.withAppendedId(collection, c.getLong(idCol));
+                    if (score >= 100) break;
+                }
             }
         } catch (Exception ignored) { }
-        return null;
+        return bestUri;
     }
 
     private boolean canReadSharedStorage() {
@@ -2164,6 +2262,7 @@ public class MainActivity extends AppCompatActivity {
                 tvSourceFile.setText(gpsAutoSelection
                         ? getString(R.string.db_loaded_gps, displayName, tuduCount)
                         : getString(R.string.db_loaded_manual, displayName, tuduCount));
+                pendingAutoLoadAfterStorage = false;
                 persistDbSource(path, displayName, sourceUri);
                 endCard1DbLoad();
                 collapseCard1Body();
