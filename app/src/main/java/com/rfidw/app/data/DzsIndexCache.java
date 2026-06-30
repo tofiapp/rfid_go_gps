@@ -22,13 +22,14 @@ import java.util.zip.GZIPOutputStream;
  * Platnost indexu je vázaná na velikost a SHA-256 obsahu databáze – přežije
  * kopírování souboru a restart aplikace (na rozdíl od lastModified).
  *
- * Verze 11 ukládá RO index (výhybky včetně částí) a předpočítané GPS souřadnice
- * výhybek pro rychlé vyhledávání bez průchodu km tabulkou.
+ * Verze 12 ukládá RO index (výhybky včetně částí) a předpočítané GPS souřadnice
+ * výhybek (správné párování KM_EXT ↔ střed OD/DO pro stejný pár ID).
  */
 final class DzsIndexCache {
 
     private static final int MAGIC = 0x445A5349; // "DZSI"
-    private static final int VERSION = 11;
+    private static final int VERSION = 12;
+    private static final int VERSION_LEGACY_V11 = 11;
     private static final int VERSION_LEGACY_V10 = 10;
     private static final int VERSION_LEGACY_V9 = 9;
     private static final int HASH_HEX_LEN = 64;
@@ -215,7 +216,7 @@ final class DzsIndexCache {
                 double midKm = in.readDouble();
                 int castMin = CAST_UNSPECIFIED;
                 int castMax = CAST_UNSPECIFIED;
-                if (version >= VERSION) {
+                if (version >= VERSION_LEGACY_V11) {
                     castMin = in.readInt();
                     castMax = in.readInt();
                 }
@@ -223,7 +224,7 @@ final class DzsIndexCache {
                 ro.computeIfAbsent(pairKey, k -> new ArrayList<>()).add(entry);
             }
             VyhybkaGpsStore vyhybkaGpsStore = VyhybkaGpsStore.empty();
-            if (version == VERSION_LEGACY_V9 || version == VERSION) {
+            if (version == VERSION_LEGACY_V9 || version >= VERSION_LEGACY_V11) {
                 vyhybkaGpsStore = readVyhybkaGpsStore(in);
             }
             return new LoadedIndex(ro, vyhybkaGpsStore);
