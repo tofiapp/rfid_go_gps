@@ -76,19 +76,6 @@ public class DzsDatabase implements Closeable {
         }
     }
 
-    /** Kilometrický bod GPS tabulky – dočasně při indexaci, neukládá se do cache. */
-    private static final class KmGpsPoint {
-        final double km;
-        final double latitude;
-        final double longitude;
-
-        KmGpsPoint(double km, double latitude, double longitude) {
-            this.km = km;
-            this.latitude = latitude;
-            this.longitude = longitude;
-        }
-    }
-
     private static final class SpatialGrid {
         private static final double CELL_DEG = 0.005;
         private static final int MAX_RING = 40;
@@ -240,9 +227,7 @@ public class DzsDatabase implements Closeable {
                 report(listener, "Indexuji výhybky", 20);
                 roByPairKey = buildRoIndex(db, roColumns);
                 report(listener, "Indexuji souřadnice výhybek", 50);
-                int expectedGpsRows = countGpsRowsForPairs(db, gpsColumns, roByPairKey.keySet());
-                vyhybkaGpsStore = buildVyhybkaGpsIndex(
-                        db, gpsColumns, roByPairKey, expectedGpsRows, listener);
+                vyhybkaGpsStore = buildVyhybkaGpsIndex(db, gpsColumns, roByPairKey, listener);
                 report(listener, "Ukládám cache", 85);
                 if (cacheDir != null) {
                     if (contentHash == null) {
@@ -567,59 +552,160 @@ public class DzsDatabase implements Closeable {
 
     /**
      * Předpočítá souřadnici každé výhybky: pro pár ID najde km bod, jehož KM_EXT
-     * nejlépe sedí na (OD+DO)/2. GPS tabulka se projde jednou; do cache jde jen výsledek.
+     * nejlépe sedí na (OD+DO)/2. GPS tabulka se projde jednou bez ORDER BY (rychlý sekvenční
+     * čtení); párování proběhne v paměti a do cache jde jen výsledek.
      */
     private static VyhybkaGpsStore buildVyhybkaGpsIndex(SQLiteDatabase db, GpsColumns gpsColumns,
                                                         Map<String, List<RoIndexEntry>> roByPairKey,
-                                                        int expectedRows, OpenProgressListener listener) {
+                                                        OpenProgressListener listener) {
         if (roByPairKey.isEmpty()) return VyhybkaGpsStore.empty();
         Set<String> pairKeys = roByPairKey.keySet();
-        VyhybkaGpsStore fromJoin = buildVyhybkaGpsIndexJoin(
-                db, gpsColumns, roByPairKey, pairKeys, expectedRows, listener);
-        if (fromJoin != null) return fromJoin;
-        int tableRows = countTableRows(db, TABLE_GPS_KM);
-        return buildVyhybkaGpsIndexFullScan(
-                db, gpsColumns, roByPairKey, pairKeys, expectedRows, tableRows, listener);
+
+        int expectedRows = -1;
+        GpsPointStore kmBuffer = null;
+        if (populateRoPairsTempTable(db, pairKeys)) {
+            expectedRows = countGpsRowsWithTempTable(db, gpsColumns);
+            kmBuffer = readGpsKmBufferJoin(db, gpsColumns, listener, null, expectedRows, -1);
+        }
+        if (kmBuffer == null) {
+            int tableRows = countTableRows(db, TABLE_GPS_KM);
+            HashSet<String> pairFilter = new HashSet<>(pairKeys);
+            kmBuffer = readGpsKmBufferFullScan(db, gpsColumns, listener, pairFilter, expectedRows, tableRows);
+        }
+        if (kmBuffer == null) {
+            kmBuffer = GpsPointStore.empty();
+        }
+
+        report(listener, "Páruji souřadnice výhybek", 82);
+        return convertKmBufferToVyhybkaGps(kmBuffer, roByPairKey, listener);
     }
 
-    private static VyhybkaGpsStore buildVyhybkaGpsIndexJoin(SQLiteDatabase db, GpsColumns gpsColumns,
-                                                            Map<String, List<RoIndexEntry>> roByPairKey,
-                                                            Set<String> pairKeys, int expectedRows,
-                                                            OpenProgressListener listener) {
-        if (!populateRoPairsTempTable(db, pairKeys)) return null;
-
+    /**
+     * Načte GPS km body pro páry z RO indexu. Bez ORDER BY – SQLite nemusí řadit miliony řádků.
+     */
+    private static GpsPointStore readGpsKmBufferJoin(SQLiteDatabase db, GpsColumns gpsColumns,
+                                                     OpenProgressListener listener,
+                                                     Set<String> pairFilter, int expectedRows,
+                                                     int tableRows) {
         String sql = "SELECT g." + gpsColumns.superZId + ", g." + gpsColumns.superDId + ", "
                 + gpsColumns.kmExt + ", " + gpsColumns.latitude + ", " + gpsColumns.longitude
                 + " FROM " + TABLE_GPS_KM + " g"
                 + " INNER JOIN " + TEMP_RO_PAIRS + " rp"
                 + "   ON g." + gpsColumns.superZId + " = rp.super_z_id"
-                + "   AND g." + gpsColumns.superDId + " = rp.super_d_id"
-                + " ORDER BY g." + gpsColumns.superZId + ", g." + gpsColumns.superDId;
-
-        return streamGpsKmForVyhybkaIndex(db, sql, null, roByPairKey, listener,
-                null, expectedRows, -1);
+                + "   AND g." + gpsColumns.superDId + " = rp.super_d_id";
+        return readGpsKmBufferCursor(db, sql, null, listener, pairFilter, expectedRows, tableRows);
     }
 
-    private static VyhybkaGpsStore buildVyhybkaGpsIndexFullScan(SQLiteDatabase db, GpsColumns gpsColumns,
-                                                                Map<String, List<RoIndexEntry>> roByPairKey,
-                                                                Set<String> pairKeys, int expectedRows,
-                                                                int tableRows, OpenProgressListener listener) {
-        HashSet<String> pairFilter = new HashSet<>(pairKeys);
+    /** Záložní postup – sekvenční průchod GPS tabulkou s filtrem párů v paměti. */
+    private static GpsPointStore readGpsKmBufferFullScan(SQLiteDatabase db, GpsColumns gpsColumns,
+                                                         OpenProgressListener listener,
+                                                         Set<String> pairFilter, int expectedRows,
+                                                         int tableRows) {
         String sql = "SELECT " + gpsColumns.superZId + ", " + gpsColumns.superDId + ", "
                 + gpsColumns.kmExt + ", " + gpsColumns.latitude + ", " + gpsColumns.longitude
-                + " FROM " + TABLE_GPS_KM
-                + " ORDER BY " + gpsColumns.superZId + ", " + gpsColumns.superDId;
-        return streamGpsKmForVyhybkaIndex(db, sql, null, roByPairKey, listener,
-                pairFilter, expectedRows, tableRows);
+                + " FROM " + TABLE_GPS_KM;
+        return readGpsKmBufferCursor(db, sql, null, listener, pairFilter, expectedRows, tableRows);
     }
 
-    private static int countGpsRowsForPairs(SQLiteDatabase db, GpsColumns gpsColumns, Set<String> pairKeys) {
-        if (pairKeys.isEmpty() || !populateRoPairsTempTable(db, pairKeys)) return -1;
+    private static int countGpsRowsWithTempTable(SQLiteDatabase db, GpsColumns gpsColumns) {
         String sql = "SELECT COUNT(*) FROM " + TABLE_GPS_KM + " g"
                 + " INNER JOIN " + TEMP_RO_PAIRS + " rp"
                 + "   ON g." + gpsColumns.superZId + " = rp.super_z_id"
                 + "   AND g." + gpsColumns.superDId + " = rp.super_d_id";
         return readCount(db, sql);
+    }
+
+    private static GpsPointStore readGpsKmBufferCursor(SQLiteDatabase db, String sql, String[] args,
+                                                       OpenProgressListener listener,
+                                                       Set<String> pairFilter, int expectedRows,
+                                                       int tableRows) {
+        int capacity = expectedRows > 0 ? expectedRows : 65536;
+        GpsPointStore.Builder builder = GpsPointStore.builder(capacity);
+        try (Cursor c = db.rawQuery(sql, args)) {
+            int scanned = 0;
+            while (c.moveToNext()) {
+                scanned++;
+                String superZId = readId(c, 0);
+                String superDId = readId(c, 1);
+                if (superZId == null || superDId == null) continue;
+                if (pairFilter != null) {
+                    String key = pairKey(superZId, superDId);
+                    if (!pairFilter.contains(key)) continue;
+                }
+                Double kmExt = readDouble(c, 2);
+                Double lat = readDouble(c, 3);
+                Double lon = readDouble(c, 4);
+                if (kmExt == null || lat == null || lon == null) continue;
+                builder.addPoint(superZId, superDId, kmExt, lat, lon);
+
+                if (scanned % GPS_INDEX_PROGRESS_INTERVAL == 0) {
+                    reportGpsReadProgress(listener, scanned, expectedRows, tableRows, pairFilter != null);
+                }
+            }
+            reportGpsReadProgress(listener, scanned, expectedRows, tableRows, pairFilter != null);
+            return builder.build();
+        } catch (OutOfMemoryError e) {
+            throw e;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static VyhybkaGpsStore convertKmBufferToVyhybkaGps(
+            GpsPointStore kmBuffer, Map<String, List<RoIndexEntry>> roByPairKey,
+            OpenProgressListener listener) {
+        VyhybkaGpsStore.Builder builder = VyhybkaGpsStore.builder();
+        int matched = 0;
+        int pairs = roByPairKey.size();
+        int processedPairs = 0;
+        for (Map.Entry<String, List<RoIndexEntry>> e : roByPairKey.entrySet()) {
+            matched += flushPairVyhybkaCoordsFromBuffer(
+                    e.getKey(), kmBuffer, e.getValue(), builder);
+            processedPairs++;
+            if (listener != null && pairs > 0 && processedPairs % 500 == 0) {
+                int pct = 82 + (int) Math.min(2L, (processedPairs * 2L) / pairs);
+                report(listener, vyhybkaGpsProgressPhase(matched, -1), pct);
+            }
+        }
+        if (listener != null && matched > 0) {
+            report(listener, vyhybkaGpsProgressPhase(matched, -1), 84);
+        }
+        return builder.build();
+    }
+
+    private static int flushPairVyhybkaCoordsFromBuffer(String pairKey, GpsPointStore kmBuffer,
+                                                      List<RoIndexEntry> entries,
+                                                      VyhybkaGpsStore.Builder builder) {
+        if (entries == null || entries.isEmpty()) return 0;
+        int[] indices = kmBuffer.indicesForPair(pairKey);
+        if (indices == null || indices.length == 0) return 0;
+        int added = 0;
+        for (RoIndexEntry ro : entries) {
+            int hitIdx = matchKmPointInBuffer(kmBuffer, indices, ro.midKm);
+            if (hitIdx < 0) continue;
+            builder.add(pairKey, ro.tudu, ro.vyhybka,
+                    kmBuffer.latitudeAt(hitIdx), kmBuffer.longitudeAt(hitIdx));
+            added++;
+        }
+        return added;
+    }
+
+    private static void reportGpsReadProgress(OpenProgressListener listener, int scanned,
+                                              int expectedRows, int tableRows, boolean fullScan) {
+        if (listener == null || scanned <= 0) return;
+        int pct;
+        if (expectedRows > 0) {
+            pct = 50 + (int) Math.min(30L, (scanned * 30L) / expectedRows);
+        } else if (fullScan && tableRows > 0) {
+            pct = 50 + (int) Math.min(30L, (scanned * 30L) / tableRows);
+        } else {
+            pct = 50 + Math.min(30, scanned / GPS_INDEX_PROGRESS_INTERVAL);
+        }
+        report(listener, gpsReadProgressPhase(scanned), pct);
+    }
+
+    private static String gpsReadProgressPhase(int scanned) {
+        return String.format(Locale.ROOT, "Načítám GPS km body (%s řádků)", formatCount(scanned));
     }
 
     private static int countTableRows(SQLiteDatabase db, String table) {
@@ -635,100 +721,44 @@ public class DzsDatabase implements Closeable {
     }
 
     /**
-     * Streamuje km body seřazené podle páru ID; po dokončení každého páru
-     * doplní souřadnice výhybek a uvolní body z paměti.
+     * Vybere km bod podle shody KM_EXT se středem OD/DO.
+     * Priorita: přesná shoda → okno ±0,5 → zaokrouhlení → nejbližší km.
      */
-    private static VyhybkaGpsStore streamGpsKmForVyhybkaIndex(
-            SQLiteDatabase db, String sql, String[] args,
-            Map<String, List<RoIndexEntry>> roByPairKey, OpenProgressListener listener,
-            Set<String> pairFilter, int expectedRows, int tableRows) {
-        VyhybkaGpsStore.Builder builder = VyhybkaGpsStore.builder();
-        try (Cursor c = db.rawQuery(sql, args)) {
-            String currentPair = null;
-            List<KmGpsPoint> currentPoints = new ArrayList<>();
-            int scanned = 0;
-            int matchedVyhybky = 0;
+    private static int matchKmPointInBuffer(GpsPointStore buffer, int[] indices, Double midKm) {
+        if (indices.length == 0) return -1;
+        if (midKm == null) return indices[0];
+        if (indices.length == 1) return indices[0];
 
-            while (c.moveToNext()) {
-                scanned++;
-                String superZId = readId(c, 0);
-                String superDId = readId(c, 1);
-                if (superZId == null || superDId == null) continue;
-                String key = pairKey(superZId, superDId);
-                if (pairFilter != null && !pairFilter.contains(key)) continue;
+        int exact = -1;
+        int inRange = -1;
+        int rounded = -1;
+        int nearest = -1;
+        double nearestDiff = Double.MAX_VALUE;
 
-                Double kmExt = readDouble(c, 2);
-                Double lat = readDouble(c, 3);
-                Double lon = readDouble(c, 4);
-                if (kmExt == null || lat == null || lon == null) continue;
-
-                if (!key.equals(currentPair)) {
-                    if (currentPair != null) {
-                        matchedVyhybky += flushPairVyhybkaCoords(
-                                currentPair, currentPoints, roByPairKey.get(currentPair), builder);
-                        currentPoints.clear();
-                    }
-                    currentPair = key;
-                }
-                currentPoints.add(new KmGpsPoint(kmExt, lat, lon));
-
-                if (scanned % GPS_INDEX_PROGRESS_INTERVAL == 0) {
-                    reportVyhybkaGpsProgress(listener, matchedVyhybky, expectedRows, tableRows, scanned,
-                            pairFilter != null);
-                }
+        for (int idx : indices) {
+            double km = buffer.kmExtAt(idx);
+            if (km == midKm) {
+                exact = idx;
+                break;
             }
-            if (currentPair != null) {
-                matchedVyhybky += flushPairVyhybkaCoords(
-                        currentPair, currentPoints, roByPairKey.get(currentPair), builder);
+            if (km >= midKm - 0.5 && km < midKm + 0.5) {
+                inRange = idx;
             }
-            reportVyhybkaGpsProgress(listener, matchedVyhybky, expectedRows, tableRows, scanned,
-                    pairFilter != null);
-            if (listener != null && matchedVyhybky > 0) {
-                report(listener, vyhybkaGpsProgressPhase(matchedVyhybky, pairFilter != null ? scanned : -1), 84);
+            if (Math.round(km) == Math.round(midKm)) {
+                rounded = idx;
             }
-            return builder.build();
-        } catch (OutOfMemoryError e) {
-            throw e;
-        } catch (Exception ignored) {
-            return null;
+            double diff = Math.abs(km - midKm);
+            if (diff < nearestDiff) {
+                nearestDiff = diff;
+                nearest = idx;
+            }
         }
-    }
 
-    private static int flushPairVyhybkaCoords(String pairKey, List<KmGpsPoint> points,
-                                              List<RoIndexEntry> entries,
-                                              VyhybkaGpsStore.Builder builder) {
-        if (entries == null || entries.isEmpty() || points.isEmpty()) return 0;
-        int added = 0;
-        for (RoIndexEntry ro : entries) {
-            KmGpsPoint hit = matchKmPoint(points, ro.midKm);
-            if (hit == null) continue;
-            builder.add(pairKey, ro.tudu, ro.vyhybka, hit.latitude, hit.longitude);
-            added++;
-        }
-        return added;
-    }
-
-    private static void reportVyhybkaGpsProgress(OpenProgressListener listener, int matchedVyhybky,
-                                                 int expectedRows, int tableRows, int scanned,
-                                                 boolean fullScan) {
-        if (listener == null || scanned <= 0) return;
-        int pct;
-        if (expectedRows > 0) {
-            pct = 50 + (int) Math.min(34L, (scanned * 34L) / expectedRows);
-        } else if (fullScan && tableRows > 0) {
-            pct = 50 + (int) Math.min(34L, (scanned * 34L) / tableRows);
-        } else {
-            pct = 50 + Math.min(34, scanned / GPS_INDEX_PROGRESS_INTERVAL);
-        }
-        report(listener, vyhybkaGpsProgressPhase(matchedVyhybky, fullScan ? scanned : -1), pct);
-    }
-
-    private static String vyhybkaGpsProgressPhase(int matched, int scanned) {
-        if (scanned >= 0) {
-            return String.format(Locale.ROOT, "Indexuji souřadnice výhybek (%s / %s řádků)",
-                    formatCount(matched), formatCount(scanned));
-        }
-        return String.format(Locale.ROOT, "Indexuji souřadnice výhybek (%s)", formatCount(matched));
+        if (exact >= 0) return exact;
+        if (inRange >= 0) return inRange;
+        if (rounded >= 0) return rounded;
+        if (nearest >= 0) return nearest;
+        return indices[0];
     }
 
     private static String cacheProgressPhase(int written) {
@@ -775,44 +805,8 @@ public class DzsDatabase implements Closeable {
         }
     }
 
-    /**
-     * Vybere km bod podle shody KM_EXT se středem OD/DO.
-     * Priorita: přesná shoda → okno ±0,5 → zaokrouhlení → nejbližší km.
-     */
-    private static KmGpsPoint matchKmPoint(List<KmGpsPoint> points, Double midKm) {
-        if (points.isEmpty()) return null;
-        if (midKm == null) return points.get(0);
-        if (points.size() == 1) return points.get(0);
-
-        KmGpsPoint exact = null;
-        KmGpsPoint inRange = null;
-        KmGpsPoint rounded = null;
-        KmGpsPoint nearest = null;
-        double nearestDiff = Double.MAX_VALUE;
-
-        for (KmGpsPoint p : points) {
-            if (p.km == midKm) {
-                exact = p;
-                break;
-            }
-            if (p.km >= midKm - 0.5 && p.km < midKm + 0.5) {
-                inRange = p;
-            }
-            if (Math.round(p.km) == Math.round(midKm)) {
-                rounded = p;
-            }
-            double diff = Math.abs(p.km - midKm);
-            if (diff < nearestDiff) {
-                nearestDiff = diff;
-                nearest = p;
-            }
-        }
-
-        if (exact != null) return exact;
-        if (inRange != null) return inRange;
-        if (rounded != null) return rounded;
-        if (nearest != null) return nearest;
-        return points.get(0);
+    private static String vyhybkaGpsProgressPhase(int matched, int ignored) {
+        return String.format(Locale.ROOT, "Indexuji souřadnice výhybek (%s)", formatCount(matched));
     }
 
     private static String pairKey(String superZId, String superDId) {
