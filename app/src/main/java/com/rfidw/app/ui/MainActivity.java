@@ -116,6 +116,8 @@ public class MainActivity extends AppCompatActivity {
     private Tudu.Vyhybka currentVyhybka;
     /** POLOHA z nejbližšího RO_ID pro aktuální výhybku (GPS režim, 3částové výhybky). */
     private String matchedPoloha = "";
+    private double matchedPolohaLat = Double.NaN;
+    private double matchedPolohaLon = Double.NaN;
     private DzsDatabase dzsDatabase;
     /** Zruší zastaralé UI callbacky po novém načtení nebo zničení aktivity. */
     private volatile long dbLoadGeneration;
@@ -2507,6 +2509,8 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateMatchedPoloha() {
         matchedPoloha = "";
+        matchedPolohaLat = Double.NaN;
+        matchedPolohaLon = Double.NaN;
         if (!gpsAutoSelection || dzsDatabase == null || locationCache == null
                 || currentTudu == null || currentVyhybka == null
                 || currentVyhybka.castMax != 3) {
@@ -2515,11 +2519,20 @@ public class MainActivity extends AppCompatActivity {
         LocationCache.Snapshot snap = locationCache.getSnapshot();
         if (!snap.valid) return;
         try {
-            matchedPoloha = dzsDatabase.findPolohaForVyhybka(
+            DzsDatabase.PolohaMatch match = dzsDatabase.findPolohaForVyhybka(
                     currentTudu.code, currentVyhybka.cislo, snap.latitude, snap.longitude);
+            if (match != null) {
+                matchedPoloha = match.poloha;
+                if (match.hasEndpoint()) {
+                    matchedPolohaLat = match.endpointLatitude;
+                    matchedPolohaLon = match.endpointLongitude;
+                }
+            }
         } catch (Exception e) {
             Log.w(TAG, "POLOHA lookup selhal", e);
             matchedPoloha = "";
+            matchedPolohaLat = Double.NaN;
+            matchedPolohaLon = Double.NaN;
         }
     }
 
@@ -2527,6 +2540,20 @@ public class MainActivity extends AppCompatActivity {
         if (currentVyhybka == null || currentVyhybka.castMax != 3) return "";
         if (castNum != 2 && castNum != 3) return "";
         return matchedPoloha != null ? matchedPoloha : "";
+    }
+
+    private String polohaLatitudeForCsvRow(int castNum) {
+        if (currentVyhybka == null || currentVyhybka.castMax != 3) return "";
+        if (castNum != 2 && castNum != 3) return "";
+        if (Double.isNaN(matchedPolohaLat)) return "";
+        return LocationCache.formatLatitude(matchedPolohaLat);
+    }
+
+    private String polohaLongitudeForCsvRow(int castNum) {
+        if (currentVyhybka == null || currentVyhybka.castMax != 3) return "";
+        if (castNum != 2 && castNum != 3) return "";
+        if (Double.isNaN(matchedPolohaLon)) return "";
+        return LocationCache.formatLongitude(matchedPolohaLon);
     }
 
     private void closeDzsDatabase() {
@@ -3029,6 +3056,8 @@ public class MainActivity extends AppCompatActivity {
             row.vyhybka = csvVyhybkaLabel(d.vyhybka);
             row.cast = d.cast;
             row.poloha = polohaForCsvRow(parseInt(d.cast, 0));
+            row.polohaLatitude = polohaLatitudeForCsvRow(parseInt(d.cast, 0));
+            row.polohaLongitude = polohaLongitudeForCsvRow(parseInt(d.cast, 0));
             LocationCache.Snapshot gps = locationCache != null ? locationCache.getSnapshot() : LocationCache.Snapshot.empty();
             if (gps.valid) {
                 row.latitude = LocationCache.formatLatitude(gps.latitude);

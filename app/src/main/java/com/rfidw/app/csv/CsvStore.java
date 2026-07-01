@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -20,7 +21,9 @@ import java.util.Set;
  * Výstupní tabulka .CSV.
  *
  * Sloupce:
- *   ID_RFID ; EPC ; TID ; rok ; TUDU ; vyhybka ; cip ; POLOHA ; latitude ; longitude ; accuracy_m ; gps_time
+ *   ID_RFID ; EPC ; TID ; rok ; TUDU ; vyhybka ; cip ; POLOHA ;
+ *   poloha_latitude ; poloha_longitude ;
+ *   latitude ; longitude ; accuracy_m ; gps_time
  *
  * Klíčem je ID_RFID – při zápisu stejného ID_RFID se daný řádek přepíše.
  */
@@ -28,6 +31,7 @@ public class CsvStore {
 
     public static final String[] HEADER = {
             "ID_RFID", "EPC", "TID", "rok", "TUDU", "vyhybka", "cip", "POLOHA",
+            "poloha_latitude", "poloha_longitude",
             "latitude", "longitude", "accuracy_m", "gps_time"
     };
     private static final String SEP = ";";
@@ -41,6 +45,8 @@ public class CsvStore {
         public String vyhybka;
         public String cast;
         public String poloha;
+        public String polohaLatitude;
+        public String polohaLongitude;
         public String latitude;
         public String longitude;
         public String accuracyM;
@@ -49,6 +55,7 @@ public class CsvStore {
         public String[] toArray() {
             return new String[]{
                     idRfid, epc, tid, rok, tudu, vyhybka, cast, poloha,
+                    polohaLatitude, polohaLongitude,
                     latitude, longitude, accuracyM, gpsTime
             };
         }
@@ -142,42 +149,60 @@ public class CsvStore {
         try (BufferedReader br = new BufferedReader(new FileReader(file))) {
             String line;
             boolean first = true;
-            boolean hasPolohaColumn = false;
+            Map<String, Integer> colIndex = null;
             while ((line = br.readLine()) != null) {
                 if (line.trim().isEmpty()) continue;
                 String[] c = line.split(SEP, -1);
                 if (first) {
                     first = false;
                     if (c.length > 0 && c[0].trim().equalsIgnoreCase("ID_RFID")) {
-                        for (String col : c) {
-                            if ("POLOHA".equalsIgnoreCase(col.trim())) {
-                                hasPolohaColumn = true;
-                                break;
-                            }
-                        }
-                        continue; // hlavička
+                        colIndex = parseHeader(c);
+                        continue;
                     }
                 }
                 Row r = new Row();
-                r.idRfid  = get(c, 0);
-                r.epc     = get(c, 1);
-                r.tid     = get(c, 2);
-                r.rok     = get(c, 3);
-                r.tudu    = get(c, 4);
-                r.vyhybka = get(c, 5);
-                r.cast    = get(c, 6);
-                if (hasPolohaColumn) {
-                    r.poloha = get(c, 7);
-                    r.latitude = get(c, 8);
-                    r.longitude = get(c, 9);
-                    r.accuracyM = get(c, 10);
-                    r.gpsTime = get(c, 11);
+                if (colIndex != null) {
+                    r.idRfid = get(c, colIndex, "ID_RFID", 0);
+                    r.epc = get(c, colIndex, "EPC", 1);
+                    r.tid = get(c, colIndex, "TID", 2);
+                    r.rok = get(c, colIndex, "rok", 3);
+                    r.tudu = get(c, colIndex, "TUDU", 4);
+                    r.vyhybka = get(c, colIndex, "vyhybka", 5);
+                    r.cast = get(c, colIndex, "cip", 6);
+                    r.poloha = get(c, colIndex, "POLOHA", -1);
+                    r.polohaLatitude = get(c, colIndex, "poloha_latitude", -1);
+                    r.polohaLongitude = get(c, colIndex, "poloha_longitude", -1);
+                    r.latitude = get(c, colIndex, "latitude", -1);
+                    r.longitude = get(c, colIndex, "longitude", -1);
+                    r.accuracyM = get(c, colIndex, "accuracy_m", -1);
+                    r.gpsTime = get(c, colIndex, "gps_time", -1);
                 } else {
-                    r.poloha = "";
-                    r.latitude = get(c, 7);
-                    r.longitude = get(c, 8);
-                    r.accuracyM = get(c, 9);
-                    r.gpsTime = get(c, 10);
+                    r.idRfid = get(c, 0);
+                    r.epc = get(c, 1);
+                    r.tid = get(c, 2);
+                    r.rok = get(c, 3);
+                    r.tudu = get(c, 4);
+                    r.vyhybka = get(c, 5);
+                    r.cast = get(c, 6);
+                    r.poloha = c.length > 11 ? get(c, 7) : "";
+                    r.polohaLatitude = c.length > 13 ? get(c, 8) : "";
+                    r.polohaLongitude = c.length > 13 ? get(c, 9) : "";
+                    if (c.length > 13) {
+                        r.latitude = get(c, 10);
+                        r.longitude = get(c, 11);
+                        r.accuracyM = get(c, 12);
+                        r.gpsTime = get(c, 13);
+                    } else if (c.length > 11) {
+                        r.latitude = get(c, 8);
+                        r.longitude = get(c, 9);
+                        r.accuracyM = get(c, 10);
+                        r.gpsTime = get(c, 11);
+                    } else {
+                        r.latitude = get(c, 7);
+                        r.longitude = get(c, 8);
+                        r.accuracyM = get(c, 9);
+                        r.gpsTime = get(c, 10);
+                    }
                 }
                 if (r.idRfid != null && !r.idRfid.isEmpty()) {
                     rows.put(r.idRfid, r);
@@ -185,10 +210,17 @@ public class CsvStore {
                 }
             }
         } catch (Exception e) {
-            // poškozený soubor – začneme s prázdnou tabulkou
             rows.clear();
             castsByVyhybka.clear();
         }
+    }
+
+    private static Map<String, Integer> parseHeader(String[] cols) {
+        Map<String, Integer> out = new HashMap<>();
+        for (int i = 0; i < cols.length; i++) {
+            out.put(cols[i].trim().toLowerCase(Locale.ROOT), i);
+        }
+        return out;
     }
 
     private void save() {
@@ -236,6 +268,13 @@ public class CsvStore {
         return i < arr.length ? arr[i].trim() : "";
     }
 
+    private static String get(String[] arr, Map<String, Integer> colIndex, String name, int fallback) {
+        Integer idx = colIndex.get(name.toLowerCase(Locale.ROOT));
+        if (idx != null && idx >= 0) return get(arr, idx);
+        if (fallback >= 0) return get(arr, fallback);
+        return "";
+    }
+
     private static int parseInt(String s, int def) {
         try {
             return Integer.parseInt(s.replaceAll("[^0-9-]", ""));
@@ -263,7 +302,6 @@ public class CsvStore {
 
     private static String escape(String s) {
         if (s == null) return "";
-        // nahradíme oddělovač/nové řádky, ať se tabulka nerozbije
         return s.replace(SEP, " ").replace("\n", " ").replace("\r", " ");
     }
 }

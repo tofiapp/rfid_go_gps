@@ -4,7 +4,8 @@ import java.util.ArrayList;
 
 /**
  * Kompaktní úložiště předpočítaných GPS souřadnic výhybek.
- * Každá výhybka má jednu souřadnici z GPS tabulky (párování přes RO_ID).
+ * Každý záznam je jeden km bod z GPS tabulky (párování přes RO_ID).
+ * Pro jedno RO_ID může být více bodů (úsek tratě).
  */
 final class VyhybkaGpsStore {
 
@@ -114,6 +115,11 @@ final class VyhybkaGpsStore {
 
     String roIdAt(int index) {
         return roIds[index];
+    }
+
+    /** Klíč SUPER_Z_ID|SUPER_D_ID|RO_ID odpovídající indexu. */
+    String roKeyAt(int index) {
+        return pairKeys[index] + "|" + roIds[index];
     }
 
     String polohaAt(int index) {
