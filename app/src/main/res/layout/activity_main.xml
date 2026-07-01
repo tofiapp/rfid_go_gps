@@ -503,6 +503,17 @@
         </androidx.constraintlayout.widget.ConstraintLayout>
 
         <TextView
+            android:id="@+id/tvUserId"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="end"
+            android:paddingBottom="4dp"
+            android:textColor="@color/primary"
+            android:textSize="12sp" />
+
+        <TextView
             android:id="@+id/tvGpsStatus"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

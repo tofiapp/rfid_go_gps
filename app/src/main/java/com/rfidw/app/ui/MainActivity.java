@@ -51,6 +51,7 @@ import com.google.android.material.button.MaterialButton;
 import com.google.android.material.button.MaterialButtonToggleGroup;
 
 import com.rfidw.app.R;
+import com.rfidw.app.auth.UserSession;
 import com.rfidw.app.csv.CsvStore;
 import com.rfidw.app.data.DzsDatabase;
 import com.rfidw.app.data.Tudu;
@@ -158,7 +159,7 @@ public class MainActivity extends AppCompatActivity {
     private int activeStep;
 
     // view reference
-    private TextView tvReaderStatus, tvGpsStatus, tvEpcPreview, tvEpcValid, tvSourceFile,
+    private TextView tvReaderStatus, tvGpsStatus, tvUserId, tvEpcPreview, tvEpcValid, tvSourceFile,
             tvCard1DbProgress,
             tvWriteResult, tvCsvPath, tvPwdWriteResult, tvLockResult,
             tvSummaryTudu, tvSummaryVyhybka, tvSummaryCast,
@@ -194,8 +195,14 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        prefs = getSharedPreferences(UserSession.PREFS_NAME, MODE_PRIVATE);
+        if (!UserSession.isLoggedIn(prefs)) {
+            startActivity(new Intent(this, LoginActivity.class));
+            finish();
+            return;
+        }
+
         setContentView(R.layout.activity_main);
-        prefs = getSharedPreferences("rfidgogps", MODE_PRIVATE);
 
         bindViews();
         setupLocation();
@@ -223,11 +230,33 @@ public class MainActivity extends AppCompatActivity {
         updateStepIndicators();
 
         setActionStatusReady();
+        updateUserIdDisplay();
+    }
+
+    private void updateUserIdDisplay() {
+        if (tvUserId == null) return;
+        String userId = UserSession.getUserId(prefs);
+        tvUserId.setText(getString(R.string.user_id_label, userId));
+    }
+
+    private void confirmLogout() {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.logout_confirm_title)
+                .setPositiveButton(R.string.logout_confirm_yes, (d, w) -> logout())
+                .setNegativeButton(R.string.logout_confirm_no, null)
+                .show();
+    }
+
+    private void logout() {
+        UserSession.logout(prefs);
+        startActivity(new Intent(this, LoginActivity.class));
+        finish();
     }
 
     private void bindViews() {
         tvReaderStatus = findViewById(R.id.tvReaderStatus);
         tvGpsStatus = findViewById(R.id.tvGpsStatus);
+        tvUserId = findViewById(R.id.tvUserId);
         tvEpcPreview = findViewById(R.id.tvEpcPreview);
         tvEpcValid = findViewById(R.id.tvEpcValid);
         tvSourceFile = findViewById(R.id.tvSourceFile);
@@ -1720,6 +1749,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void setupListeners() {
         findViewById(R.id.btnPickSource).setOnClickListener(v -> pickSourceFile());
+        tvUserId.setOnClickListener(v -> confirmLogout());
 
         powerPresetGroup.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
             if (!isChecked) return;
@@ -3045,6 +3075,7 @@ public class MainActivity extends AppCompatActivity {
                     toast(getString(R.string.gps_unavailable_toast));
                 }
             }
+            row.userId = UserSession.getUserId(prefs);
             csvStore.upsert(row);
             persistCsvAsync();
             refreshCsvTable();
