@@ -861,6 +861,27 @@ public class MainActivity extends AppCompatActivity {
         scheduleGpsTuduLookup();
     }
 
+    /**
+     * Obnoví GPS fix a v GPS režimu znovu určí TUDU/výhybku – volá se na začátku
+     * hardwarového cyklu (EPC → CSV → heslo → zamčení), před nastavením workflowRunning.
+     */
+    private void refreshGpsAtWorkflowStart() {
+        if (locationCache == null) return;
+        ensureLocationPermission();
+        if (!gpsTestMode) {
+            locationCache.refresh(this);
+        }
+        showGpsStatus = true;
+        refreshGpsStatus(false);
+        if (gpsAutoSelection && dzsDatabase != null) {
+            forceNextGpsLookup = true;
+            lastGpsLookupLat = null;
+            lastGpsLookupLon = null;
+            lastGpsLookupTimeMs = 0;
+            scheduleGpsTuduLookup();
+        }
+    }
+
     private List<Tudu.Vyhybka> sortVyhybkyForPicker(List<Tudu.Vyhybka> source,
                                                       Map<Integer, Double> distancesM) {
         if (distancesM == null || distancesM.isEmpty()) {
@@ -3313,6 +3334,7 @@ public class MainActivity extends AppCompatActivity {
             toast("NEW PWD musí mít 8 hex znaků");
             return;
         }
+        refreshGpsAtWorkflowStart();
         chainWorkflow = true;
         workflowRunning = true;
         activeStep = 2;
