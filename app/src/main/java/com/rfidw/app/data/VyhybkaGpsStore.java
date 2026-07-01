@@ -3,8 +3,8 @@ package com.rfidw.app.data;
 import java.util.ArrayList;
 
 /**
- * Kompaktní úložiště předpočítaných GPS souřadnic výhybek.
- * Každá výhybka má jednu souřadnici z GPS tabulky (párování přes RO_ID).
+ * Kompaktní úložiště reprezentačních GPS souřadnic výhybek (jeden bod na RO_ID).
+ * Pro určení POLOHA slouží {@link RoGpsPolohaIndex} se všemi km body úseku.
  */
 final class VyhybkaGpsStore {
 
@@ -114,6 +114,11 @@ final class VyhybkaGpsStore {
 
     String roIdAt(int index) {
         return roIds[index];
+    }
+
+    /** Klíč SUPER_Z_ID|SUPER_D_ID|RO_ID odpovídající indexu. */
+    String roKeyAt(int index) {
+        return pairKeys[index] + "|" + roIds[index];
     }
 
     String polohaAt(int index) {
