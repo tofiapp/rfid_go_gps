@@ -153,6 +153,16 @@ public class RfidResultStore {
         db.close();
     }
 
+    /** Sloučí WAL do hlavního souboru před kopírováním na disk. */
+    public synchronized void prepareForFileCopy() {
+        try (Cursor c = db.rawQuery("PRAGMA wal_checkpoint(FULL)", null)) {
+            if (c != null) {
+                c.moveToFirst();
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
     private static void ensureSchema(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE IF NOT EXISTS " + TABLE_NAME + " ("
                 + "_id INTEGER PRIMARY KEY AUTOINCREMENT, "

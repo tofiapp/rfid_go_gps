@@ -384,12 +384,28 @@
                 </LinearLayout>
 
                 <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnSaveToDownloads"
+                    style="@style/Widget.Material3.Button"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="@string/btn_save_downloads"/>
+
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnExportSqlite"
                     style="@style/Widget.Material3.Button.TonalButton"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
                     android:text="@string/btn_export_sqlite"/>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingTop="6dp"
+                    android:text="@string/save_downloads_hint"
+                    android:textColor="@color/text_muted"
+                    android:textSize="11sp"/>
 
                 <TextView
                     android:id="@+id/tvCsvPath"

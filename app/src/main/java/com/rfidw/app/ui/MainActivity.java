@@ -56,7 +56,7 @@ import com.rfidw.app.csv.CsvStore;
 import com.rfidw.app.data.DzsDatabase;
 import com.rfidw.app.data.RfidResultStore;
 import com.rfidw.app.data.Tudu;
-import com.rfidw.app.epc.EpcModel;
+import com.rfidw.app.export.PublicFileExport;
 import com.rfidw.app.location.LocationCache;
 import com.rfidw.app.rfid.UhfManager;
 
@@ -81,6 +81,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
     private static final int REQUEST_LOCATION_PERMISSION = 1001;
     private static final int REQUEST_STORAGE_PERMISSION = 1002;
+    private static final int REQUEST_SAVE_DOWNLOADS_PERMISSION = 1003;
     private static final String DEFAULT_DB_NAME = "DZS_PASPORT_TPI.sqlite";
 
     /** Výsledek automatického vyhledání DB ve Stažených / úložišti. */
@@ -156,6 +157,7 @@ public class MainActivity extends AppCompatActivity {
     private SharedPreferences prefs;
 
     private boolean pendingAutoLoadAfterStorage;
+    private boolean pendingSaveToDownloads;
     private boolean step1Done, step2Done, step3Done, step2Failed;
     private boolean workflowRunning, chainWorkflow, scanDoneAwaitingConfirm, lastRecordUnlocked;
     /** CSV obnoveno dřív než zdrojový soubor – posun na další čip/výhybku až po načtení TUDU. */
@@ -1552,6 +1554,18 @@ public class MainActivity extends AppCompatActivity {
             }
             return;
         }
+        if (requestCode == REQUEST_SAVE_DOWNLOADS_PERMISSION) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                if (pendingSaveToDownloads) {
+                    pendingSaveToDownloads = false;
+                    doSaveOutputsToDownloads();
+                }
+            } else if (pendingSaveToDownloads) {
+                pendingSaveToDownloads = false;
+                toast(getString(R.string.save_downloads_error, "chybí oprávnění k zápisu"));
+            }
+            return;
+        }
         if (requestCode != REQUEST_STORAGE_PERMISSION) return;
         if (!pendingAutoLoadAfterStorage) return;
         pendingAutoLoadAfterStorage = false;
@@ -1777,6 +1791,7 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.btnLock).setOnClickListener(v -> doLock());
         findViewById(R.id.btnExportCsv).setOnClickListener(v -> exportCsv());
         findViewById(R.id.btnExportSqlite).setOnClickListener(v -> exportSqlite());
+        findViewById(R.id.btnSaveToDownloads).setOnClickListener(v -> saveOutputsToDownloads());
         findViewById(R.id.btnClearCsv).setOnClickListener(v -> showDeleteConfirmDialog());
         findViewById(R.id.btnDeleteLastRecord).setOnClickListener(v -> showDeleteConfirmDialog());
         findViewById(R.id.btnScanDoneContinue).setOnClickListener(v -> onScanDoneContinue());
@@ -3438,6 +3453,58 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
             toast("Export SQLite selhal: " + e.getMessage());
         }
+    }
+
+    private void saveOutputsToDownloads() {
+        if (csvStore == null && resultStore == null) {
+            toast("Výstup se ještě načítá");
+            return;
+        }
+        if (needsWriteStoragePermissionForDownloads()) {
+            pendingSaveToDownloads = true;
+            ActivityCompat.requestPermissions(
+                    this,
+                    new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                    REQUEST_SAVE_DOWNLOADS_PERMISSION);
+            return;
+        }
+        doSaveOutputsToDownloads();
+    }
+
+    private boolean needsWriteStoragePermissionForDownloads() {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                && ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void doSaveOutputsToDownloads() {
+        io.execute(() -> {
+            List<String> saved = new ArrayList<>();
+            try {
+                if (csvStore != null && csvStore.size() > 0) {
+                    csvStore.persist();
+                    File csv = csvStore.getFile();
+                    saved.add(PublicFileExport.copyToDownloads(
+                            this, csv, csv.getName(), "text/csv"));
+                }
+                if (resultStore != null && resultStore.size() > 0) {
+                    resultStore.prepareForFileCopy();
+                    File db = resultStore.getFile();
+                    saved.add(PublicFileExport.copyToDownloads(
+                            this, db, db.getName(), "application/x-sqlite3"));
+                }
+                if (saved.isEmpty()) {
+                    ui.post(() -> toast(getString(R.string.save_downloads_empty)));
+                    return;
+                }
+                final String message = saved.size() == 1
+                        ? getString(R.string.save_downloads_one, saved.get(0))
+                        : getString(R.string.save_downloads_many, TextUtils.join("\n", saved));
+                ui.post(() -> toast(message));
+            } catch (Exception e) {
+                ui.post(() -> toast(getString(R.string.save_downloads_error, e.getMessage())));
+            }
+        });
     }
 
     // ---------- čtečka ----------
