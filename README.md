@@ -37,7 +37,7 @@ Výhybky se stejným `SUPER_Z_ID`/`SUPER_D_ID` se rozliší středem `(OD+DO)/2`
 
 Vzorová databáze je ve složce [`sample_data/`](sample_data).
 
-**Indexace a cache:** Při prvním otevření databáze aplikace sama sestaví index (výhybky + předpočítané souřadnice výhybek přes `KM_EXT`). Výsledek uloží do cache podle otisku obsahu souboru – po restartu aplikace se index znovu načte během desítek sekund, bez opakovaného skenování tabulek. Podrobnosti viz [`docs/INDEXACE_DZS.md`](docs/INDEXACE_DZS.md).
+**Indexace a cache:** Při prvním otevření databáze aplikace sama sestaví index (výhybky + předpočítané souřadnice výhybek přes `RO_ID`). Výsledek uloží do cache podle otisku obsahu souboru – po restartu aplikace se index znovu načte během desítek sekund. Index lze **předpřipravit na PC** (`./gradlew :preindex:jar`) a dodat spolu s databází – viz [`docs/INDEXACE_DZS.md`](docs/INDEXACE_DZS.md).
 
 **Nápověda k části výhybky** – u výhybek se třemi částmi (1–3) se pod výběrem zobrazí textová nápověda:
 - část 1 → *jazyk*

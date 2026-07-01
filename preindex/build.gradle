@@ -1,0 +1,26 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group = 'com.rfidw'
+version = '1.0'
+
+dependencies {
+    implementation 'org.xerial:sqlite-jdbc:3.46.1.3'
+}
+
+application {
+    mainClass = 'com.rfidw.preindex.PreindexMain'
+}
+
+tasks.named('jar') {
+    archiveBaseName = 'preindex-dzs'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    manifest {
+        attributes 'Main-Class': 'com.rfidw.preindex.PreindexMain'
+    }
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+}

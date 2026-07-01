@@ -285,6 +285,7 @@ public class DzsDatabase implements Closeable {
             if (cacheDir != null) {
                 report(listener, "Kontrola databáze", 8);
                 contentHash = DzsIndexCache.resolveContentHash(sourceFile, indexCacheDir);
+                DzsIndexCache.importBundledIfPresent(sourceFile, contentHash, indexCacheDir);
                 report(listener, "Načítám cache indexu", 12);
                 cached = DzsIndexCache.tryLoad(sourceFile, contentHash, indexCacheDir);
             }
@@ -853,7 +854,7 @@ public class DzsDatabase implements Closeable {
         if (!populateRoGpsLookupTempTable(roByRoKey)) {
             return VyhybkaGpsStore.empty();
         }
-        String roIdExpr = "TRIM(CAST(" + gpsColumns.roId + " AS TEXT))";
+        String roIdExpr = "TRIM(CAST(gps." + gpsColumns.roId + " AS TEXT))";
         String sql = "SELECT ro.tudu, ro.vyhybka, gps." + gpsColumns.latitude + ", gps."
                 + gpsColumns.longitude + ", ro.super_z_id, ro.super_d_id, ro.ro_id"
                 + " FROM " + TEMP_RO_GPS_LOOKUP + " ro"

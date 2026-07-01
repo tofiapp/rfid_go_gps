@@ -8,6 +8,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.OutputStream;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -117,6 +118,57 @@ final class DzsIndexCache {
         File cacheFile = cacheFileFor(contentHash, cacheDir);
         if (!cacheFile.isFile()) return null;
         return readIndex(dbFile.length(), contentHash, cacheFile);
+    }
+
+    /**
+     * Zkopíruje předpřipravený .idx ze složky databáze do cache aplikace.
+     * Hledá: {@code dzs_<sha256>.idx}, {@code dzs_index/dzs_<sha256>.idx},
+     * {@code <název_db>.idx} (sidecar).
+     */
+    static void importBundledIfPresent(File sourceDb, String contentHash, File cacheDir) {
+        if (sourceDb == null || !sourceDb.isFile() || cacheDir == null) return;
+        if (contentHash == null || contentHash.length() != HASH_HEX_LEN) return;
+        if (!cacheDir.exists() && !cacheDir.mkdirs()) return;
+
+        File target = cacheFileFor(contentHash, cacheDir);
+        if (target.isFile() && readIndex(sourceDb.length(), contentHash, target) != null) {
+            return;
+        }
+
+        File parent = sourceDb.getParentFile();
+        if (parent == null) return;
+
+        String idxName = target.getName();
+        File[] candidates = {
+                new File(parent, idxName),
+                new File(parent, "dzs_index" + File.separator + idxName),
+                new File(sourceDb.getAbsolutePath() + ".idx")
+        };
+        for (File candidate : candidates) {
+            if (!candidate.isFile()) continue;
+            if (readIndex(sourceDb.length(), contentHash, candidate) == null) continue;
+            copyIndexFile(candidate, target);
+            return;
+        }
+    }
+
+    private static void copyIndexFile(File source, File target) {
+        File tmp = new File(target.getParentFile(), target.getName() + ".tmp");
+        try (InputStream in = new FileInputStream(source);
+             OutputStream out = new FileOutputStream(tmp)) {
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                out.write(buf, 0, n);
+            }
+            out.flush();
+        } catch (Exception ignored) {
+            tmp.delete();
+            return;
+        }
+        if (!tmp.renameTo(target)) {
+            tmp.delete();
+        }
     }
 
     @FunctionalInterface
