@@ -56,6 +56,7 @@ import com.rfidw.app.csv.CsvStore;
 import com.rfidw.app.data.DzsDatabase;
 import com.rfidw.app.data.RfidResultStore;
 import com.rfidw.app.data.Tudu;
+import com.rfidw.app.epc.EpcModel;
 import com.rfidw.app.export.PublicFileExport;
 import com.rfidw.app.location.LocationCache;
 import com.rfidw.app.rfid.UhfManager;
