@@ -3,9 +3,8 @@ package com.rfidw.app.data;
 import java.util.ArrayList;
 
 /**
- * Kompaktní úložiště předpočítaných GPS souřadnic výhybek.
- * Každý záznam je jeden km bod z GPS tabulky (párování přes RO_ID).
- * Pro jedno RO_ID může být více bodů (úsek tratě).
+ * Kompaktní úložiště reprezentačních GPS souřadnic výhybek (jeden bod na RO_ID).
+ * Pro určení POLOHA slouží {@link RoGpsPolohaIndex} se všemi km body úseku.
  */
 final class VyhybkaGpsStore {
 

@@ -11,6 +11,7 @@ import java.io.OutputStream;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -22,20 +23,17 @@ import java.util.zip.GZIPOutputStream;
  * Disková cache paměťových indexů DZS databáze.
  * Platnost indexu je vázaná na velikost a SHA-256 obsahu databáze.
  *
+ * Verze 21 odděluje reprezentační GPS body (findNearest) a plný POLOHA index (všechny km body).
  * Verze 20 kompaktně ukládá GPS body (index RO_ID + souřadnice) a hlásí průběh zápisu.
  * Verze 19 ukládá všechny GPS body výhybek a krajní body RO_ID (první/poslední km bod).
- * Verze 18 přidává POLOHA k RO indexu a k předpočítaným GPS souřadnicím výhybek.
- * Verze 17 přidává volitelné IOB písmeno k číslu výhybky (COBJEKT).
- * Verze 16 ukládá RO index (RO_ID) včetně rozsahu částí odvozeného z POLOHA
- * (J = 3, C = 4) a předpočítané GPS souřadnice výhybek.
  */
 final class DzsIndexCache {
 
     private static final int MAGIC = 0x445A5349; // "DZSI"
-    private static final int VERSION = 20;
+    private static final int VERSION = 21;
+    private static final int VERSION_LEGACY_V20 = 20;
+    private static final int VERSION_LEGACY_V19 = 19;
     private static final int VERSION_LEGACY_V16 = 16;
-    private static final int VERSION_LEGACY_V14 = 14;
-    private static final int VERSION_LEGACY_V13 = 13;
     private static final int HASH_HEX_LEN = 64;
     /** {@link RoEntry#castMin} / {@link RoEntry#castMax} pokud sloupec v DB chybí. */
     static final int CAST_UNSPECIFIED = -1;
@@ -64,12 +62,14 @@ final class DzsIndexCache {
     static final class LoadedIndex {
         final Map<String, List<RoEntry>> roByPairKey;
         final VyhybkaGpsStore vyhybkaGpsStore;
+        final RoGpsPolohaIndex roGpsPolohaIndex;
         final RoGpsEndpoints roGpsEndpoints;
 
         LoadedIndex(Map<String, List<RoEntry>> roByPairKey, VyhybkaGpsStore vyhybkaGpsStore,
-                    RoGpsEndpoints roGpsEndpoints) {
+                    RoGpsPolohaIndex roGpsPolohaIndex, RoGpsEndpoints roGpsEndpoints) {
             this.roByPairKey = roByPairKey;
             this.vyhybkaGpsStore = vyhybkaGpsStore != null ? vyhybkaGpsStore : VyhybkaGpsStore.empty();
+            this.roGpsPolohaIndex = roGpsPolohaIndex != null ? roGpsPolohaIndex : RoGpsPolohaIndex.empty();
             this.roGpsEndpoints = roGpsEndpoints != null ? roGpsEndpoints : RoGpsEndpoints.empty();
         }
     }
@@ -139,6 +139,7 @@ final class DzsIndexCache {
     static boolean save(File dbFile, String contentHash, File cacheDir,
                      Map<String, List<RoEntry>> roByPairKey,
                      VyhybkaGpsStore vyhybkaGpsStore,
+                     RoGpsPolohaIndex roGpsPolohaIndex,
                      RoGpsEndpoints roGpsEndpoints,
                      SaveProgressListener progress) {
         if (dbFile == null || cacheDir == null || !dbFile.isFile()) return false;
@@ -156,9 +157,10 @@ final class DzsIndexCache {
             for (List<RoEntry> entries : roByPairKey.values()) {
                 roCount += entries.size();
             }
-            int gpsCount = vyhybkaGpsStore != null ? vyhybkaGpsStore.size() : 0;
+            int reprCount = vyhybkaGpsStore != null ? vyhybkaGpsStore.size() : 0;
+            int polohaCount = roGpsPolohaIndex != null ? roGpsPolohaIndex.size() : 0;
             int endpointCount = roGpsEndpoints != null ? roGpsEndpoints.size() : 0;
-            int totalWork = roCount + gpsCount + endpointCount;
+            int totalWork = roCount + reprCount + polohaCount + endpointCount;
             int written = 0;
 
             out.writeInt(roCount);
@@ -178,7 +180,9 @@ final class DzsIndexCache {
                     }
                 }
             }
-            written = writeVyhybkaGpsStoreCompact(out, vyhybkaGpsStore, written, totalWork, progress);
+            written = writeVyhybkaGpsStoreCompact(out, vyhybkaGpsStore, written, totalWork,
+                    progress, "GPS repr.");
+            written = writePolohaIndexCompact(out, roGpsPolohaIndex, written, totalWork, progress);
             written = writeRoGpsEndpoints(out, roGpsEndpoints, written, totalWork, progress);
             if (progress != null) {
                 progress.onProgress("dokončuji", totalWork, totalWork);
@@ -200,7 +204,7 @@ final class DzsIndexCache {
         try (DataInputStream in = new DataInputStream(new GZIPInputStream(new FileInputStream(indexFile)))) {
             if (in.readInt() != MAGIC) return null;
             int version = in.readInt();
-            if (version != VERSION) {
+            if (version != VERSION && version != VERSION_LEGACY_V20 && version != VERSION_LEGACY_V19) {
                 return null;
             }
             long cachedSize = in.readLong();
@@ -231,15 +235,33 @@ final class DzsIndexCache {
             Map<String, String> pairKeyByRoKey = new HashMap<>(Math.max(roCount, 16));
             for (Map.Entry<String, List<RoEntry>> e : ro.entrySet()) {
                 for (RoEntry roEntry : e.getValue()) {
-                    String roKey = roKey(e.getKey(), roEntry.roId);
-                    roByRoKey.put(roKey, roEntry);
-                    pairKeyByRoKey.put(roKey, e.getKey());
+                    String key = roKey(e.getKey(), roEntry.roId);
+                    roByRoKey.put(key, roEntry);
+                    pairKeyByRoKey.put(key, e.getKey());
                 }
             }
 
-            VyhybkaGpsStore vyhybkaGpsStore = readVyhybkaGpsStoreCompact(in, roByRoKey, pairKeyByRoKey);
+            VyhybkaGpsStore vyhybkaGpsStore;
+            RoGpsPolohaIndex roGpsPolohaIndex;
+            if (version == VERSION) {
+                vyhybkaGpsStore = readVyhybkaGpsStoreCompact(in, roByRoKey, pairKeyByRoKey);
+                roGpsPolohaIndex = readPolohaIndexCompact(in);
+            } else if (version == VERSION_LEGACY_V20) {
+                VyhybkaGpsStore legacyAllPoints = readVyhybkaGpsStoreCompact(in, roByRoKey, pairKeyByRoKey);
+                SplitGpsIndex split = splitLegacyGpsStore(legacyAllPoints);
+                vyhybkaGpsStore = split.representative;
+                roGpsPolohaIndex = split.polohaIndex;
+            } else {
+                VyhybkaGpsStore legacyAllPoints = readVyhybkaGpsStoreVerbose(in, roByRoKey, pairKeyByRoKey);
+                SplitGpsIndex split = splitLegacyGpsStore(legacyAllPoints);
+                vyhybkaGpsStore = split.representative;
+                roGpsPolohaIndex = split.polohaIndex;
+            }
             RoGpsEndpoints roGpsEndpoints = readRoGpsEndpoints(in);
-            return new LoadedIndex(ro, vyhybkaGpsStore, roGpsEndpoints);
+            if (roGpsPolohaIndex.isEmpty() && !vyhybkaGpsStore.isEmpty()) {
+                roGpsPolohaIndex = polohaIndexFromRepresentativeStore(vyhybkaGpsStore);
+            }
+            return new LoadedIndex(ro, vyhybkaGpsStore, roGpsPolohaIndex, roGpsEndpoints);
         } catch (OutOfMemoryError e) {
             throw e;
         } catch (Exception ignored) {
@@ -247,9 +269,47 @@ final class DzsIndexCache {
         }
     }
 
+    private static final class SplitGpsIndex {
+        final VyhybkaGpsStore representative;
+        final RoGpsPolohaIndex polohaIndex;
+
+        SplitGpsIndex(VyhybkaGpsStore representative, RoGpsPolohaIndex polohaIndex) {
+            this.representative = representative;
+            this.polohaIndex = polohaIndex;
+        }
+    }
+
+    private static SplitGpsIndex splitLegacyGpsStore(VyhybkaGpsStore allPoints) {
+        if (allPoints == null || allPoints.isEmpty()) {
+            return new SplitGpsIndex(VyhybkaGpsStore.empty(), RoGpsPolohaIndex.empty());
+        }
+        VyhybkaGpsStore.Builder reprBuilder = VyhybkaGpsStore.builder();
+        RoGpsPolohaIndex.Builder polohaBuilder = RoGpsPolohaIndex.builder();
+        HashSet<String> seen = new HashSet<>();
+        for (int i = 0; i < allPoints.size(); i++) {
+            String roKey = allPoints.roKeyAt(i);
+            polohaBuilder.addPoint(roKey, allPoints.latitudeAt(i), allPoints.longitudeAt(i));
+            if (seen.add(roKey)) {
+                reprBuilder.add(allPoints.pairKeyAt(i), allPoints.tuduAt(i), allPoints.vyhybkaAt(i),
+                        allPoints.roIdAt(i), allPoints.polohaAt(i),
+                        allPoints.latitudeAt(i), allPoints.longitudeAt(i));
+            }
+        }
+        return new SplitGpsIndex(reprBuilder.build(), polohaBuilder.build());
+    }
+
+    private static RoGpsPolohaIndex polohaIndexFromRepresentativeStore(VyhybkaGpsStore store) {
+        RoGpsPolohaIndex.Builder builder = RoGpsPolohaIndex.builder();
+        for (int i = 0; i < store.size(); i++) {
+            builder.addPoint(store.roKeyAt(i), store.latitudeAt(i), store.longitudeAt(i));
+        }
+        return builder.build();
+    }
+
     private static int writeVyhybkaGpsStoreCompact(DataOutputStream out, VyhybkaGpsStore store,
                                                  int writtenSoFar, int totalWork,
-                                                 SaveProgressListener progress) throws IOException {
+                                                 SaveProgressListener progress, String phase)
+            throws IOException {
         if (store == null || store.isEmpty()) {
             out.writeInt(0);
             out.writeInt(0);
@@ -272,14 +332,38 @@ final class DzsIndexCache {
         int written = writtenSoFar;
         for (int i = 0; i < store.size(); i++) {
             int roKeyIndex = roKeyToIndex.get(store.roKeyAt(i));
-            if (roKeyIndex > 0xFFFF) {
-                throw new IOException("Příliš mnoho RO_ID v GPS indexu");
-            }
             out.writeShort(roKeyIndex);
             out.writeFloat((float) store.latitudeAt(i));
             out.writeFloat((float) store.longitudeAt(i));
             written++;
             if (progress != null && (i % GPS_WRITE_PROGRESS_STEP == 0 || i + 1 == store.size())) {
+                progress.onProgress(phase, written, totalWork);
+            }
+        }
+        return written;
+    }
+
+    private static int writePolohaIndexCompact(DataOutputStream out, RoGpsPolohaIndex index,
+                                               int writtenSoFar, int totalWork,
+                                               SaveProgressListener progress) throws IOException {
+        if (index == null || index.isEmpty()) {
+            out.writeInt(0);
+            out.writeInt(0);
+            return writtenSoFar;
+        }
+        String[] roKeyTable = index.roKeyTable();
+        out.writeInt(index.size());
+        out.writeInt(roKeyTable.length);
+        for (String roKey : roKeyTable) {
+            out.writeUTF(roKey);
+        }
+        int written = writtenSoFar;
+        for (int i = 0; i < index.size(); i++) {
+            out.writeShort(index.roKeyIndexAt(i));
+            out.writeFloat((float) index.latitudeAt(i));
+            out.writeFloat((float) index.longitudeAt(i));
+            written++;
+            if (progress != null && (i % GPS_WRITE_PROGRESS_STEP == 0 || i + 1 == index.size())) {
                 progress.onProgress("GPS body", written, totalWork);
             }
         }
@@ -292,15 +376,67 @@ final class DzsIndexCache {
             throws IOException {
         int count = in.readInt();
         if (count <= 0) {
-            in.readInt(); // prázdná tabulka roKey
+            in.readInt();
             return VyhybkaGpsStore.empty();
         }
         int roKeyCount = in.readInt();
         if (roKeyCount <= 0) return VyhybkaGpsStore.empty();
+        String[] roKeys = readRoKeyTable(in, roKeyCount);
+        return readGpsPointsIntoStore(in, count, roKeys, roByRoKey, pairKeyByRoKey);
+    }
+
+    private static VyhybkaGpsStore readVyhybkaGpsStoreVerbose(DataInputStream in,
+                                                              Map<String, RoEntry> roByRoKey,
+                                                              Map<String, String> pairKeyByRoKey)
+            throws IOException {
+        int count = in.readInt();
+        if (count <= 0) return VyhybkaGpsStore.empty();
+        VyhybkaGpsStore.Builder builder = VyhybkaGpsStore.builder();
+        for (int i = 0; i < count; i++) {
+            String pairKey = in.readUTF();
+            String tudu = in.readUTF();
+            int vyhybka = in.readInt();
+            float lat = in.readFloat();
+            float lon = in.readFloat();
+            String roId = in.readUTF();
+            String poloha = in.readUTF();
+            builder.add(pairKey, tudu, vyhybka, roId, poloha, lat, lon);
+        }
+        return builder.build();
+    }
+
+    private static RoGpsPolohaIndex readPolohaIndexCompact(DataInputStream in) throws IOException {
+        int count = in.readInt();
+        if (count <= 0) {
+            in.readInt();
+            return RoGpsPolohaIndex.empty();
+        }
+        int roKeyCount = in.readInt();
+        if (roKeyCount <= 0) return RoGpsPolohaIndex.empty();
+        String[] roKeys = readRoKeyTable(in, roKeyCount);
+        RoGpsPolohaIndex.Builder builder = RoGpsPolohaIndex.builder();
+        for (int i = 0; i < count; i++) {
+            int roKeyIndex = in.readShort() & 0xFFFF;
+            float lat = in.readFloat();
+            float lon = in.readFloat();
+            if (roKeyIndex < 0 || roKeyIndex >= roKeys.length) continue;
+            builder.addPoint(roKeys[roKeyIndex], lat, lon);
+        }
+        return builder.build();
+    }
+
+    private static String[] readRoKeyTable(DataInputStream in, int roKeyCount) throws IOException {
         String[] roKeys = new String[roKeyCount];
         for (int i = 0; i < roKeyCount; i++) {
             roKeys[i] = in.readUTF();
         }
+        return roKeys;
+    }
+
+    private static VyhybkaGpsStore readGpsPointsIntoStore(DataInputStream in, int count, String[] roKeys,
+                                                        Map<String, RoEntry> roByRoKey,
+                                                        Map<String, String> pairKeyByRoKey)
+            throws IOException {
         VyhybkaGpsStore.Builder builder = VyhybkaGpsStore.builder();
         for (int i = 0; i < count; i++) {
             int roKeyIndex = in.readShort() & 0xFFFF;
