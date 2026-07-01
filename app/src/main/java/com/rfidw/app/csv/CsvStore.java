@@ -20,14 +20,14 @@ import java.util.Set;
  * Výstupní tabulka .CSV.
  *
  * Sloupce:
- *   ID_RFID ; EPC ; TID ; rok ; TUDU ; vyhybka ; cip ; latitude ; longitude ; accuracy_m ; gps_time
+ *   ID_RFID ; EPC ; TID ; rok ; TUDU ; vyhybka ; cip ; POLOHA ; latitude ; longitude ; accuracy_m ; gps_time
  *
  * Klíčem je ID_RFID – při zápisu stejného ID_RFID se daný řádek přepíše.
  */
 public class CsvStore {
 
     public static final String[] HEADER = {
-            "ID_RFID", "EPC", "TID", "rok", "TUDU", "vyhybka", "cip",
+            "ID_RFID", "EPC", "TID", "rok", "TUDU", "vyhybka", "cip", "POLOHA",
             "latitude", "longitude", "accuracy_m", "gps_time"
     };
     private static final String SEP = ";";
@@ -40,6 +40,7 @@ public class CsvStore {
         public String tudu;
         public String vyhybka;
         public String cast;
+        public String poloha;
         public String latitude;
         public String longitude;
         public String accuracyM;
@@ -47,7 +48,7 @@ public class CsvStore {
 
         public String[] toArray() {
             return new String[]{
-                    idRfid, epc, tid, rok, tudu, vyhybka, cast,
+                    idRfid, epc, tid, rok, tudu, vyhybka, cast, poloha,
                     latitude, longitude, accuracyM, gpsTime
             };
         }
@@ -141,12 +142,19 @@ public class CsvStore {
         try (BufferedReader br = new BufferedReader(new FileReader(file))) {
             String line;
             boolean first = true;
+            boolean hasPolohaColumn = false;
             while ((line = br.readLine()) != null) {
                 if (line.trim().isEmpty()) continue;
                 String[] c = line.split(SEP, -1);
                 if (first) {
                     first = false;
                     if (c.length > 0 && c[0].trim().equalsIgnoreCase("ID_RFID")) {
+                        for (String col : c) {
+                            if ("POLOHA".equalsIgnoreCase(col.trim())) {
+                                hasPolohaColumn = true;
+                                break;
+                            }
+                        }
                         continue; // hlavička
                     }
                 }
@@ -158,10 +166,19 @@ public class CsvStore {
                 r.tudu    = get(c, 4);
                 r.vyhybka = get(c, 5);
                 r.cast    = get(c, 6);
-                r.latitude = get(c, 7);
-                r.longitude = get(c, 8);
-                r.accuracyM = get(c, 9);
-                r.gpsTime = get(c, 10);
+                if (hasPolohaColumn) {
+                    r.poloha = get(c, 7);
+                    r.latitude = get(c, 8);
+                    r.longitude = get(c, 9);
+                    r.accuracyM = get(c, 10);
+                    r.gpsTime = get(c, 11);
+                } else {
+                    r.poloha = "";
+                    r.latitude = get(c, 7);
+                    r.longitude = get(c, 8);
+                    r.accuracyM = get(c, 9);
+                    r.gpsTime = get(c, 10);
+                }
                 if (r.idRfid != null && !r.idRfid.isEmpty()) {
                     rows.put(r.idRfid, r);
                     addToCastIndex(r);

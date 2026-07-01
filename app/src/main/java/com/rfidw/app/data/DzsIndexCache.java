@@ -21,6 +21,7 @@ import java.util.zip.GZIPOutputStream;
  * Disková cache paměťových indexů DZS databáze.
  * Platnost indexu je vázaná na velikost a SHA-256 obsahu databáze.
  *
+ * Verze 18 přidává POLOHA k RO indexu a k předpočítaným GPS souřadnicím výhybek.
  * Verze 17 přidává volitelné IOB písmeno k číslu výhybky (COBJEKT).
  * Verze 16 ukládá RO index (RO_ID) včetně rozsahu částí odvozeného z POLOHA
  * (J = 3, C = 4) a předpočítané GPS souřadnice výhybek.
@@ -28,7 +29,7 @@ import java.util.zip.GZIPOutputStream;
 final class DzsIndexCache {
 
     private static final int MAGIC = 0x445A5349; // "DZSI"
-    private static final int VERSION = 17;
+    private static final int VERSION = 18;
     private static final int VERSION_LEGACY_V16 = 16;
     private static final int VERSION_LEGACY_V14 = 14;
     private static final int VERSION_LEGACY_V13 = 13;
@@ -43,14 +44,17 @@ final class DzsIndexCache {
         final String roId;
         final int castMin;
         final int castMax;
+        final String poloha;
 
-        RoEntry(String tudu, int vyhybka, String iob, String roId, int castMin, int castMax) {
+        RoEntry(String tudu, int vyhybka, String iob, String roId, int castMin, int castMax,
+                String poloha) {
             this.tudu = tudu;
             this.vyhybka = vyhybka;
             this.iob = iob != null ? iob : "";
             this.roId = roId;
             this.castMin = castMin;
             this.castMax = castMax;
+            this.poloha = poloha != null ? poloha : "";
         }
     }
 
@@ -153,13 +157,14 @@ final class DzsIndexCache {
                     out.writeUTF(ro.roId);
                     out.writeInt(ro.castMin);
                     out.writeInt(ro.castMax);
+                    out.writeUTF(ro.poloha);
                     written++;
                     if (progress != null && (written % 10_000 == 0 || written == roCount)) {
                         progress.onWritten(written, roCount);
                     }
                 }
             }
-            writeVyhybkaGpsStore(out, vyhybkaGpsStore);
+            writeVyhybkaGpsStore(out, vyhybkaGpsStore, true);
             out.flush();
         } catch (Exception ignored) {
             tmp.delete();
@@ -177,8 +182,7 @@ final class DzsIndexCache {
         try (DataInputStream in = new DataInputStream(new GZIPInputStream(new FileInputStream(indexFile)))) {
             if (in.readInt() != MAGIC) return null;
             int version = in.readInt();
-            if (version != VERSION && version != VERSION_LEGACY_V16
-                    && version != VERSION_LEGACY_V14 && version != VERSION_LEGACY_V13) {
+            if (version != VERSION) {
                 return null;
             }
             long cachedSize = in.readLong();
@@ -193,36 +197,19 @@ final class DzsIndexCache {
                 String pairKey = in.readUTF();
                 String tudu = in.readUTF();
                 int vyhybka = in.readInt();
-                String iob = "";
-                String roId;
-                int castMin = CAST_UNSPECIFIED;
-                int castMax = CAST_UNSPECIFIED;
-                if (version >= VERSION) {
-                    iob = in.readUTF();
-                    roId = in.readUTF();
-                    castMin = in.readInt();
-                    castMax = in.readInt();
-                } else if (version >= VERSION_LEGACY_V14) {
-                    roId = in.readUTF();
-                    castMin = in.readInt();
-                    castMax = in.readInt();
-                } else {
-                    roId = in.readUTF();
-                    in.readDouble(); // legacy midKm
-                    castMin = in.readInt();
-                    castMax = in.readInt();
-                }
+                String iob = in.readUTF();
+                String roId = in.readUTF();
+                int castMin = in.readInt();
+                int castMax = in.readInt();
+                String poloha = in.readUTF();
                 if (roId == null || roId.isEmpty()) continue;
                 hasRoId = true;
-                RoEntry entry = new RoEntry(tudu, vyhybka, iob, roId, castMin, castMax);
+                RoEntry entry = new RoEntry(tudu, vyhybka, iob, roId, castMin, castMax, poloha);
                 ro.computeIfAbsent(pairKey, k -> new ArrayList<>()).add(entry);
             }
             if (!hasRoId) return null;
 
-            VyhybkaGpsStore vyhybkaGpsStore = VyhybkaGpsStore.empty();
-            if (version == VERSION || version == VERSION_LEGACY_V16 || version == VERSION_LEGACY_V13) {
-                vyhybkaGpsStore = readVyhybkaGpsStore(in);
-            }
+            VyhybkaGpsStore vyhybkaGpsStore = readVyhybkaGpsStore(in, true);
             return new LoadedIndex(ro, vyhybkaGpsStore);
         } catch (OutOfMemoryError e) {
             throw e;
@@ -231,7 +218,8 @@ final class DzsIndexCache {
         }
     }
 
-    private static void writeVyhybkaGpsStore(DataOutputStream out, VyhybkaGpsStore store) throws IOException {
+    private static void writeVyhybkaGpsStore(DataOutputStream out, VyhybkaGpsStore store,
+                                             boolean withPoloha) throws IOException {
         if (store == null || store.isEmpty()) {
             out.writeInt(0);
             return;
@@ -243,10 +231,15 @@ final class DzsIndexCache {
             out.writeInt(store.vyhybkaAt(i));
             out.writeFloat((float) store.latitudeAt(i));
             out.writeFloat((float) store.longitudeAt(i));
+            if (withPoloha) {
+                out.writeUTF(store.roIdAt(i));
+                out.writeUTF(store.polohaAt(i));
+            }
         }
     }
 
-    private static VyhybkaGpsStore readVyhybkaGpsStore(DataInputStream in) throws IOException {
+    private static VyhybkaGpsStore readVyhybkaGpsStore(DataInputStream in, boolean withPoloha)
+            throws IOException {
         int count = in.readInt();
         if (count <= 0) return VyhybkaGpsStore.empty();
         VyhybkaGpsStore.Builder builder = VyhybkaGpsStore.builder();
@@ -256,7 +249,13 @@ final class DzsIndexCache {
             int vyhybka = in.readInt();
             float lat = in.readFloat();
             float lon = in.readFloat();
-            builder.add(pairKey, tudu, vyhybka, lat, lon);
+            String roId = "";
+            String poloha = "";
+            if (withPoloha) {
+                roId = in.readUTF();
+                poloha = in.readUTF();
+            }
+            builder.add(pairKey, tudu, vyhybka, roId, poloha, lat, lon);
         }
         return builder.build();
     }

@@ -12,13 +12,18 @@ final class VyhybkaGpsStore {
         private final ArrayList<String> pairKeys = new ArrayList<>();
         private final ArrayList<String> tuduCodes = new ArrayList<>();
         private final ArrayList<Integer> vyhybkaNumbers = new ArrayList<>();
+        private final ArrayList<String> roIds = new ArrayList<>();
+        private final ArrayList<String> polohas = new ArrayList<>();
         private final ArrayList<Float> latitudes = new ArrayList<>();
         private final ArrayList<Float> longitudes = new ArrayList<>();
 
-        void add(String pairKey, String tudu, int vyhybka, double latitude, double longitude) {
+        void add(String pairKey, String tudu, int vyhybka, String roId, String poloha,
+                 double latitude, double longitude) {
             pairKeys.add(pairKey);
             tuduCodes.add(tudu);
             vyhybkaNumbers.add(vyhybka);
+            roIds.add(roId != null ? roId : "");
+            polohas.add(poloha != null ? poloha : "");
             latitudes.add((float) latitude);
             longitudes.add((float) longitude);
         }
@@ -35,6 +40,8 @@ final class VyhybkaGpsStore {
                     pairKeys.toArray(new String[0]),
                     tuduCodes.toArray(new String[0]),
                     toIntArray(vyhybkaNumbers),
+                    roIds.toArray(new String[0]),
+                    polohas.toArray(new String[0]),
                     toFloatArray(latitudes),
                     toFloatArray(longitudes));
         }
@@ -59,14 +66,19 @@ final class VyhybkaGpsStore {
     private final String[] pairKeys;
     private final String[] tuduCodes;
     private final int[] vyhybkaNumbers;
+    private final String[] roIds;
+    private final String[] polohas;
     private final float[] latitudes;
     private final float[] longitudes;
 
     private VyhybkaGpsStore(String[] pairKeys, String[] tuduCodes, int[] vyhybkaNumbers,
+                              String[] roIds, String[] polohas,
                               float[] latitudes, float[] longitudes) {
         this.pairKeys = pairKeys;
         this.tuduCodes = tuduCodes;
         this.vyhybkaNumbers = vyhybkaNumbers;
+        this.roIds = roIds;
+        this.polohas = polohas;
         this.latitudes = latitudes;
         this.longitudes = longitudes;
     }
@@ -77,7 +89,7 @@ final class VyhybkaGpsStore {
 
     static VyhybkaGpsStore empty() {
         return new VyhybkaGpsStore(new String[0], new String[0], new int[0],
-                new float[0], new float[0]);
+                new String[0], new String[0], new float[0], new float[0]);
     }
 
     int size() {
@@ -98,6 +110,14 @@ final class VyhybkaGpsStore {
 
     int vyhybkaAt(int index) {
         return vyhybkaNumbers[index];
+    }
+
+    String roIdAt(int index) {
+        return roIds[index];
+    }
+
+    String polohaAt(int index) {
+        return polohas[index];
     }
 
     double latitudeAt(int index) {
