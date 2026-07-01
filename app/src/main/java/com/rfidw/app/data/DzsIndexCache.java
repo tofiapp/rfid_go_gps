@@ -15,7 +15,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.zip.Deflater;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
@@ -147,8 +146,8 @@ final class DzsIndexCache {
         if (!cacheDir.exists() && !cacheDir.mkdirs()) return false;
         File cacheFile = cacheFileFor(contentHash, cacheDir);
         File tmp = new File(cacheDir, cacheFile.getName() + ".tmp");
-        try (DataOutputStream out = new DataOutputStream(new GZIPOutputStream(
-                new FileOutputStream(tmp), new Deflater(Deflater.BEST_SPEED, true)))) {
+        try (DataOutputStream out = new DataOutputStream(
+                new GZIPOutputStream(new FileOutputStream(tmp)))) {
             out.writeInt(MAGIC);
             out.writeInt(VERSION);
             out.writeLong(dbFile.length());
