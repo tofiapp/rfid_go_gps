@@ -28,7 +28,7 @@ import java.util.function.IntConsumer;
  * SQLite zdroj TUDU / výhybek z tabulek DZS_SUPERTRA_GPS_KM a DZS_SUPER_RO_TPI.
  *
  * Při otevření se indexuje tabulka výhybek (RO) a předpočítají se GPS souřadnice
- * výhybek (všechny km body per RO_ID + krajní body úseku). Výsledek se ukládá do diskové cache v19.
+ * výhybek (všechny km body per RO_ID + krajní body úseku). Výsledek se ukládá do diskové cache v20.
  * Vyhledávání TUDU podle GPS pak probíhá nad tisíci předpočítaných bodů v paměti,
  * ne nad celou km tabulkou za běhu.
  */
@@ -511,9 +511,10 @@ public class DzsDatabase implements Closeable {
                                           OpenProgressListener listener) {
         return DzsIndexCache.save(dbFile, contentHash, new File(cacheDir, "dzs_index"),
                 toRoCache(roByPairKey), vyhybkaGpsStore, roGpsEndpoints,
-                (written, total) -> {
-                    int pct = 85 + (int) ((written * 10L) / Math.max(total, 1));
-                    report(listener, cacheProgressPhase(written), Math.min(pct, 95));
+                (phase, written, total) -> {
+                    int pct = 85 + (int) ((written * 14L) / Math.max(total, 1));
+                    report(listener, cacheProgressPhase(phase, written, total),
+                            Math.min(pct, 99));
                 });
     }
 
@@ -1204,8 +1205,9 @@ public class DzsDatabase implements Closeable {
         return new RoIndexBuildResult(byPairKey, byRoKey);
     }
 
-    private static String cacheProgressPhase(int written) {
-        return String.format(Locale.ROOT, "Ukládám cache (%s)", formatCount(written));
+    private static String cacheProgressPhase(String phase, int written, int total) {
+        return String.format(Locale.ROOT, "Ukládám cache – %s (%s / %s)",
+                phase, formatCount(written), formatCount(total));
     }
 
     private static String formatCount(int count) {
