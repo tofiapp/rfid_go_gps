@@ -4,6 +4,16 @@
     <string name="btn_write_pwd">ZAPSAT HESLO</string>
     <string name="btn_lock">ZAMKNOUT</string>
     <string name="btn_delete_last_csv">Vymazat poslední záznam</string>
+    <string name="btn_export_csv">Sdílet CSV</string>
+    <string name="btn_export_sqlite">Sdílet SQLite</string>
+    <string name="btn_save_downloads">Uložit do Stažených</string>
+    <string name="export_sqlite_chooser">Sdílet SQLite</string>
+    <string name="save_downloads_empty">Není co ukládat – výstup je prázdný</string>
+    <string name="save_downloads_one">Uloženo do Stažených: %1$s</string>
+    <string name="save_downloads_many">Uloženo do Stažených:\n%1$s</string>
+    <string name="save_downloads_error">Uložení selhalo: %1$s</string>
+    <string name="save_downloads_hint">Soubory: Stažené soubory → RFID Go GPS (viditelné v Souborech i přes USB)</string>
+    <string name="cb_auto_csv_sqlite">Po zápisu EPC automaticky uložit do CSV a SQLite</string>
     <string name="btn_delete_short">Smazat</string>
     <string name="lock_code_value">008020</string>
     <string name="workflow_sheet_title">Pokročilé</string>

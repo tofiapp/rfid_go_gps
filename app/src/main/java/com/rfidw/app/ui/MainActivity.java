@@ -54,8 +54,10 @@ import com.rfidw.app.R;
 import com.rfidw.app.auth.UserSession;
 import com.rfidw.app.csv.CsvStore;
 import com.rfidw.app.data.DzsDatabase;
+import com.rfidw.app.data.RfidResultStore;
 import com.rfidw.app.data.Tudu;
 import com.rfidw.app.epc.EpcModel;
+import com.rfidw.app.export.PublicFileExport;
 import com.rfidw.app.location.LocationCache;
 import com.rfidw.app.rfid.UhfManager;
 
@@ -80,6 +82,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
     private static final int REQUEST_LOCATION_PERMISSION = 1001;
     private static final int REQUEST_STORAGE_PERMISSION = 1002;
+    private static final int REQUEST_SAVE_DOWNLOADS_PERMISSION = 1003;
     private static final String DEFAULT_DB_NAME = "DZS_PASPORT_TPI.sqlite";
 
     /** Výsledek automatického vyhledání DB ve Stažených / úložišti. */
@@ -117,6 +120,10 @@ public class MainActivity extends AppCompatActivity {
     private Tudu.Vyhybka currentVyhybka;
     /** POLOHA z nejbližšího RO_ID pro aktuální výhybku (GPS režim, 3částové výhybky). */
     private String matchedPoloha = "";
+    /** DZS klíče z GPS výběru – ukládají se do výstupní SQLite. */
+    private String currentSuperZId = "";
+    private String currentSuperDId = "";
+    private String currentRoId = "";
     private DzsDatabase dzsDatabase;
     /** Zruší zastaralé UI callbacky po novém načtení nebo zničení aktivity. */
     private volatile long dbLoadGeneration;
@@ -146,10 +153,12 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREF_DB_URI = "dbSourceUri";
 
     private CsvStore csvStore;
+    private RfidResultStore resultStore;
     private CsvAdapter csvAdapter;
     private SharedPreferences prefs;
 
     private boolean pendingAutoLoadAfterStorage;
+    private boolean pendingSaveToDownloads;
     private boolean step1Done, step2Done, step3Done, step2Failed;
     private boolean workflowRunning, chainWorkflow, scanDoneAwaitingConfirm, lastRecordUnlocked;
     /** CSV obnoveno dřív než zdrojový soubor – posun na další čip/výhybku až po načtení TUDU. */
@@ -161,7 +170,7 @@ public class MainActivity extends AppCompatActivity {
     // view reference
     private TextView tvReaderStatus, tvGpsStatus, tvUserId, tvEpcPreview, tvEpcValid, tvSourceFile,
             tvCard1DbProgress,
-            tvWriteResult, tvCsvPath, tvPwdWriteResult, tvLockResult,
+            tvWriteResult, tvCsvPath, tvResultDbPath, tvPwdWriteResult, tvLockResult,
             tvSummaryTudu, tvSummaryVyhybka, tvSummaryCast,
             tvCastHintAction, tvCastHintPart,
             tvScanDoneVyhybka, tvScanDoneCast,
@@ -265,6 +274,7 @@ public class MainActivity extends AppCompatActivity {
         card1DbProgressBar = findViewById(R.id.card1DbProgressBar);
         tvWriteResult = findViewById(R.id.tvWriteResult);
         tvCsvPath = findViewById(R.id.tvCsvPath);
+        tvResultDbPath = findViewById(R.id.tvResultDbPath);
         tvPwdWriteResult = findViewById(R.id.tvPwdWriteResult);
         tvLockResult = findViewById(R.id.tvLockResult);
         tvSummaryTudu = findViewById(R.id.tvSummaryTudu);
@@ -1545,6 +1555,18 @@ public class MainActivity extends AppCompatActivity {
             }
             return;
         }
+        if (requestCode == REQUEST_SAVE_DOWNLOADS_PERMISSION) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                if (pendingSaveToDownloads) {
+                    pendingSaveToDownloads = false;
+                    doSaveOutputsToDownloads();
+                }
+            } else if (pendingSaveToDownloads) {
+                pendingSaveToDownloads = false;
+                toast(getString(R.string.save_downloads_error, "chybí oprávnění k zápisu"));
+            }
+            return;
+        }
         if (requestCode != REQUEST_STORAGE_PERMISSION) return;
         if (!pendingAutoLoadAfterStorage) return;
         pendingAutoLoadAfterStorage = false;
@@ -1675,11 +1697,15 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ---------- CSV ----------
+    // ---------- CSV / SQLite výstup ----------
 
     private void setupCsv() {
         File out = new File(getExternalFilesDir(null), "rfid_go_gps_output.csv");
+        File dbOut = new File(getExternalFilesDir(null), "rfid_vysledky.sqlite");
         tvCsvPath.setText(out.getAbsolutePath());
+        if (tvResultDbPath != null) {
+            tvResultDbPath.setText(dbOut.getAbsolutePath());
+        }
 
         csvAdapter = new CsvAdapter();
         RecyclerView rv = findViewById(R.id.rvCsv);
@@ -1690,8 +1716,13 @@ public class MainActivity extends AppCompatActivity {
 
         io.execute(() -> {
             CsvStore loaded = new CsvStore(out);
+            RfidResultStore store = RfidResultStore.open(dbOut);
+            if (store.size() == 0 && loaded.size() > 0) {
+                store.importFromCsvRows(loaded.getRows());
+            }
             ui.post(() -> {
                 csvStore = loaded;
+                resultStore = store;
                 refreshCsvTable();
                 if (csvStore.size() > 0) {
                     restoreStateFromLoadedCsv();
@@ -1760,6 +1791,8 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.btnWritePwd).setOnClickListener(v -> doWritePassword());
         findViewById(R.id.btnLock).setOnClickListener(v -> doLock());
         findViewById(R.id.btnExportCsv).setOnClickListener(v -> exportCsv());
+        findViewById(R.id.btnExportSqlite).setOnClickListener(v -> exportSqlite());
+        findViewById(R.id.btnSaveToDownloads).setOnClickListener(v -> saveOutputsToDownloads());
         findViewById(R.id.btnClearCsv).setOnClickListener(v -> showDeleteConfirmDialog());
         findViewById(R.id.btnDeleteLastRecord).setOnClickListener(v -> showDeleteConfirmDialog());
         findViewById(R.id.btnScanDoneContinue).setOnClickListener(v -> onScanDoneContinue());
@@ -2501,6 +2534,8 @@ public class MainActivity extends AppCompatActivity {
         pendingAdvanceFromCsv = false;
         boolean tuduChanged = epc.tudu == null || !match.tudu.equals(epc.tudu);
 
+        setDzsContextFromMatch(match);
+
         Tudu tudu = null;
         for (Tudu t : tuduList) {
             if (t.code.equals(match.tudu)) {
@@ -2758,6 +2793,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void selectTudu(Tudu t) {
         pendingAdvanceFromCsv = false;
+        clearDzsContext();
         currentTudu = t;
         epc.tudu = t.code;
         if (!t.vyhybky.isEmpty()) {
@@ -2772,6 +2808,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void selectVyhybka(Tudu.Vyhybka v, boolean resetCast) {
+        if (!gpsAutoSelection) {
+            clearDzsContext();
+        }
         currentVyhybka = v;
         epc.vyhybka = v.cislo;
         if (resetCast) {
@@ -2828,6 +2867,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         persistCsvAsync();
+        removeResultRowAsync(last.idRfid);
         refreshCsvTable();
         restoreSelectionFromRow(last);
         updateLastRecordPreview();
@@ -3078,13 +3118,76 @@ public class MainActivity extends AppCompatActivity {
             row.userId = UserSession.getUserId(prefs);
             csvStore.upsert(row);
             persistCsvAsync();
+            saveRowToResultStore(row);
             refreshCsvTable();
         } catch (Exception e) {
             toast("CSV: " + e.getMessage());
         }
     }
 
-    /** Po dokončení zápisu tagu (EPC samostatně, nebo celý řetězec EPC→heslo→lock). */
+    private void setDzsContextFromMatch(DzsDatabase.GpsMatch match) {
+        if (match == null) {
+            clearDzsContext();
+            return;
+        }
+        currentSuperZId = match.superZId != null ? match.superZId : "";
+        currentSuperDId = match.superDId != null ? match.superDId : "";
+        currentRoId = match.roId != null ? match.roId : "";
+    }
+
+    private void clearDzsContext() {
+        currentSuperZId = "";
+        currentSuperDId = "";
+        currentRoId = "";
+    }
+
+    private void saveRowToResultStore(CsvStore.Row csvRow) {
+        if (resultStore == null || csvRow == null) return;
+        RfidResultStore.Row row = new RfidResultStore.Row();
+        row.idRfid = csvRow.idRfid;
+        row.epc = csvRow.epc;
+        row.tid = csvRow.tid;
+        row.rok = csvRow.rok;
+        row.tudu = csvRow.tudu;
+        row.vyhybka = csvRow.vyhybka;
+        row.cast = csvRow.cast;
+        row.poloha = csvRow.poloha;
+        row.latitude = csvRow.latitude;
+        row.longitude = csvRow.longitude;
+        row.accuracyM = csvRow.accuracyM;
+        row.gpsTime = csvRow.gpsTime;
+        row.userId = csvRow.userId;
+        row.superZId = currentSuperZId;
+        row.superDId = currentSuperDId;
+        row.roId = currentRoId;
+        if (row.roId.isEmpty() && dzsDatabase != null && csvRow.tudu != null && !csvRow.tudu.isEmpty()) {
+            DzsDatabase.RoKeys keys = dzsDatabase.findRoKeys(csvRow.tudu, parseInt(csvRow.vyhybka, 0));
+            if (!keys.isEmpty()) {
+                row.superZId = keys.superZId;
+                row.superDId = keys.superDId;
+                row.roId = keys.roId;
+            }
+        }
+        io.execute(() -> {
+            try {
+                resultStore.upsert(row);
+            } catch (Exception e) {
+                ui.post(() -> toast("SQLite: " + e.getMessage()));
+            }
+        });
+    }
+
+    private void removeResultRowAsync(String idRfid) {
+        if (resultStore == null || idRfid == null || idRfid.isEmpty()) return;
+        io.execute(() -> {
+            try {
+                resultStore.deleteByIdRfid(idRfid);
+            } catch (Exception e) {
+                ui.post(() -> toast("SQLite: " + e.getMessage()));
+            }
+        });
+    }
+
     private void onTagCycleComplete() {
         maybeClearGpsVyhybkaLock();
         epc.idRfid += 1;
@@ -3330,6 +3433,81 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void exportSqlite() {
+        if (resultStore == null) {
+            toast("Databáze se ještě načítá");
+            return;
+        }
+        try {
+            File f = resultStore.getFile();
+            if (!f.exists() || resultStore.size() == 0) {
+                toast("Databáze je prázdná");
+                return;
+            }
+            Uri uri = FileProvider.getUriForFile(this,
+                    getPackageName() + ".fileprovider", f);
+            Intent share = new Intent(Intent.ACTION_SEND);
+            share.setType("application/x-sqlite3");
+            share.putExtra(Intent.EXTRA_STREAM, uri);
+            share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(share, getString(R.string.export_sqlite_chooser)));
+        } catch (Exception e) {
+            toast("Export SQLite selhal: " + e.getMessage());
+        }
+    }
+
+    private void saveOutputsToDownloads() {
+        if (csvStore == null && resultStore == null) {
+            toast("Výstup se ještě načítá");
+            return;
+        }
+        if (needsWriteStoragePermissionForDownloads()) {
+            pendingSaveToDownloads = true;
+            ActivityCompat.requestPermissions(
+                    this,
+                    new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                    REQUEST_SAVE_DOWNLOADS_PERMISSION);
+            return;
+        }
+        doSaveOutputsToDownloads();
+    }
+
+    private boolean needsWriteStoragePermissionForDownloads() {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                && ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void doSaveOutputsToDownloads() {
+        io.execute(() -> {
+            List<String> saved = new ArrayList<>();
+            try {
+                if (csvStore != null && csvStore.size() > 0) {
+                    csvStore.persist();
+                    File csv = csvStore.getFile();
+                    saved.add(PublicFileExport.copyToDownloads(
+                            this, csv, csv.getName(), "text/csv"));
+                }
+                if (resultStore != null && resultStore.size() > 0) {
+                    resultStore.prepareForFileCopy();
+                    File db = resultStore.getFile();
+                    saved.add(PublicFileExport.copyToDownloads(
+                            this, db, db.getName(), "application/x-sqlite3"));
+                }
+                if (saved.isEmpty()) {
+                    ui.post(() -> toast(getString(R.string.save_downloads_empty)));
+                    return;
+                }
+                final String message = saved.size() == 1
+                        ? getString(R.string.save_downloads_one, saved.get(0))
+                        : getString(R.string.save_downloads_many, TextUtils.join("\n", saved));
+                ui.post(() -> toast(message));
+            } catch (Exception e) {
+                ui.post(() -> toast(getString(R.string.save_downloads_error, e.getMessage())));
+            }
+        });
+    }
+
     // ---------- čtečka ----------
 
     private void initReaderAsync() {
@@ -3400,6 +3578,13 @@ public class MainActivity extends AppCompatActivity {
         cancelGpsLookupTimeout();
         if (locationCache != null) locationCache.stop();
         closeDzsDatabase();
+        if (resultStore != null) {
+            try {
+                resultStore.close();
+            } catch (Exception ignored) {
+            }
+            resultStore = null;
+        }
         super.onDestroy();
         io.execute(uhf::free);
         io.shutdown();
