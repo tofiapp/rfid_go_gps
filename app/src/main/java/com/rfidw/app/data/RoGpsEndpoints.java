@@ -25,30 +25,42 @@ final class RoGpsEndpoints {
     }
 
     static final class Builder {
-        private static final class Tracker {
+        private static final class ExtremesTracker {
             double firstLatitude;
             double firstLongitude;
             double lastLatitude;
             double lastLongitude;
+            double minKey = Double.POSITIVE_INFINITY;
+            double maxKey = Double.NEGATIVE_INFINITY;
             boolean hasPoint;
 
-            void add(double latitude, double longitude) {
+            void consider(double latitude, double longitude, double sortKey) {
                 if (!hasPoint) {
+                    hasPoint = true;
+                    minKey = maxKey = sortKey;
                     firstLatitude = lastLatitude = latitude;
                     firstLongitude = lastLongitude = longitude;
-                    hasPoint = true;
-                } else {
+                    return;
+                }
+                if (sortKey < minKey) {
+                    minKey = sortKey;
+                    firstLatitude = latitude;
+                    firstLongitude = longitude;
+                }
+                if (sortKey > maxKey) {
+                    maxKey = sortKey;
                     lastLatitude = latitude;
                     lastLongitude = longitude;
                 }
             }
         }
 
-        private final Map<String, Tracker> trackers = new HashMap<>();
+        private final Map<String, ExtremesTracker> trackers = new HashMap<>();
 
-        void addPoint(String roKey, double latitude, double longitude) {
+        void addPoint(String roKey, double latitude, double longitude, double sortKey) {
             if (roKey == null || roKey.isEmpty()) return;
-            trackers.computeIfAbsent(roKey, k -> new Tracker()).add(latitude, longitude);
+            trackers.computeIfAbsent(roKey, k -> new ExtremesTracker())
+                    .consider(latitude, longitude, sortKey);
         }
 
         RoGpsEndpoints build() {
@@ -56,8 +68,8 @@ final class RoGpsEndpoints {
                 return empty();
             }
             Map<String, Endpoint> out = new HashMap<>(trackers.size());
-            for (Map.Entry<String, Tracker> e : trackers.entrySet()) {
-                Tracker t = e.getValue();
+            for (Map.Entry<String, ExtremesTracker> e : trackers.entrySet()) {
+                ExtremesTracker t = e.getValue();
                 if (!t.hasPoint) continue;
                 out.put(e.getKey(), new Endpoint(
                         t.firstLatitude, t.firstLongitude, t.lastLatitude, t.lastLongitude));

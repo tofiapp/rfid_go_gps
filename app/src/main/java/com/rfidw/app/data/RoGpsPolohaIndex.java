@@ -1,6 +1,7 @@
 package com.rfidw.app.data;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -11,11 +12,14 @@ import java.util.Map;
 final class RoGpsPolohaIndex {
 
     static final class Builder {
+        private static final int INITIAL_CAPACITY = 4096;
+
         private final ArrayList<String> roKeyTable = new ArrayList<>();
         private final HashMap<String, Integer> roKeyToIndex = new HashMap<>();
-        private final ArrayList<Integer> roKeyIndices = new ArrayList<>();
-        private final ArrayList<Float> latitudes = new ArrayList<>();
-        private final ArrayList<Float> longitudes = new ArrayList<>();
+        private int[] roKeyIndices = new int[INITIAL_CAPACITY];
+        private float[] latitudes = new float[INITIAL_CAPACITY];
+        private float[] longitudes = new float[INITIAL_CAPACITY];
+        private int size;
 
         void addPoint(String roKey, double latitude, double longitude) {
             if (roKey == null || roKey.isEmpty()) return;
@@ -25,40 +29,31 @@ final class RoGpsPolohaIndex {
                 roKeyToIndex.put(roKey, index);
                 roKeyTable.add(roKey);
             }
-            roKeyIndices.add(index);
-            latitudes.add((float) latitude);
-            longitudes.add((float) longitude);
+            if (size == roKeyIndices.length) {
+                int next = size * 2;
+                roKeyIndices = Arrays.copyOf(roKeyIndices, next);
+                latitudes = Arrays.copyOf(latitudes, next);
+                longitudes = Arrays.copyOf(longitudes, next);
+            }
+            roKeyIndices[size] = index;
+            latitudes[size] = (float) latitude;
+            longitudes[size] = (float) longitude;
+            size++;
         }
 
         int size() {
-            return roKeyIndices.size();
+            return size;
         }
 
         RoGpsPolohaIndex build() {
-            if (roKeyIndices.isEmpty()) {
+            if (size == 0) {
                 return empty();
             }
             return new RoGpsPolohaIndex(
                     roKeyTable.toArray(new String[0]),
-                    toIntArray(roKeyIndices),
-                    toFloatArray(latitudes),
-                    toFloatArray(longitudes));
-        }
-
-        private static int[] toIntArray(ArrayList<Integer> list) {
-            int[] out = new int[list.size()];
-            for (int i = 0; i < out.length; i++) {
-                out[i] = list.get(i);
-            }
-            return out;
-        }
-
-        private static float[] toFloatArray(ArrayList<Float> list) {
-            float[] out = new float[list.size()];
-            for (int i = 0; i < out.length; i++) {
-                out[i] = list.get(i);
-            }
-            return out;
+                    Arrays.copyOf(roKeyIndices, size),
+                    Arrays.copyOf(latitudes, size),
+                    Arrays.copyOf(longitudes, size));
         }
     }
 

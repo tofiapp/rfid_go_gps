@@ -1089,6 +1089,27 @@ public class DzsDatabase implements Closeable {
         }
     }
 
+    private static final class ReprCandidate {
+        final String pairKey;
+        final String tudu;
+        final int vyhybka;
+        final String roId;
+        final String poloha;
+        final double latitude;
+        final double longitude;
+
+        ReprCandidate(String pairKey, String tudu, int vyhybka, String roId, String poloha,
+                      double latitude, double longitude) {
+            this.pairKey = pairKey;
+            this.tudu = tudu;
+            this.vyhybka = vyhybka;
+            this.roId = roId;
+            this.poloha = poloha;
+            this.latitude = latitude;
+            this.longitude = longitude;
+        }
+    }
+
     private VyhybkaGpsBuildResult buildVyhybkaGpsStoreBatch(Map<String, RoIndexEntry> roByRoKey,
                                                             OpenProgressListener listener) {
         if (!populateRoGpsLookupTempTable(roByRoKey)) {
@@ -1096,24 +1117,26 @@ public class DzsDatabase implements Closeable {
                     RoGpsEndpoints.empty());
         }
         String roIdExpr = "TRIM(CAST(" + gpsColumns.roId + " AS TEXT))";
-        String orderBy = gpsColumns.kmExt != null
-                ? "gps." + gpsColumns.kmExt
-                : "gps." + gpsColumns.latitude + ", gps." + gpsColumns.longitude;
-        String sql = "SELECT ro.tudu, ro.vyhybka, gps." + gpsColumns.latitude + ", gps."
-                + gpsColumns.longitude + ", ro.super_z_id, ro.super_d_id, ro.ro_id"
-                + " FROM " + TEMP_RO_GPS_LOOKUP + " ro"
-                + " INNER JOIN " + TABLE_GPS_KM + " gps"
-                + " ON gps." + gpsColumns.superZId + " = ro.super_z_id"
-                + " AND gps." + gpsColumns.superDId + " = ro.super_d_id"
-                + " AND " + roIdExpr + " = ro.ro_id"
-                + " ORDER BY ro.super_z_id, ro.super_d_id, ro.ro_id, " + orderBy;
+        boolean hasKmExt = gpsColumns.kmExt != null;
+        StringBuilder sql = new StringBuilder("SELECT ro.tudu, ro.vyhybka, gps.")
+                .append(gpsColumns.latitude).append(", gps.").append(gpsColumns.longitude)
+                .append(", ro.super_z_id, ro.super_d_id, ro.ro_id");
+        if (hasKmExt) {
+            sql.append(", gps.").append(gpsColumns.kmExt);
+        }
+        sql.append(" FROM ").append(TEMP_RO_GPS_LOOKUP).append(" ro")
+                .append(" INNER JOIN ").append(TABLE_GPS_KM).append(" gps")
+                .append(" ON gps.").append(gpsColumns.superZId).append(" = ro.super_z_id")
+                .append(" AND gps.").append(gpsColumns.superDId).append(" = ro.super_d_id")
+                .append(" AND ").append(roIdExpr).append(" = ro.ro_id");
 
         VyhybkaGpsStore.Builder reprBuilder = VyhybkaGpsStore.builder();
         RoGpsPolohaIndex.Builder polohaBuilder = RoGpsPolohaIndex.builder();
         RoGpsEndpoints.Builder endpointBuilder = RoGpsEndpoints.builder();
-        HashSet<String> reprSeen = new HashSet<>();
+        Map<String, ReprCandidate> reprByRoKey = new HashMap<>();
+        Map<String, Double> reprMinKey = new HashMap<>();
         int matched = 0;
-        try (Cursor c = db.rawQuery(sql, null)) {
+        try (Cursor c = db.rawQuery(sql.toString(), null)) {
             while (c.moveToNext()) {
                 String tudu = c.getString(0);
                 Integer vyhybka = readInt(c, 1);
@@ -1124,28 +1147,41 @@ public class DzsDatabase implements Closeable {
                 String roId = readId(c, 6);
                 if (tudu == null || vyhybka == null || lat == null || lon == null) continue;
                 if (superZId == null || superDId == null || roId == null) continue;
-                RoIndexEntry ro = roByRoKey.get(roKey(superZId, superDId, roId));
-                String poloha = ro != null ? ro.poloha : "";
+                double sortKey = hasKmExt ? sortKey(readDouble(c, 7), lat) : lat;
                 String rk = roKey(superZId, superDId, roId);
                 String pk = pairKey(superZId, superDId);
+                RoIndexEntry ro = roByRoKey.get(rk);
+                String poloha = ro != null ? ro.poloha : "";
                 polohaBuilder.addPoint(rk, lat, lon);
-                endpointBuilder.addPoint(rk, lat, lon);
-                if (reprSeen.add(rk)) {
-                    reprBuilder.add(pk, tudu, vyhybka, roId, poloha, lat, lon);
+                endpointBuilder.addPoint(rk, lat, lon, sortKey);
+                Double existingMin = reprMinKey.get(rk);
+                if (existingMin == null || sortKey < existingMin) {
+                    reprMinKey.put(rk, sortKey);
+                    reprByRoKey.put(rk, new ReprCandidate(pk, tudu, vyhybka, roId, poloha, lat, lon));
                 }
                 matched++;
+                if (listener != null && matched % 100_000 == 0) {
+                    int pct = 50 + (int) ((matched * 30L) / Math.max(matched + 50_000L, 1));
+                    report(listener, String.format(Locale.ROOT,
+                            "Indexuji GPS body (%s)", formatCount(matched)),
+                            Math.min(pct, 79));
+                }
             }
         } catch (Exception ignored) {
             return new VyhybkaGpsBuildResult(VyhybkaGpsStore.empty(), RoGpsPolohaIndex.empty(),
                     RoGpsEndpoints.empty());
+        }
+        for (ReprCandidate repr : reprByRoKey.values()) {
+            reprBuilder.add(repr.pairKey, repr.tudu, repr.vyhybka, repr.roId, repr.poloha,
+                    repr.latitude, repr.longitude);
         }
         if (matched == 0) {
             report(listener, "Varování: žádné GPS souřadnice výhybek", 80);
         } else {
             RoGpsEndpoints builtEndpoints = endpointBuilder.build();
             report(listener, String.format(Locale.ROOT,
-                    "Indexuji souřadnice výhybek (%d bodů, %d RO_ID)",
-                    matched, builtEndpoints.size()), 80);
+                    "Indexuji souřadnice výhybek (%s bodů, %d RO_ID)",
+                    formatCount(matched), builtEndpoints.size()), 80);
             return new VyhybkaGpsBuildResult(reprBuilder.build(), polohaBuilder.build(),
                     builtEndpoints);
         }
@@ -1153,20 +1189,23 @@ public class DzsDatabase implements Closeable {
                 endpointBuilder.build());
     }
 
+    private static double sortKey(Double kmExt, double latitudeFallback) {
+        return kmExt != null ? kmExt : latitudeFallback;
+    }
+
     private VyhybkaGpsBuildResult buildVyhybkaGpsStorePerEntry(Map<String, RoIndexEntry> roByRoKey,
                                                               OpenProgressListener listener) {
         VyhybkaGpsStore.Builder reprBuilder = VyhybkaGpsStore.builder();
         RoGpsPolohaIndex.Builder polohaBuilder = RoGpsPolohaIndex.builder();
         RoGpsEndpoints.Builder endpointBuilder = RoGpsEndpoints.builder();
-        HashSet<String> reprSeen = new HashSet<>();
-        String orderBy = gpsColumns.kmExt != null
-                ? gpsColumns.kmExt
-                : gpsColumns.latitude + ", " + gpsColumns.longitude;
+        Map<String, ReprCandidate> reprByRoKey = new HashMap<>();
+        Map<String, Double> reprMinKey = new HashMap<>();
+        boolean hasKmExt = gpsColumns.kmExt != null;
         String sql = "SELECT " + gpsColumns.latitude + ", " + gpsColumns.longitude
+                + (hasKmExt ? ", " + gpsColumns.kmExt : "")
                 + " FROM " + TABLE_GPS_KM
                 + " WHERE " + gpsColumns.superZId + " = ? AND " + gpsColumns.superDId + " = ?"
-                + " AND " + gpsColumns.roId + " = ?"
-                + " ORDER BY " + orderBy;
+                + " AND " + gpsColumns.roId + " = ?";
         int total = roByRoKey.size();
         int done = 0;
         int matched = 0;
@@ -1179,12 +1218,15 @@ public class DzsDatabase implements Closeable {
                     Double lat = readDouble(c, 0);
                     Double lon = readDouble(c, 1);
                     if (lat == null || lon == null) continue;
+                    double sortKey = hasKmExt ? sortKey(readDouble(c, 2), lat) : lat;
                     String rk = e.getKey();
                     polohaBuilder.addPoint(rk, lat, lon);
-                    endpointBuilder.addPoint(rk, lat, lon);
-                    if (reprSeen.add(rk)) {
-                        reprBuilder.add(pairKey(ids[0], ids[1]), ro.tudu, ro.vyhybka, ro.roId,
-                                ro.poloha, lat, lon);
+                    endpointBuilder.addPoint(rk, lat, lon, sortKey);
+                    Double existingMin = reprMinKey.get(rk);
+                    if (existingMin == null || sortKey < existingMin) {
+                        reprMinKey.put(rk, sortKey);
+                        reprByRoKey.put(rk, new ReprCandidate(pairKey(ids[0], ids[1]), ro.tudu,
+                                ro.vyhybka, ro.roId, ro.poloha, lat, lon));
                     }
                     matched++;
                 }
@@ -1197,6 +1239,10 @@ public class DzsDatabase implements Closeable {
                         "Indexuji souřadnice výhybek (%d/%d)", done, total),
                         Math.min(pct, 80));
             }
+        }
+        for (ReprCandidate repr : reprByRoKey.values()) {
+            reprBuilder.add(repr.pairKey, repr.tudu, repr.vyhybka, repr.roId, repr.poloha,
+                    repr.latitude, repr.longitude);
         }
         if (matched == 0) {
             report(listener, "Varování: žádné GPS souřadnice výhybek", 80);
