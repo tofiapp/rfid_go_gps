@@ -47,6 +47,7 @@ public class CsvAdapter extends RecyclerView.Adapter<CsvAdapter.VH> {
         h.cLon.setText(r.longitude);
         h.cAcc.setText(r.accuracyM);
         h.cGpsTime.setText(r.gpsTime);
+        h.cUserId.setText(r.userId);
         h.itemView.setBackgroundColor(position % 2 == 0 ? 0xFFFFFFFF : 0xFFF5F8FC);
     }
 
@@ -54,7 +55,7 @@ public class CsvAdapter extends RecyclerView.Adapter<CsvAdapter.VH> {
     public int getItemCount() { return data.size(); }
 
     static class VH extends RecyclerView.ViewHolder {
-        TextView cId, cEpc, cTid, cRok, cTudu, cVyh, cCast, cPoloha, cLat, cLon, cAcc, cGpsTime;
+        TextView cId, cEpc, cTid, cRok, cTudu, cVyh, cCast, cPoloha, cLat, cLon, cAcc, cGpsTime, cUserId;
         VH(@NonNull View v) {
             super(v);
             cId = v.findViewById(R.id.cId);
@@ -69,6 +70,7 @@ public class CsvAdapter extends RecyclerView.Adapter<CsvAdapter.VH> {
             cLon = v.findViewById(R.id.cLon);
             cAcc = v.findViewById(R.id.cAcc);
             cGpsTime = v.findViewById(R.id.cGpsTime);
+            cUserId = v.findViewById(R.id.cUserId);
         }
     }
 }

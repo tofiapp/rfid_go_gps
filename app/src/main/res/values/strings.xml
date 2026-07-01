@@ -70,4 +70,15 @@
     <string name="tudu_loading_list">Načítám seznam TUDU…</string>
     <string name="db_loaded_gps">%1$s  •  TUDU: %2$d (GPS režim)</string>
     <string name="db_loaded_manual">%1$s  •  TUDU: %2$d</string>
+    <string name="login_title">Přihlášení</string>
+    <string name="login_user_id_hint">USER_ID</string>
+    <string name="login_password_hint">Heslo</string>
+    <string name="login_button">Přihlásit se</string>
+    <string name="login_error_user_id_required">Zadejte USER_ID</string>
+    <string name="login_error_password_required">Zadejte heslo</string>
+    <string name="login_error_invalid">Neplatné USER_ID nebo heslo</string>
+    <string name="user_id_label">operátor %1$s</string>
+    <string name="logout_confirm_title">Odhlásit operátora?</string>
+    <string name="logout_confirm_yes">Odhlásit</string>
+    <string name="logout_confirm_no">Zůstat přihlášen</string>
 </resources>
