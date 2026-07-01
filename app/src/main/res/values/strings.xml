@@ -4,6 +4,10 @@
     <string name="btn_write_pwd">ZAPSAT HESLO</string>
     <string name="btn_lock">ZAMKNOUT</string>
     <string name="btn_delete_last_csv">Vymazat poslední záznam</string>
+    <string name="btn_export_csv">Sdílet CSV</string>
+    <string name="btn_export_sqlite">Sdílet SQLite</string>
+    <string name="export_sqlite_chooser">Sdílet SQLite</string>
+    <string name="cb_auto_csv_sqlite">Po zápisu EPC automaticky uložit do CSV a SQLite</string>
     <string name="btn_delete_short">Smazat</string>
     <string name="lock_code_value">008020</string>
     <string name="workflow_sheet_title">Pokročilé</string>
