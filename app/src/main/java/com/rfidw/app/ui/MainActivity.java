@@ -114,6 +114,8 @@ public class MainActivity extends AppCompatActivity {
     private List<Tudu> tuduList = new ArrayList<>();
     private Tudu currentTudu;
     private Tudu.Vyhybka currentVyhybka;
+    /** POLOHA z nejbližšího RO_ID pro aktuální výhybku (GPS režim, 3částové výhybky). */
+    private String matchedPoloha = "";
     private DzsDatabase dzsDatabase;
     /** Zruší zastaralé UI callbacky po novém načtení nebo zničení aktivity. */
     private volatile long dbLoadGeneration;
@@ -2479,6 +2481,31 @@ public class MainActivity extends AppCompatActivity {
         refreshTemplate();
         updateStep1();
         updateSummary1();
+        updateMatchedPoloha();
+    }
+
+    private void updateMatchedPoloha() {
+        matchedPoloha = "";
+        if (!gpsAutoSelection || dzsDatabase == null || locationCache == null
+                || currentTudu == null || currentVyhybka == null
+                || currentVyhybka.castMax != 3) {
+            return;
+        }
+        LocationCache.Snapshot snap = locationCache.getSnapshot();
+        if (!snap.valid) return;
+        try {
+            matchedPoloha = dzsDatabase.findPolohaForVyhybka(
+                    currentTudu.code, currentVyhybka.cislo, snap.latitude, snap.longitude);
+        } catch (Exception e) {
+            Log.w(TAG, "POLOHA lookup selhal", e);
+            matchedPoloha = "";
+        }
+    }
+
+    private String polohaForCsvRow(int castNum) {
+        if (currentVyhybka == null || currentVyhybka.castMax != 3) return "";
+        if (castNum != 2 && castNum != 3) return "";
+        return matchedPoloha != null ? matchedPoloha : "";
     }
 
     private void closeDzsDatabase() {
@@ -2704,6 +2731,7 @@ public class MainActivity extends AppCompatActivity {
         refreshTemplate();
         updateStep1();
         updateSummary1();
+        updateMatchedPoloha();
     }
 
     private void restoreSelectionFromRow(CsvStore.Row row) {
@@ -2979,6 +3007,7 @@ public class MainActivity extends AppCompatActivity {
             row.tudu = d.tudu;
             row.vyhybka = csvVyhybkaLabel(d.vyhybka);
             row.cast = d.cast;
+            row.poloha = polohaForCsvRow(parseInt(d.cast, 0));
             LocationCache.Snapshot gps = locationCache != null ? locationCache.getSnapshot() : LocationCache.Snapshot.empty();
             if (gps.valid) {
                 row.latitude = LocationCache.formatLatitude(gps.latitude);

@@ -42,6 +42,7 @@ public class CsvAdapter extends RecyclerView.Adapter<CsvAdapter.VH> {
         h.cTudu.setText(r.tudu);
         h.cVyh.setText(r.vyhybka);
         h.cCast.setText(r.cast);
+        h.cPoloha.setText(r.poloha);
         h.cLat.setText(r.latitude);
         h.cLon.setText(r.longitude);
         h.cAcc.setText(r.accuracyM);
@@ -53,7 +54,7 @@ public class CsvAdapter extends RecyclerView.Adapter<CsvAdapter.VH> {
     public int getItemCount() { return data.size(); }
 
     static class VH extends RecyclerView.ViewHolder {
-        TextView cId, cEpc, cTid, cRok, cTudu, cVyh, cCast, cLat, cLon, cAcc, cGpsTime;
+        TextView cId, cEpc, cTid, cRok, cTudu, cVyh, cCast, cPoloha, cLat, cLon, cAcc, cGpsTime;
         VH(@NonNull View v) {
             super(v);
             cId = v.findViewById(R.id.cId);
@@ -63,6 +64,7 @@ public class CsvAdapter extends RecyclerView.Adapter<CsvAdapter.VH> {
             cTudu = v.findViewById(R.id.cTudu);
             cVyh = v.findViewById(R.id.cVyh);
             cCast = v.findViewById(R.id.cCast);
+            cPoloha = v.findViewById(R.id.cPoloha);
             cLat = v.findViewById(R.id.cLat);
             cLon = v.findViewById(R.id.cLon);
             cAcc = v.findViewById(R.id.cAcc);
