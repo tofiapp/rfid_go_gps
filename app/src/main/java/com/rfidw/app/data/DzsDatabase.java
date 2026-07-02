@@ -237,6 +237,7 @@ public class DzsDatabase implements Closeable {
     private volatile Double proximityCenterLon;
     private File sourceDbFile;
     private File storageCacheDir;
+    private volatile int prefetchGeneration;
 
     private DzsDatabase(SQLiteDatabase db, GpsColumns gpsColumns, RoColumns roColumns,
                         Map<String, List<RoIndexEntry>> roByPairKey,
@@ -325,8 +326,9 @@ public class DzsDatabase implements Closeable {
                     int loaded = opened.loadProximityIndex(initialLatitude, initialLongitude, listener);
                     report(listener, String.format(Locale.ROOT,
                             "Okolí GPS načteno (%d výhybek)", loaded), 90);
-                    opened.scheduleBackgroundProximityCacheSave(initialLatitude, initialLongitude);
                 }
+                opened.scheduleBackgroundProximityCacheSave(initialLatitude, initialLongitude);
+                opened.scheduleBackgroundProximityPrefetch(initialLatitude, initialLongitude);
                 opened.scheduleBackgroundContentHash();
             } else {
                 report(listener, "Čekám na GPS pro indexaci okolí", 40);
@@ -443,6 +445,131 @@ public class DzsDatabase implements Closeable {
         }, "dzs-prox-cache");
         t.setDaemon(true);
         t.start();
+    }
+
+    /**
+     * Na pozadí přednačte {@code .pidx} cache pro sousední oblasti (~3 km), aby při jízdě
+     * nemusel uživatel čekat na SQL scan při každém přesunu.
+     */
+    private void scheduleBackgroundProximityPrefetch(double centerLatitude, double centerLongitude) {
+        if (sourceDbFile == null || storageCacheDir == null) return;
+        final int generation = ++prefetchGeneration;
+        final double lat = centerLatitude;
+        final double lon = centerLongitude;
+        Thread t = new Thread(() -> runProximityPrefetch(generation, lat, lon), "dzs-prox-prefetch");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private void runProximityPrefetch(int generation, double originLat, double originLon) {
+        File indexCacheDir = new File(storageCacheDir, "dzs_index");
+        for (double[] center : prefetchNeighborCenters(originLat, originLon)) {
+            if (generation != prefetchGeneration) return;
+            double cLat = center[0];
+            double cLon = center[1];
+            if (hasProximityCacheResolved(indexCacheDir, cLat, cLon)) continue;
+            try {
+                DzsIndexCache.LoadedIndex loaded = queryProximityBbox(cLat, cLon);
+                if (generation != prefetchGeneration) return;
+                savePrefetchProximity(indexCacheDir, cLat, cLon, loaded);
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private static double[][] prefetchNeighborCenters(double latitude, double longitude) {
+        double km = PROXIMITY_RELOAD_MOVE_KM;
+        double dLat = km / 111.0;
+        double cosLat = Math.cos(Math.toRadians(latitude));
+        double dLon = cosLat > 1e-6 ? km / (111.0 * cosLat) : km / 111.0;
+        return new double[][]{
+                {latitude + dLat, longitude},
+                {latitude - dLat, longitude},
+                {latitude, longitude + dLon},
+                {latitude, longitude - dLon},
+                {latitude + dLat, longitude + dLon},
+                {latitude + dLat, longitude - dLon},
+                {latitude - dLat, longitude + dLon},
+                {latitude - dLat, longitude - dLon},
+        };
+    }
+
+    private boolean hasProximityCacheResolved(File indexCacheDir, double latitude, double longitude) {
+        String key = DzsIndexCache.resolveCacheKey(sourceDbFile, indexCacheDir);
+        if (DzsIndexCache.hasProximityCache(key, indexCacheDir, latitude, longitude)) {
+            return true;
+        }
+        String fastKey = DzsIndexCache.fastDbKey(sourceDbFile);
+        return !fastKey.equals(key)
+                && DzsIndexCache.hasProximityCache(fastKey, indexCacheDir, latitude, longitude);
+    }
+
+    private void savePrefetchProximity(File indexCacheDir, double centerLat, double centerLon,
+                                       DzsIndexCache.LoadedIndex loaded) {
+        if (loaded == null) return;
+        String key = DzsIndexCache.resolveCacheKey(sourceDbFile, indexCacheDir);
+        DzsIndexCache.saveProximity(sourceDbFile, key, indexCacheDir, centerLat, centerLon,
+                loaded.roByPairKey, loaded.vyhybkaGpsStore);
+        String fastKey = DzsIndexCache.fastDbKey(sourceDbFile);
+        if (!fastKey.equals(key)) {
+            DzsIndexCache.saveProximity(sourceDbFile, fastKey, indexCacheDir, centerLat, centerLon,
+                    loaded.roByPairKey, loaded.vyhybkaGpsStore);
+        }
+    }
+
+    private DzsIndexCache.LoadedIndex tryLoadProximityFromDisk(double latitude, double longitude) {
+        if (sourceDbFile == null || storageCacheDir == null) return null;
+        File indexCacheDir = new File(storageCacheDir, "dzs_index");
+        String key = DzsIndexCache.resolveCacheKey(sourceDbFile, indexCacheDir);
+        double maxDistM = PROXIMITY_RELOAD_MOVE_KM * 1000.0;
+        DzsIndexCache.LoadedIndex loaded = DzsIndexCache.tryLoadProximity(
+                sourceDbFile, key, indexCacheDir, latitude, longitude, maxDistM);
+        if (loaded != null) return loaded;
+        String fastKey = DzsIndexCache.fastDbKey(sourceDbFile);
+        if (fastKey.equals(key)) return null;
+        return DzsIndexCache.tryLoadProximity(
+                sourceDbFile, fastKey, indexCacheDir, latitude, longitude, maxDistM);
+    }
+
+    private int mergeProximityLoadedIndex(DzsIndexCache.LoadedIndex cached) {
+        if (cached == null) return 0;
+        int added = 0;
+        Set<String> newlyAdded = new HashSet<>();
+        for (Map.Entry<String, List<DzsIndexCache.RoEntry>> e : cached.roByPairKey.entrySet()) {
+            String pairKey = e.getKey();
+            String[] ids = splitPairKey(pairKey);
+            for (DzsIndexCache.RoEntry ro : e.getValue()) {
+                if (ro.roId == null || ro.roId.isEmpty()) continue;
+                String entryRoKey = roKey(ids[0], ids[1], ro.roId);
+                if (roByRoKey.containsKey(entryRoKey)) continue;
+                Integer castMin = ro.castMin >= 0 ? ro.castMin : null;
+                Integer castMax = ro.castMax >= 0 ? ro.castMax : null;
+                RoIndexEntry entry = new RoIndexEntry(ro.tudu, ro.vyhybka, ro.iob, ro.roId,
+                        castMin, castMax, ro.poloha);
+                mergeRoEntry(ids[0], ids[1], entry);
+                newlyAdded.add(entryRoKey);
+                added++;
+            }
+        }
+        VyhybkaGpsStore store = cached.vyhybkaGpsStore;
+        if (store == null || store.isEmpty()) return added;
+        if (vyhybkaGpsStore.isEmpty()) {
+            vyhybkaGpsStore = store;
+            return added;
+        }
+        if (newlyAdded.isEmpty()) return added;
+        VyhybkaGpsStore.Builder gpsBuilder = VyhybkaGpsStore.builder();
+        VyhybkaGpsStore.appendAll(gpsBuilder, vyhybkaGpsStore);
+        for (int i = 0; i < store.size(); i++) {
+            String pairKey = store.pairKeyAt(i);
+            String[] ids = splitPairKey(pairKey);
+            String entryRoKey = roKey(ids[0], ids[1], store.roIdAt(i));
+            if (!newlyAdded.contains(entryRoKey)) continue;
+            gpsBuilder.add(pairKey, store.tuduAt(i), store.vyhybkaAt(i), store.roIdAt(i),
+                    store.polohaAt(i), store.latitudeAt(i), store.longitudeAt(i));
+        }
+        vyhybkaGpsStore = gpsBuilder.build();
+        return added;
     }
 
     private void scheduleBackgroundContentHash() {
@@ -1079,6 +1206,37 @@ public class DzsDatabase implements Closeable {
     }
 
     private int loadProximityIndex(double latitude, double longitude, OpenProgressListener listener) {
+        DzsIndexCache.LoadedIndex cached = tryLoadProximityFromDisk(latitude, longitude);
+        if (cached != null) {
+            int added = mergeProximityLoadedIndex(cached);
+            spatialGrid = null;
+            proximityCenterLat = latitude;
+            proximityCenterLon = longitude;
+            proximityLoaded = true;
+            scheduleBackgroundProximityPrefetch(latitude, longitude);
+            if (listener != null) {
+                report(listener, String.format(Locale.ROOT,
+                        "Okolí GPS z cache (%d výhybek)", vyhybkaGpsStore.size()), 80);
+            }
+            return added;
+        }
+
+        DzsIndexCache.LoadedIndex queried = queryProximityBbox(latitude, longitude);
+        int added = mergeProximityLoadedIndex(queried);
+        spatialGrid = null;
+        proximityCenterLat = latitude;
+        proximityCenterLon = longitude;
+        proximityLoaded = true;
+        scheduleBackgroundProximityCacheSave(latitude, longitude);
+        scheduleBackgroundProximityPrefetch(latitude, longitude);
+        if (listener != null) {
+            report(listener, String.format(Locale.ROOT,
+                    "Okolí GPS načteno (%d výhybek)", added), 80);
+        }
+        return added;
+    }
+
+    private DzsIndexCache.LoadedIndex queryProximityBbox(double latitude, double longitude) {
         double minLat = latitude - PROXIMITY_BBOX_DEG;
         double maxLat = latitude + PROXIMITY_BBOX_DEG;
         double minLon = longitude - PROXIMITY_BBOX_DEG;
@@ -1122,9 +1280,9 @@ public class DzsDatabase implements Closeable {
                 String.valueOf(minLon), String.valueOf(maxLon)
         };
 
-        Set<String> seenRoKeys = new HashSet<>(roByRoKey.keySet());
-        int added = 0;
+        Map<String, List<RoIndexEntry>> localRoByPair = new HashMap<>();
         VyhybkaGpsStore.Builder gpsBuilder = VyhybkaGpsStore.builder();
+        Set<String> seenRoKeys = new HashSet<>();
 
         try (Cursor c = db.rawQuery(sql.toString(), args)) {
             while (c.moveToNext()) {
@@ -1150,30 +1308,15 @@ public class DzsDatabase implements Closeable {
                 RoIndexEntry entry = new RoIndexEntry(tudu, vyhybka, iob, roId, cast.castMin,
                         cast.castMax, poloha);
                 String entryRoKey = roKey(superZId, superDId, roId);
-                if (seenRoKeys.add(entryRoKey)) {
-                    mergeRoEntry(superZId, superDId, entry);
-                    gpsBuilder.add(pairKey(superZId, superDId), tudu, vyhybka, roId, poloha, lat, lon);
-                    added++;
-                }
+                if (!seenRoKeys.add(entryRoKey)) continue;
+                localRoByPair.computeIfAbsent(pairKey(superZId, superDId), k -> new ArrayList<>())
+                        .add(entry);
+                gpsBuilder.add(pairKey(superZId, superDId), tudu, vyhybka, roId, poloha, lat, lon);
             }
         } catch (Exception ignored) {
         }
 
-        VyhybkaGpsStore addedStore = gpsBuilder.build();
-        if (vyhybkaGpsStore.isEmpty()) {
-            vyhybkaGpsStore = addedStore;
-        } else if (!addedStore.isEmpty()) {
-            vyhybkaGpsStore = VyhybkaGpsStore.merge(vyhybkaGpsStore, addedStore);
-        }
-        spatialGrid = null;
-        proximityCenterLat = latitude;
-        proximityCenterLon = longitude;
-        proximityLoaded = true;
-        if (listener != null) {
-            report(listener, String.format(Locale.ROOT,
-                    "Okolí GPS načteno (%d výhybek)", added), 80);
-        }
-        return added;
+        return new DzsIndexCache.LoadedIndex(toRoCache(localRoByPair), gpsBuilder.build());
     }
 
     private void mergeRoEntry(String superZId, String superDId, RoIndexEntry entry) {
@@ -1314,6 +1457,7 @@ public class DzsDatabase implements Closeable {
 
     @Override
     public void close() {
+        prefetchGeneration++;
         db.close();
     }
 
