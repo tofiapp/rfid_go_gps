@@ -123,6 +123,7 @@ public class MainActivity extends AppCompatActivity {
     /** Zruší zastaralé UI callbacky po novém načtení nebo zničení aktivity. */
     private volatile long dbLoadGeneration;
     private int card1DbProgressPercent;
+    private int dbIndexProgressPercent;
     /** Režim výběru TUDU: true = GPS, false = ruční výběr ze seznamu. */
     private boolean gpsAutoSelection = true;
     /** Ruční výběr TUDU v GPS režimu – GPS lookup nepřepíše, dokud uživatel neklikne Načíst polohu. */
@@ -169,7 +170,7 @@ public class MainActivity extends AppCompatActivity {
 
     // view reference
     private TextView tvReaderStatus, tvGpsStatus, tvEpcPreview, tvEpcValid, tvSourceFile,
-            tvCard1DbProgress,
+            tvCard1DbProgress, tvDbIndexProgress,
             tvWriteResult, tvCsvPath, tvPwdWriteResult, tvLockResult,
             tvSummaryTudu, tvSummaryVyhybka, tvSummaryCast,
             tvCastHintAction, tvCastHintPart,
@@ -178,8 +179,9 @@ public class MainActivity extends AppCompatActivity {
             step1Circle, step2Circle, step3Circle, step1Label, step2Label;
     private View summary1, colSummaryTudu, colSummaryVyhybka, castHintBox, scanDoneScrim,
             scanDoneDialog, deleteConfirmDialog, lastRecordBox, card1, topBar,
-            card1DbProgress;
-    private com.google.android.material.progressindicator.LinearProgressIndicator card1DbProgressBar;
+            card1DbProgress, cardDbIndex;
+    private com.google.android.material.progressindicator.LinearProgressIndicator card1DbProgressBar,
+            dbIndexProgressBar;
     private NestedScrollView mainScroll;
     private BottomSheetBehavior<View> workflowBehavior;
     private EditText etAccessPwd, etPower, etPwdAccess, etPwdNew, etLockAccessPwd;
@@ -249,6 +251,9 @@ public class MainActivity extends AppCompatActivity {
         tvCard1DbProgress = findViewById(R.id.tvCard1DbProgress);
         card1DbProgress = findViewById(R.id.card1DbProgress);
         card1DbProgressBar = findViewById(R.id.card1DbProgressBar);
+        cardDbIndex = findViewById(R.id.cardDbIndex);
+        tvDbIndexProgress = findViewById(R.id.tvDbIndexProgress);
+        dbIndexProgressBar = findViewById(R.id.dbIndexProgressBar);
         tvWriteResult = findViewById(R.id.tvWriteResult);
         tvCsvPath = findViewById(R.id.tvCsvPath);
         tvPwdWriteResult = findViewById(R.id.tvPwdWriteResult);
@@ -497,6 +502,55 @@ public class MainActivity extends AppCompatActivity {
     private void endCard1DbLoad() {
         if (card1DbProgress != null) {
             card1DbProgress.setVisibility(View.GONE);
+        }
+    }
+
+    private void attachDbIndexProgressListener(DzsDatabase db) {
+        if (db == null) {
+            hideWorkflowDbIndexCard();
+            return;
+        }
+        db.setIndexProgressListener((phase, percent) -> runOnUiThread(() -> {
+            if (dzsDatabase != db) return;
+            updateWorkflowDbIndexProgress(phase, percent);
+        }));
+    }
+
+    private void updateWorkflowDbIndexProgress(String phase, int percent) {
+        if (cardDbIndex == null) return;
+        if (percent < 0) {
+            cardDbIndex.setVisibility(View.VISIBLE);
+            if (tvDbIndexProgress != null) {
+                tvDbIndexProgress.setText(getString(R.string.db_index_failed));
+            }
+            if (dbIndexProgressBar != null) {
+                dbIndexProgressBar.setVisibility(View.GONE);
+            }
+            return;
+        }
+        int clamped = Math.max(0, Math.min(100, percent));
+        if (clamped < dbIndexProgressPercent) {
+            clamped = dbIndexProgressPercent;
+        } else {
+            dbIndexProgressPercent = clamped;
+        }
+        cardDbIndex.setVisibility(View.VISIBLE);
+        if (dbIndexProgressBar != null) {
+            dbIndexProgressBar.setVisibility(View.VISIBLE);
+            dbIndexProgressBar.setProgressCompat(clamped, true);
+        }
+        String label = clamped >= 100
+                ? getString(R.string.db_index_complete)
+                : getString(R.string.db_index_progress, phase, clamped);
+        if (tvDbIndexProgress != null) {
+            tvDbIndexProgress.setText(label);
+        }
+    }
+
+    private void hideWorkflowDbIndexCard() {
+        dbIndexProgressPercent = 0;
+        if (cardDbIndex != null) {
+            cardDbIndex.setVisibility(View.GONE);
         }
     }
 
@@ -2645,7 +2699,10 @@ public class MainActivity extends AppCompatActivity {
 
     private void loadDatabaseFromPath(String path, String displayName, boolean showErrorToast, Uri sourceUri) {
         final long loadId = ++dbLoadGeneration;
-        runOnUiThreadIfAlive(loadId, () -> beginCard1DbLoad(displayName));
+        runOnUiThreadIfAlive(loadId, () -> {
+            beginCard1DbLoad(displayName);
+            hideWorkflowDbIndexCard();
+        });
         DzsDatabase previous;
         synchronized (this) {
             previous = dzsDatabase;
@@ -2803,6 +2860,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void onDatabaseLoaded() {
+        attachDbIndexProgressListener(dzsDatabase);
         if (skipCsvTuduRestore) {
             skipCsvTuduRestore = false;
         }
