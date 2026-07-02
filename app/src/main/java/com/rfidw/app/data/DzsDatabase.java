@@ -755,52 +755,6 @@ public class DzsDatabase implements Closeable {
         return bestByVyhybka;
     }
 
-    /**
-     * Vrátí POLOHA z nejbližšího RO záznamu dané výhybky (podle GPS souřadnic).
-     * Prázdný řetězec, pokud není nalezeno nebo sloupec POLOHA v DB chybí.
-     */
-    public String findPolohaForVyhybka(String tuduCode, int vyhybka, double latitude,
-                                       double longitude) {
-        if (tuduCode == null || tuduCode.isEmpty() || vyhybka <= 0) return "";
-        String trimmedTudu = tuduCode.trim();
-        if (trimmedTudu.isEmpty()) return "";
-
-        if (!vyhybkaGpsStore.isEmpty()) {
-            int bestIdx = -1;
-            double bestDistSq = Double.MAX_VALUE;
-            double cosLat = Math.cos(Math.toRadians(latitude));
-            for (int i = 0; i < vyhybkaGpsStore.size(); i++) {
-                if (!trimmedTudu.equals(vyhybkaGpsStore.tuduAt(i))) continue;
-                if (vyhybkaGpsStore.vyhybkaAt(i) != vyhybka) continue;
-                double dLat = vyhybkaGpsStore.latitudeAt(i) - latitude;
-                double dLon = (vyhybkaGpsStore.longitudeAt(i) - longitude) * cosLat;
-                double distSq = dLat * dLat + dLon * dLon;
-                if (distSq < bestDistSq) {
-                    bestDistSq = distSq;
-                    bestIdx = i;
-                }
-            }
-            if (bestIdx >= 0) return vyhybkaGpsStore.polohaAt(bestIdx);
-            return "";
-        }
-
-        String bestPoloha = "";
-        double bestDistM = Double.MAX_VALUE;
-        for (Map.Entry<String, List<RoIndexEntry>> e : roByPairKey.entrySet()) {
-            for (RoIndexEntry ro : e.getValue()) {
-                if (!trimmedTudu.equals(ro.tudu) || ro.vyhybka != vyhybka) continue;
-                double[] coord = resolveVyhybkaCoord(e.getKey(), ro);
-                if (coord == null) continue;
-                double dist = haversineM(latitude, longitude, coord[0], coord[1]);
-                if (dist < bestDistM) {
-                    bestDistM = dist;
-                    bestPoloha = ro.poloha;
-                }
-            }
-        }
-        return bestPoloha != null ? bestPoloha : "";
-    }
-
     private void queryGpsPointsInBox(double latitude, double longitude, double deltaDeg,
                                      GpsKmPointConsumer consumer) {
         String sql = "SELECT " + gpsColumns.superZId + ", " + gpsColumns.superDId + ", "
