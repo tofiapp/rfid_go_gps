@@ -35,7 +35,6 @@ public class DzsDatabase implements Closeable {
     public static final String TABLE_GPS_KM = "DZS_SUPERTRA_GPS_KM";
     public static final String TABLE_RO_TPI = "DZS_SUPER_RO_TPI";
     private static final String TEMP_RO_GPS_LOOKUP = "_dzs_ro_gps_lookup";
-    private static final String TEMP_PROX_GPS = "_dzs_prox_gps";
     /** Bbox ±0,05° kolem GPS (~5 km) – odpovídá SQL dotazu v dokumentaci. */
     private static final double PROXIMITY_BBOX_DEG = 0.05;
     /** Po přesunu o tuto vzdálenost se znovu načte okolí GPS. */
@@ -305,9 +304,9 @@ public class DzsDatabase implements Closeable {
     public static DzsDatabase open(String path, File cacheDir, OpenProgressListener listener,
                                    Double initialLatitude, Double initialLongitude) throws Exception {
         File sourceFile = new File(path);
-        File dbFile = resolveWritableDatabaseFile(sourceFile, cacheDir, listener);
+        File dbFile = resolveDatabaseFile(sourceFile, cacheDir, listener);
         SQLiteDatabase db = SQLiteDatabase.openDatabase(
-                dbFile.getAbsolutePath(), null, SQLiteDatabase.OPEN_READWRITE);
+                dbFile.getAbsolutePath(), null, SQLiteDatabase.OPEN_READONLY);
         try {
             applyReadPragmas(db);
             report(listener, "Kontrola schématu", 5);
@@ -325,26 +324,35 @@ public class DzsDatabase implements Closeable {
             if (initialLatitude != null && initialLongitude != null) {
                 File indexCacheDir = cacheDir != null ? new File(cacheDir, "dzs_index") : null;
                 DzsIndexCache.LoadedIndex proximityCached = null;
-                String contentHash = null;
                 if (indexCacheDir != null) {
                     report(listener, "Kontrola cache okolí", 15);
-                    contentHash = DzsIndexCache.resolveContentHash(sourceFile, indexCacheDir);
+                    String cacheKey = DzsIndexCache.resolveCacheKey(sourceFile, indexCacheDir);
                     proximityCached = DzsIndexCache.tryLoadProximity(
-                            sourceFile, contentHash, indexCacheDir,
+                            sourceFile, cacheKey, indexCacheDir,
                             initialLatitude, initialLongitude,
                             PROXIMITY_RELOAD_MOVE_KM * 1000.0);
+                    if (proximityCached == null) {
+                        String fastKey = DzsIndexCache.fastDbKey(sourceFile);
+                        if (!fastKey.equals(cacheKey)) {
+                            proximityCached = DzsIndexCache.tryLoadProximity(
+                                    sourceFile, fastKey, indexCacheDir,
+                                    initialLatitude, initialLongitude,
+                                    PROXIMITY_RELOAD_MOVE_KM * 1000.0);
+                        }
+                    }
                 }
                 if (proximityCached != null) {
                     opened.applyLoadedProximity(proximityCached, initialLatitude, initialLongitude);
                     report(listener, String.format(Locale.ROOT,
                             "Okolí GPS z cache (%d výhybek)", opened.vyhybkaGpsStore.size()), 90);
                 } else {
-                    report(listener, "Indexuji okolí GPS (5 km)", 40);
+                    report(listener, "Načítám okolí GPS (5 km)", 40);
                     int loaded = opened.loadProximityIndex(initialLatitude, initialLongitude, listener);
                     report(listener, String.format(Locale.ROOT,
                             "Okolí GPS načteno (%d výhybek)", loaded), 90);
+                    opened.scheduleBackgroundProximityCacheSave(initialLatitude, initialLongitude);
                 }
-                opened.scheduleBackgroundGpsLatLonIndex();
+                opened.scheduleBackgroundContentHash();
             } else {
                 report(listener, "Čekám na GPS pro indexaci okolí", 40);
             }
@@ -378,7 +386,12 @@ public class DzsDatabase implements Closeable {
         }
     }
 
-    private static File resolveWritableDatabaseFile(File source, File cacheDir,
+    /** Má načtené výhybky v okolí GPS – použitelné pro GPS režim bez čekání na SQL COUNT. */
+    public boolean hasProximityData() {
+        return proximityLoaded && !vyhybkaGpsStore.isEmpty();
+    }
+
+    private static File resolveDatabaseFile(File source, File cacheDir,
                                                     OpenProgressListener listener) throws Exception {
         if (!source.isFile()) {
             throw new Exception("Databáze nenalezena: " + source.getAbsolutePath());
@@ -449,31 +462,41 @@ public class DzsDatabase implements Closeable {
         }
     }
 
-    private void ensureRoCompositeIndex() {
-        try {
-            db.execSQL("CREATE INDEX IF NOT EXISTS _dzs_ro_zdr ON " + TABLE_RO_TPI
-                    + " (" + roColumns.superZId + ", " + roColumns.superDId + ", "
-                    + roColumns.roId + ")");
-        } catch (Exception ignored) {
-        }
+    private void scheduleBackgroundProximityCacheSave(double centerLatitude, double centerLongitude) {
+        if (sourceDbFile == null || storageCacheDir == null || !proximityLoaded) return;
+        final File dbFile = sourceDbFile;
+        final File cacheDir = storageCacheDir;
+        Thread t = new Thread(() -> {
+            synchronized (this) {
+                if (!proximityLoaded || vyhybkaGpsStore.isEmpty()) return;
+                File indexCacheDir = new File(cacheDir, "dzs_index");
+                String key = DzsIndexCache.resolveCacheKey(dbFile, indexCacheDir);
+                saveProximityCache(key, centerLatitude, centerLongitude);
+            }
+        }, "dzs-prox-cache");
+        t.setDaemon(true);
+        t.start();
     }
 
-    private boolean hasSqliteIndex(String name) {
-        try (Cursor c = db.rawQuery(
-                "SELECT 1 FROM sqlite_master WHERE type='index' AND name=? LIMIT 1",
-                new String[]{name})) {
-            return c.moveToFirst();
-        } catch (Exception ignored) {
-            return false;
-        }
-    }
-
-    private void scheduleBackgroundGpsLatLonIndex() {
-        if (gpsLatLonIndexReady || hasSqliteIndex("_dzs_gps_latlon")) {
-            gpsLatLonIndexReady = true;
-            return;
-        }
-        Thread t = new Thread(() -> ensureGpsLatLonIndex(), "dzs-gps-latlon-index");
+    private void scheduleBackgroundContentHash() {
+        if (sourceDbFile == null || storageCacheDir == null) return;
+        final File dbFile = sourceDbFile;
+        final File cacheDir = storageCacheDir;
+        Thread t = new Thread(() -> {
+            try {
+                File indexCacheDir = new File(cacheDir, "dzs_index");
+                String existing = DzsIndexCache.resolveCacheKey(dbFile, indexCacheDir);
+                if (!existing.startsWith("f_")) return;
+                String sha = DzsIndexCache.resolveContentHash(dbFile, indexCacheDir);
+                synchronized (this) {
+                    if (proximityLoaded && proximityCenterLat != null && proximityCenterLon != null
+                            && !vyhybkaGpsStore.isEmpty()) {
+                        saveProximityCache(sha, proximityCenterLat, proximityCenterLon);
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+        }, "dzs-db-hash");
         t.setDaemon(true);
         t.start();
     }
@@ -1150,19 +1173,12 @@ public class DzsDatabase implements Closeable {
     }
 
     private int loadProximityIndex(double latitude, double longitude, OpenProgressListener listener) {
-        ensureRoCompositeIndex();
-        if (hasSqliteIndex("_dzs_gps_latlon")) {
-            ensureGpsLatLonIndex();
-        }
         double minLat = latitude - PROXIMITY_BBOX_DEG;
         double maxLat = latitude + PROXIMITY_BBOX_DEG;
         double minLon = longitude - PROXIMITY_BBOX_DEG;
         double maxLon = longitude + PROXIMITY_BBOX_DEG;
 
-        if (!populateProxGpsTempTable(minLat, maxLat, minLon, maxLon)) {
-            return 0;
-        }
-
+        String gpsRoIdExpr = "TRIM(CAST(g." + gpsColumns.roId + " AS TEXT))";
         String roRoIdExpr = "TRIM(CAST(ro." + roColumns.roId + " AS TEXT))";
         String vyhybkaExpr = roColumns.vyhybkaSelectExpr("ro");
         StringBuilder sql = new StringBuilder("SELECT ro.")
@@ -1173,25 +1189,32 @@ public class DzsDatabase implements Closeable {
         if (roColumns.castMax != null) sql.append(", ro.").append(roColumns.castMax);
         if (roColumns.poloha != null) sql.append(", ro.").append(roColumns.poloha);
         if (roColumns.iob != null) sql.append(", ro.").append(roColumns.iob);
-        sql.append(", g.lat, g.lon");
-        sql.append(" FROM ").append(TEMP_PROX_GPS).append(" g");
-        sql.append(" INNER JOIN ").append(TABLE_RO_TPI).append(" ro ON ro.")
-                .append(roColumns.superZId).append(" = g.super_z_id AND ro.")
-                .append(roColumns.superDId).append(" = g.super_d_id AND ")
-                .append(roRoIdExpr).append(" = g.ro_id");
-        sql.append(" WHERE ro.").append(roColumns.tudu).append(" IS NOT NULL AND ro.")
+        sql.append(", g.").append(gpsColumns.latitude).append(", g.").append(gpsColumns.longitude);
+        sql.append(" FROM ").append(TABLE_GPS_KM).append(" g");
+        sql.append(" INNER JOIN ").append(TABLE_RO_TPI).append(" ro ON g.")
+                .append(gpsColumns.superZId).append(" = ro.").append(roColumns.superZId);
+        sql.append(" AND g.").append(gpsColumns.superDId).append(" = ro.").append(roColumns.superDId);
+        sql.append(" AND ").append(gpsRoIdExpr).append(" = ").append(roRoIdExpr);
+        sql.append(" WHERE g.").append(gpsColumns.latitude).append(" BETWEEN ? AND ?");
+        sql.append(" AND g.").append(gpsColumns.longitude).append(" BETWEEN ? AND ?");
+        sql.append(" AND ro.").append(roColumns.tudu).append(" IS NOT NULL AND ro.")
                 .append(roColumns.tudu).append(" <> ''");
         sql.append(" AND ").append(vyhybkaExpr).append(" IS NOT NULL");
         sql.append(" AND ro.").append(roColumns.roId).append(" IS NOT NULL AND ")
                 .append(roRoIdExpr).append(" <> ''");
         roColumns.appendPolohaFilter(sql, "ro");
 
+        String[] args = {
+                String.valueOf(minLat), String.valueOf(maxLat),
+                String.valueOf(minLon), String.valueOf(maxLon)
+        };
+
         Set<String> seenRoKeys = new HashSet<>(roByRoKey.keySet());
         int added = 0;
         VyhybkaGpsStore.Builder gpsBuilder = VyhybkaGpsStore.builder();
         VyhybkaGpsStore.appendAll(gpsBuilder, vyhybkaGpsStore);
 
-        try (Cursor c = db.rawQuery(sql.toString(), null)) {
+        try (Cursor c = db.rawQuery(sql.toString(), args)) {
             while (c.moveToNext()) {
                 String superZId = readId(c, 0);
                 String superDId = readId(c, 1);
@@ -1222,8 +1245,6 @@ public class DzsDatabase implements Closeable {
                 }
             }
         } catch (Exception ignored) {
-        } finally {
-            dropProxGpsTempTable();
         }
 
         vyhybkaGpsStore = gpsBuilder.build();
@@ -1235,57 +1256,7 @@ public class DzsDatabase implements Closeable {
             report(listener, String.format(Locale.ROOT,
                     "Okolí GPS načteno (%d výhybek)", added), 80);
         }
-        if (sourceDbFile != null && storageCacheDir != null && added > 0) {
-            try {
-                File indexCacheDir = new File(storageCacheDir, "dzs_index");
-                String hash = DzsIndexCache.resolveContentHash(sourceDbFile, indexCacheDir);
-                saveProximityCache(hash, latitude, longitude);
-            } catch (Exception ignored) {
-            }
-        }
-        scheduleBackgroundGpsLatLonIndex();
         return added;
-    }
-
-    private boolean populateProxGpsTempTable(double minLat, double maxLat,
-                                             double minLon, double maxLon) {
-        try {
-            db.execSQL("CREATE TEMP TABLE IF NOT EXISTS " + TEMP_PROX_GPS
-                    + " (super_z_id TEXT NOT NULL, super_d_id TEXT NOT NULL, ro_id TEXT NOT NULL,"
-                    + " lat REAL NOT NULL, lon REAL NOT NULL,"
-                    + " PRIMARY KEY (super_z_id, super_d_id, ro_id))");
-            db.execSQL("DELETE FROM " + TEMP_PROX_GPS);
-        } catch (Exception ignored) {
-            return false;
-        }
-
-        String roIdExpr = "TRIM(CAST(" + gpsColumns.roId + " AS TEXT))";
-        String insertSql = "INSERT OR IGNORE INTO " + TEMP_PROX_GPS
-                + " (super_z_id, super_d_id, ro_id, lat, lon)"
-                + " SELECT " + gpsColumns.superZId + ", " + gpsColumns.superDId + ", "
-                + roIdExpr + ", MIN(" + gpsColumns.latitude + "), MIN(" + gpsColumns.longitude + ")"
-                + " FROM " + TABLE_GPS_KM
-                + " WHERE " + gpsColumns.latitude + " BETWEEN ? AND ?"
-                + " AND " + gpsColumns.longitude + " BETWEEN ? AND ?"
-                + " GROUP BY " + gpsColumns.superZId + ", " + gpsColumns.superDId + ", "
-                + roIdExpr;
-        String[] args = {
-                String.valueOf(minLat), String.valueOf(maxLat),
-                String.valueOf(minLon), String.valueOf(maxLon)
-        };
-        try {
-            db.execSQL(insertSql, args);
-            return true;
-        } catch (Exception ignored) {
-            return false;
-        }
-    }
-
-    private void dropProxGpsTempTable() {
-        try {
-            db.execSQL("DROP TABLE IF EXISTS " + TEMP_PROX_GPS);
-        } catch (Exception ignored) {
-        }
     }
 
     private void mergeRoEntry(String superZId, String superDId, RoIndexEntry entry) {

@@ -2594,8 +2594,8 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         ensureGpsForTuduLookup();
-        if (dzsDatabase != null && dzsDatabase.countDistinctTudu() == 0) {
-            toast("Databáze neobsahuje žádné TUDU – zkouším určit podle GPS…");
+        if (dzsDatabase != null && !dzsDatabase.hasProximityData()) {
+            toast("V okolí GPS nebyla nalezena výhybka – zkuste ruční výběr TUDU");
         } else if (!step1Done && locationCache != null && !locationCache.hasFix()) {
             if (gpsTestMode) {
                 if (!locationCache.hasTestOverride()) {

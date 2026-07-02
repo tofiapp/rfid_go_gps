@@ -73,6 +73,26 @@ final class DzsIndexCache {
     private DzsIndexCache() {
     }
 
+    /**
+     * Rychlý klíč cache bez čtení celého souboru (velikost + lastModified).
+     * Použít na kritické cestě otevírání; plný SHA-256 jen na pozadí.
+     */
+    static String fastDbKey(File dbFile) {
+        if (dbFile == null || !dbFile.isFile()) return "";
+        return String.format(Locale.ROOT, "f_%016x_%016x",
+                dbFile.length(), dbFile.lastModified());
+    }
+
+    /** Vrátí uložený SHA-256 nebo {@link #fastDbKey} – nikdy nespočítá hash synchronně. */
+    static String resolveCacheKey(File dbFile, File cacheDir) {
+        if (dbFile == null || !dbFile.isFile()) return "";
+        if (cacheDir != null) {
+            String cached = readStoredHash(dbFile, cacheDir);
+            if (cached != null) return cached;
+        }
+        return fastDbKey(dbFile);
+    }
+
     static String resolveContentHash(File dbFile, File cacheDir) throws IOException {
         if (dbFile == null || !dbFile.isFile()) {
             throw new IOException("Databáze nenalezena");
@@ -136,7 +156,7 @@ final class DzsIndexCache {
                                  Map<String, List<RoEntry>> roByPairKey,
                                  VyhybkaGpsStore vyhybkaGpsStore) {
         if (dbFile == null || cacheDir == null || !dbFile.isFile()) return false;
-        if (contentHash == null || contentHash.length() != HASH_HEX_LEN) return false;
+        if (contentHash == null || contentHash.isEmpty()) return false;
         if (!cacheDir.exists() && !cacheDir.mkdirs()) return false;
         File cacheFile = proximityCacheFileFor(contentHash, cacheDir, centerLatitude, centerLongitude);
         File tmp = new File(cacheDir, cacheFile.getName() + ".tmp");
