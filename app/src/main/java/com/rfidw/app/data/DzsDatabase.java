@@ -506,7 +506,7 @@ public class DzsDatabase implements Closeable {
         Set<String> codes = new HashSet<>();
         for (List<RoIndexEntry> entries : roByPairKey.values()) {
             for (RoIndexEntry entry : entries) {
-                codes.add(entry.tudu);
+                codes.add(Tudu.uduCode(entry.tudu));
             }
         }
         return codes.size();
@@ -654,30 +654,30 @@ public class DzsDatabase implements Closeable {
         return best[0];
     }
 
-    /** Nejbližší výhybka pro každý unikátní TUDU kód, seřazené podle vzdálenosti. */
+    /** Nejbližší výhybka pro každý unikátní UDU (prvních 5 znaků TUDU), seřazené podle vzdálenosti. */
     public List<GpsMatch> findNearestDistinctTudu(double latitude, double longitude, int limit) {
         if (limit <= 0) return Collections.emptyList();
         if (roByRoKey.isEmpty()) return Collections.emptyList();
         if (!vyhybkaGpsStore.isEmpty()) {
-            Map<String, GpsMatch> bestByTudu = new HashMap<>();
+            Map<String, GpsMatch> bestByUdu = new HashMap<>();
             double cosLat = Math.cos(Math.toRadians(latitude));
             SpatialGrid grid = spatialGrid();
             for (int ring = 0; ring <= SpatialGrid.MAX_RING; ring++) {
                 grid.forEachInRing(latitude, longitude, ring, idx -> {
-                    String tudu = vyhybkaGpsStore.tuduAt(idx);
+                    String udu = Tudu.uduCode(vyhybkaGpsStore.tuduAt(idx));
                     double dLat = vyhybkaGpsStore.latitudeAt(idx) - latitude;
                     double dLon = (vyhybkaGpsStore.longitudeAt(idx) - longitude) * cosLat;
                     double distSq = dLat * dLat + dLon * dLon;
-                    GpsMatch existing = bestByTudu.get(tudu);
+                    GpsMatch existing = bestByUdu.get(udu);
                     if (existing != null) {
                         double existingDistSq = approximateDistSq(
                                 latitude, longitude, existing.latitude, existing.longitude, cosLat);
                         if (distSq >= existingDistSq) return;
                     }
-                    bestByTudu.put(tudu, vyhybkaToMatch(idx, latitude, longitude));
+                    bestByUdu.put(udu, vyhybkaToMatch(idx, latitude, longitude));
                 });
-                if (bestByTudu.size() >= limit) {
-                    List<GpsMatch> candidates = new ArrayList<>(bestByTudu.values());
+                if (bestByUdu.size() >= limit) {
+                    List<GpsMatch> candidates = new ArrayList<>(bestByUdu.values());
                     candidates.sort(Comparator.comparingDouble(m -> m.distanceM));
                     GpsMatch nth = candidates.get(limit - 1);
                     double nthDistSq = approximateDistSq(
@@ -686,14 +686,14 @@ public class DzsDatabase implements Closeable {
                     if (nthDistSq <= ringBoundDeg * ringBoundDeg) break;
                 }
             }
-            List<GpsMatch> sorted = new ArrayList<>(bestByTudu.values());
+            List<GpsMatch> sorted = new ArrayList<>(bestByUdu.values());
             sorted.sort(Comparator.comparingDouble(m -> m.distanceM));
             if (sorted.size() <= limit) return sorted;
             return new ArrayList<>(sorted.subList(0, limit));
         }
         ensureGpsLatLonIndex();
 
-        Map<String, GpsMatch> bestByTudu = new HashMap<>();
+        Map<String, GpsMatch> bestByUdu = new HashMap<>();
 
         for (int ring = 0; ring <= BBOX_MAX_RING; ring++) {
             double delta = BBOX_CELL_DEG * (ring + 1);
@@ -701,24 +701,25 @@ public class DzsDatabase implements Closeable {
                 RoIndexEntry ro = roByRoKey.get(roKey(point.superZId, point.superDId, point.roId));
                 if (ro == null) return;
                 double dist = haversineM(latitude, longitude, point.latitude, point.longitude);
+                String udu = Tudu.uduCode(ro.tudu);
 
-                GpsMatch existing = bestByTudu.get(ro.tudu);
+                GpsMatch existing = bestByUdu.get(udu);
                 if (existing != null && dist >= existing.distanceM) return;
 
-                bestByTudu.put(ro.tudu, new GpsMatch(point.superZId, point.superDId, ro.tudu,
+                bestByUdu.put(udu, new GpsMatch(point.superZId, point.superDId, ro.tudu,
                         ro.vyhybka, point.latitude, point.longitude, dist, ro.poloha));
             });
 
-            if (bestByTudu.size() >= limit) {
+            if (bestByUdu.size() >= limit) {
                 double ringBoundM = delta * 111_000.0;
-                double worstDist = bestByTudu.values().stream()
+                double worstDist = bestByUdu.values().stream()
                         .mapToDouble(m -> m.distanceM)
                         .max().orElse(Double.MAX_VALUE);
                 if (worstDist <= ringBoundM) break;
             }
         }
 
-        List<GpsMatch> sorted = new ArrayList<>(bestByTudu.values());
+        List<GpsMatch> sorted = new ArrayList<>(bestByUdu.values());
         sorted.sort(Comparator.comparingDouble(m -> m.distanceM));
         if (sorted.size() <= limit) return sorted;
         return new ArrayList<>(sorted.subList(0, limit));

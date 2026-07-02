@@ -13,6 +13,21 @@ public class Tudu {
         this.code = code;
     }
 
+    /**
+     * UDU – prvních 5 znaků TUDU (např. 1501J). V náhledu reprezentuje celou stanici;
+     * do EPC a CSV se zapisuje plný kód včetně 6. znaku (podtypu).
+     */
+    public static String uduCode(String fullCode) {
+        if (fullCode == null) return "";
+        String trimmed = fullCode.trim();
+        if (trimmed.isEmpty()) return "";
+        return trimmed.length() <= 5 ? trimmed : trimmed.substring(0, 5);
+    }
+
+    public String uduCode() {
+        return uduCode(code);
+    }
+
     public Vyhybka findOrCreate(int cislo) {
         for (Vyhybka v : vyhybky) {
             if (v.cislo == cislo && v.iob.isEmpty()) return v;
