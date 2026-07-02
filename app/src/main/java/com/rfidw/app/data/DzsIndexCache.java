@@ -30,7 +30,7 @@ final class DzsIndexCache {
 
     private static final int MAGIC = 0x445A5349; // "DZSI"
     private static final int VERSION = 18;
-    /** Cache indexu okolí GPS (jen výhybky v bbox ±0,05°). */
+    /** Cache indexu okolí GPS (bbox ±0,04° ~4 km). */
     private static final int PROXIMITY_VERSION = 19;
     private static final int VERSION_LEGACY_V16 = 16;
     private static final int VERSION_LEGACY_V14 = 14;

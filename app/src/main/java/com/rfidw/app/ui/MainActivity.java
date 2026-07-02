@@ -12,6 +12,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.graphics.Typeface;
 import android.provider.DocumentsContract;
 import android.provider.MediaStore;
@@ -139,6 +140,10 @@ public class MainActivity extends AppCompatActivity {
     private static final long GPS_LOOKUP_MIN_INTERVAL_MS = 1000;
     private static final long GPS_LOOKUP_TIMEOUT_MS = 10_000;
     private static final long GPS_DB_LOAD_POLL_MS = 500;
+    /** Krátké čekání na GPS při automatickém načtení – pak se DB otevře i bez fixu. */
+    private static final long GPS_DB_LOAD_MAX_WAIT_AUTO_MS = 8_000;
+    /** Při ručním výběru souboru lze počkat déle, ale ne donekonečna. */
+    private static final long GPS_DB_LOAD_MAX_WAIT_MANUAL_MS = 20_000;
     private static final int GPS_NEARBY_TUDU_LIMIT = 10;
     private static final String PREFS_NAME = "rfidgogps";
     private static final String PREF_GPS_TEST_MODE = "gpsTestMode";
@@ -2350,7 +2355,9 @@ public class MainActivity extends AppCompatActivity {
     private void tryAutoLoadDefaultDatabase() {
         String savedName = prefs.getString(PREF_DB_DISPLAY_NAME, DEFAULT_DB_NAME);
         beginCard1DbLoad(savedName);
-        if (isFreshInstallDbState() && needsStoragePermission()) {
+        // MediaStore (Android 10+) funguje bez READ_EXTERNAL_STORAGE – oprávnění jen pro přímý scan disku.
+        if (isFreshInstallDbState() && needsStoragePermission()
+                && Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             pendingAutoLoadAfterStorage = true;
             ui.post(this::requestStoragePermissionIfNeeded);
         }
@@ -2387,7 +2394,7 @@ public class MainActivity extends AppCompatActivity {
             if (uriStr != null && tryLoadFromPersistedUri(Uri.parse(uriStr))) {
                 return;
             }
-            if (needsStoragePermission()) {
+            if (needsStoragePermission() && Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                 pendingAutoLoadAfterStorage = true;
                 ui.post(() -> {
                     endCard1DbLoad();
@@ -2545,6 +2552,8 @@ public class MainActivity extends AppCompatActivity {
 
     private Uri findDefaultDatabaseUriViaMediaStore() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null;
+        Uri exact = findDatabaseUriInDownloadsByName(DEFAULT_DB_NAME);
+        if (exact != null) return exact;
         Uri collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI;
         String[] projection = { MediaStore.Downloads._ID, MediaStore.Downloads.DISPLAY_NAME };
         Uri bestUri = null;
@@ -2577,6 +2586,22 @@ public class MainActivity extends AppCompatActivity {
             }
         } catch (Exception ignored) { }
         return bestUri;
+    }
+
+    private Uri findDatabaseUriInDownloadsByName(String displayName) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || displayName == null) return null;
+        Uri collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI;
+        String selection = MediaStore.Downloads.DISPLAY_NAME + " = ?";
+        String[] args = {displayName};
+        try (Cursor c = getContentResolver().query(collection,
+                new String[]{MediaStore.Downloads._ID},
+                selection, args, MediaStore.Downloads.DATE_MODIFIED + " DESC")) {
+            if (c == null || !c.moveToFirst()) return null;
+            int idCol = c.getColumnIndexOrThrow(MediaStore.Downloads._ID);
+            return ContentUris.withAppendedId(collection, c.getLong(idCol));
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private boolean canReadSharedStorage() {
@@ -2654,23 +2679,19 @@ public class MainActivity extends AppCompatActivity {
                     uiReady.countDown();
                 });
                 uiReady.await(3, TimeUnit.SECONDS);
-                LocationCache.Snapshot snap = waitForGpsFix(loadId);
+                long gpsWaitMs = showErrorToast
+                        ? GPS_DB_LOAD_MAX_WAIT_MANUAL_MS : GPS_DB_LOAD_MAX_WAIT_AUTO_MS;
+                LocationCache.Snapshot snap = waitForGpsFix(loadId, gpsWaitMs);
                 if (loadId != dbLoadGeneration) return;
-                if (!snap.valid) {
-                    runOnUiThreadIfAlive(loadId, () -> {
-                        endCard1DbLoad();
-                        expandCard1Body();
-                        tvSourceFile.setText(getString(R.string.gps_db_load_no_fix));
-                        if (showErrorToast) {
-                            toast(getString(R.string.gps_db_load_no_fix));
-                        }
-                    });
-                    return;
+                if (snap.valid) {
+                    initLat = snap.latitude;
+                    initLon = snap.longitude;
+                    runOnUiThreadIfAlive(loadId, () ->
+                            updateCard1DbProgress(getString(R.string.gps_db_indexing), 15, true));
+                } else {
+                    runOnUiThreadIfAlive(loadId, () ->
+                            updateCard1DbProgress(getString(R.string.gps_db_open_without_fix), 15, true));
                 }
-                initLat = snap.latitude;
-                initLon = snap.longitude;
-                runOnUiThreadIfAlive(loadId, () ->
-                        updateCard1DbProgress(getString(R.string.gps_db_indexing), 15, true));
             } else if (locationCache != null) {
                 LocationCache.Snapshot snap = locationCache.getSnapshot();
                 if (snap.valid) {
@@ -2755,11 +2776,17 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private LocationCache.Snapshot waitForGpsFix(long loadId) throws InterruptedException {
+    private LocationCache.Snapshot waitForGpsFix(long loadId, long maxWaitMs) throws InterruptedException {
+        long deadline = maxWaitMs > 0
+                ? SystemClock.elapsedRealtime() + maxWaitMs
+                : Long.MAX_VALUE;
         while (loadId == dbLoadGeneration) {
             if (locationCache != null) {
                 LocationCache.Snapshot snap = locationCache.getSnapshot();
                 if (snap.valid) return snap;
+            }
+            if (SystemClock.elapsedRealtime() >= deadline) {
+                return LocationCache.Snapshot.empty();
             }
             Thread.sleep(GPS_DB_LOAD_POLL_MS);
         }
