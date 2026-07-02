@@ -20,14 +20,15 @@ import java.util.Set;
  * Výstupní tabulka .CSV.
  *
  * Sloupce:
- *   ID_RFID ; EPC ; TID ; rok ; TUDU ; vyhybka ; cip ; POLOHA ; latitude ; longitude ; accuracy_m ; gps_time ; USER_ID
+ *   ID_RFID ; EPC ; TID ; rok ; TUDU ; vyhybka ; cip ; POLOHA ; RO_ID ;
+ *   latitude ; longitude ; accuracy_m ; gps_time ; USER_ID
  *
  * Klíčem je ID_RFID – při zápisu stejného ID_RFID se daný řádek přepíše.
  */
 public class CsvStore {
 
     public static final String[] HEADER = {
-            "ID_RFID", "EPC", "TID", "rok", "TUDU", "vyhybka", "cip", "POLOHA",
+            "ID_RFID", "EPC", "TID", "rok", "TUDU", "vyhybka", "cip", "POLOHA", "RO_ID",
             "latitude", "longitude", "accuracy_m", "gps_time", "USER_ID"
     };
     private static final String SEP = ";";
@@ -41,6 +42,7 @@ public class CsvStore {
         public String vyhybka;
         public String cast;
         public String poloha;
+        public String roId;
         public String latitude;
         public String longitude;
         public String accuracyM;
@@ -49,17 +51,16 @@ public class CsvStore {
 
         public String[] toArray() {
             return new String[]{
-                    idRfid, epc, tid, rok, tudu, vyhybka, cast, poloha,
+                    idRfid, epc, tid, rok, tudu, vyhybka, cast, poloha, roId,
                     latitude, longitude, accuracyM, gpsTime, userId
             };
         }
     }
 
     private final File file;
-    // zachovává pořadí vložení, klíč = ID_RFID
     private final Map<String, Row> rows = new LinkedHashMap<>();
-    // rychlý index: TUDU|výhybka → množina zapsaných částí
-    private final Map<String, Set<Integer>> castsByVyhybka = new HashMap<>();
+    /** TUDU|výhybka|RO_ID → množina zapsaných částí */
+    private final Map<String, Set<Integer>> castsByVyhybkaRo = new HashMap<>();
 
     public CsvStore(File file) {
         this.file = file;
@@ -74,14 +75,12 @@ public class CsvStore {
 
     public int size() { return rows.size(); }
 
-    /** Vrátí poslední vložený řádek nebo null, pokud je tabulka prázdná. */
     public Row getLastRow() {
         if (rows.isEmpty()) return null;
         List<Row> list = getRows();
         return list.get(list.size() - 1);
     }
 
-    /** Vrátí nejvyšší hodnotu ID_RFID v tabulce, nebo 0 pokud je tabulka prázdná. */
     public synchronized long getMaxIdRfid() {
         long max = 0;
         for (Row r : rows.values()) {
@@ -91,7 +90,6 @@ public class CsvStore {
         return max;
     }
 
-    /** Vloží nebo přepíše řádek podle ID_RFID (jen v paměti). */
     public synchronized void upsert(Row row) {
         Row previous = rows.get(row.idRfid);
         if (previous != null) removeFromCastIndex(previous);
@@ -101,10 +99,9 @@ public class CsvStore {
 
     public synchronized void clear() {
         rows.clear();
-        castsByVyhybka.clear();
+        castsByVyhybkaRo.clear();
     }
 
-    /** Vrátí posledních {@code max} vložených řádků (chronologicky od nejstaršího). */
     public List<Row> getLastRows(int max) {
         List<Row> all = getRows();
         if (max <= 0 || all.isEmpty()) return new ArrayList<>();
@@ -112,7 +109,6 @@ public class CsvStore {
         return new ArrayList<>(all.subList(from, all.size()));
     }
 
-    /** Odstraní poslední vložený řádek (jen v paměti). Vrátí smazaný řádek nebo null. */
     public synchronized Row removeLast() {
         if (rows.isEmpty()) return null;
         List<Row> list = getRows();
@@ -122,28 +118,39 @@ public class CsvStore {
         return last;
     }
 
-    /** Vrátí množinu částí výhybky, které jsou v CSV pro dané TUDU. */
+    /** Souhrn částí výhybky napříč všemi RO_ID (zpětná kompatibilita). */
     public synchronized Set<Integer> getWrittenCasts(String tuduCode, int vyhybkaCislo) {
-        Set<Integer> casts = castsByVyhybka.get(vyhybkaKey(tuduCode, vyhybkaCislo));
+        Set<Integer> merged = new HashSet<>();
+        String prefix = tuduCode + "\0" + vyhybkaCislo + "\0";
+        for (Map.Entry<String, Set<Integer>> e : castsByVyhybkaRo.entrySet()) {
+            if (e.getKey().startsWith(prefix)) merged.addAll(e.getValue());
+        }
+        return merged.isEmpty() ? Collections.emptySet() : merged;
+    }
+
+    public synchronized Set<Integer> getWrittenCasts(String tuduCode, int vyhybkaCislo, String roId) {
+        Set<Integer> casts = castsByVyhybkaRo.get(vyhybkaRoKey(tuduCode, vyhybkaCislo, roId));
         if (casts == null || casts.isEmpty()) return Collections.emptySet();
         return new HashSet<>(casts);
     }
 
-    /** Uloží aktuální stav na disk. Volat mimo UI vlákno. */
+    public synchronized boolean hasWrittenCast(String tuduCode, int vyhybkaCislo, String roId, int cast) {
+        return getWrittenCasts(tuduCode, vyhybkaCislo, roId).contains(cast);
+    }
+
     public synchronized void persist() {
         save();
     }
 
-    // ----------------------------------------------------------- IO
-
     private void load() {
         rows.clear();
-        castsByVyhybka.clear();
+        castsByVyhybkaRo.clear();
         if (file == null || !file.exists()) return;
         try (BufferedReader br = new BufferedReader(new FileReader(file))) {
             String line;
             boolean first = true;
             boolean hasPolohaColumn = false;
+            boolean hasRoIdColumn = false;
             boolean hasUserIdColumn = false;
             while ((line = br.readLine()) != null) {
                 if (line.trim().isEmpty()) continue;
@@ -154,21 +161,31 @@ public class CsvStore {
                         for (String col : c) {
                             String name = col.trim();
                             if ("POLOHA".equalsIgnoreCase(name)) hasPolohaColumn = true;
+                            if ("RO_ID".equalsIgnoreCase(name)) hasRoIdColumn = true;
                             if ("USER_ID".equalsIgnoreCase(name)) hasUserIdColumn = true;
                         }
-                        continue; // hlavička
+                        continue;
                     }
                 }
                 Row r = new Row();
-                r.idRfid  = get(c, 0);
-                r.epc     = get(c, 1);
-                r.tid     = get(c, 2);
-                r.rok     = get(c, 3);
-                r.tudu    = get(c, 4);
+                r.idRfid = get(c, 0);
+                r.epc = get(c, 1);
+                r.tid = get(c, 2);
+                r.rok = get(c, 3);
+                r.tudu = get(c, 4);
                 r.vyhybka = get(c, 5);
-                r.cast    = get(c, 6);
-                if (hasPolohaColumn) {
+                r.cast = get(c, 6);
+                if (hasPolohaColumn && hasRoIdColumn) {
                     r.poloha = get(c, 7);
+                    r.roId = get(c, 8);
+                    r.latitude = get(c, 9);
+                    r.longitude = get(c, 10);
+                    r.accuracyM = get(c, 11);
+                    r.gpsTime = get(c, 12);
+                    r.userId = hasUserIdColumn ? get(c, 13) : "";
+                } else if (hasPolohaColumn) {
+                    r.poloha = get(c, 7);
+                    r.roId = "";
                     r.latitude = get(c, 8);
                     r.longitude = get(c, 9);
                     r.accuracyM = get(c, 10);
@@ -176,6 +193,7 @@ public class CsvStore {
                     r.userId = hasUserIdColumn ? get(c, 12) : "";
                 } else {
                     r.poloha = "";
+                    r.roId = "";
                     r.latitude = get(c, 7);
                     r.longitude = get(c, 8);
                     r.accuracyM = get(c, 9);
@@ -188,9 +206,8 @@ public class CsvStore {
                 }
             }
         } catch (Exception e) {
-            // poškozený soubor – začneme s prázdnou tabulkou
             rows.clear();
-            castsByVyhybka.clear();
+            castsByVyhybkaRo.clear();
         }
     }
 
@@ -212,16 +229,17 @@ public class CsvStore {
         }
     }
 
-    private static String vyhybkaKey(String tuduCode, int vyhybkaCislo) {
-        return tuduCode + "\0" + vyhybkaCislo;
+    private static String vyhybkaRoKey(String tuduCode, int vyhybkaCislo, String roId) {
+        String ro = roId != null ? roId.trim() : "";
+        return tuduCode + "\0" + vyhybkaCislo + "\0" + ro;
     }
 
     private void addToCastIndex(Row row) {
         int cast = parseInt(row.cast, -1);
         int vyhybka = parseInt(row.vyhybka, -1);
         if (row.tudu == null || row.tudu.isEmpty() || vyhybka < 0 || cast < 0) return;
-        castsByVyhybka
-                .computeIfAbsent(vyhybkaKey(row.tudu, vyhybka), k -> new HashSet<>())
+        castsByVyhybkaRo
+                .computeIfAbsent(vyhybkaRoKey(row.tudu, vyhybka, row.roId), k -> new HashSet<>())
                 .add(cast);
     }
 
@@ -229,10 +247,12 @@ public class CsvStore {
         int cast = parseInt(row.cast, -1);
         int vyhybka = parseInt(row.vyhybka, -1);
         if (row.tudu == null || row.tudu.isEmpty() || vyhybka < 0 || cast < 0) return;
-        Set<Integer> casts = castsByVyhybka.get(vyhybkaKey(row.tudu, vyhybka));
+        Set<Integer> casts = castsByVyhybkaRo.get(vyhybkaRoKey(row.tudu, vyhybka, row.roId));
         if (casts == null) return;
         casts.remove(cast);
-        if (casts.isEmpty()) castsByVyhybka.remove(vyhybkaKey(row.tudu, vyhybka));
+        if (casts.isEmpty()) {
+            castsByVyhybkaRo.remove(vyhybkaRoKey(row.tudu, vyhybka, row.roId));
+        }
     }
 
     private static String get(String[] arr, int i) {
@@ -266,7 +286,6 @@ public class CsvStore {
 
     private static String escape(String s) {
         if (s == null) return "";
-        // nahradíme oddělovač/nové řádky, ať se tabulka nerozbije
         return s.replace(SEP, " ").replace("\n", " ").replace("\r", " ");
     }
 }
