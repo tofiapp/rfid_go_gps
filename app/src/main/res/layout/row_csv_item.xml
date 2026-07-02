@@ -18,5 +18,4 @@
     <TextView android:id="@+id/cLon" android:layout_width="100dp" android:layout_height="wrap_content" android:textSize="12sp" android:paddingStart="6dp" android:paddingEnd="6dp"/>
     <TextView android:id="@+id/cAcc" android:layout_width="80dp" android:layout_height="wrap_content" android:textSize="12sp" android:paddingStart="6dp" android:paddingEnd="6dp"/>
     <TextView android:id="@+id/cGpsTime" android:layout_width="140dp" android:layout_height="wrap_content" android:textSize="12sp" android:paddingStart="6dp" android:paddingEnd="6dp"/>
-    <TextView android:id="@+id/cUserId" android:layout_width="70dp" android:layout_height="wrap_content" android:textSize="12sp" android:paddingStart="6dp" android:paddingEnd="6dp"/>
 </LinearLayout>
