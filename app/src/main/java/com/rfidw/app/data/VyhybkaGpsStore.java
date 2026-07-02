@@ -87,6 +87,24 @@ final class VyhybkaGpsStore {
         return new Builder();
     }
 
+    static void appendAll(Builder builder, VyhybkaGpsStore store) {
+        if (store == null || store.isEmpty()) return;
+        for (int i = 0; i < store.size(); i++) {
+            builder.add(store.pairKeyAt(i), store.tuduAt(i), store.vyhybkaAt(i),
+                    store.roIdAt(i), store.polohaAt(i),
+                    store.latitudeAt(i), store.longitudeAt(i));
+        }
+    }
+
+    static VyhybkaGpsStore merge(VyhybkaGpsStore existing, VyhybkaGpsStore added) {
+        if (existing == null || existing.isEmpty()) return added != null ? added : empty();
+        if (added == null || added.isEmpty()) return existing;
+        Builder builder = builder();
+        appendAll(builder, existing);
+        appendAll(builder, added);
+        return builder.build();
+    }
+
     static VyhybkaGpsStore empty() {
         return new VyhybkaGpsStore(new String[0], new String[0], new int[0],
                 new String[0], new String[0], new float[0], new float[0]);
