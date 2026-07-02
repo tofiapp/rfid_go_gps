@@ -302,13 +302,17 @@ public class DzsDatabase implements Closeable {
                 if (indexCacheDir != null) {
                     report(listener, "Kontrola cache okolí", 15);
                     String cacheKey = DzsIndexCache.resolveCacheKey(sourceFile, indexCacheDir);
-                    proximityCached = tryLoadProximityCache(sourceFile, indexCacheDir, cacheKey,
-                            initialLatitude, initialLongitude);
+                    proximityCached = DzsIndexCache.tryLoadProximity(
+                            sourceFile, cacheKey, indexCacheDir,
+                            initialLatitude, initialLongitude,
+                            PROXIMITY_RELOAD_MOVE_KM * 1000.0);
                     if (proximityCached == null) {
                         String fastKey = DzsIndexCache.fastDbKey(sourceFile);
                         if (!fastKey.equals(cacheKey)) {
-                            proximityCached = tryLoadProximityCache(sourceFile, indexCacheDir, fastKey,
-                                    initialLatitude, initialLongitude);
+                            proximityCached = DzsIndexCache.tryLoadProximity(
+                                    sourceFile, fastKey, indexCacheDir,
+                                    initialLatitude, initialLongitude,
+                                    PROXIMITY_RELOAD_MOVE_KM * 1000.0);
                         }
                     }
                 }
@@ -392,7 +396,7 @@ public class DzsDatabase implements Closeable {
     private static void copyFile(File source, File dest) throws IOException {
         try (InputStream in = new FileInputStream(source);
              OutputStream out = new FileOutputStream(dest)) {
-            byte[] buf = new byte[1_048_576];
+            byte[] buf = new byte[262_144];
             int n;
             while ((n = in.read(buf)) > 0) {
                 out.write(buf, 0, n);
@@ -402,27 +406,11 @@ public class DzsDatabase implements Closeable {
 
     private static void applyReadPragmas(SQLiteDatabase db) {
         try {
-            db.execSQL("PRAGMA cache_size = -128000");
+            db.execSQL("PRAGMA cache_size = -64000");
             db.execSQL("PRAGMA temp_store = MEMORY");
-            db.execSQL("PRAGMA mmap_size = 536870912");
+            db.execSQL("PRAGMA mmap_size = 268435456");
         } catch (Exception ignored) {
         }
-    }
-
-    private static DzsIndexCache.LoadedIndex tryLoadProximityCache(
-            File sourceFile, File indexCacheDir, String cacheKey,
-            double latitude, double longitude) {
-        if (DzsIndexCache.allBBoxCellsCached(cacheKey, indexCacheDir, latitude, longitude,
-                PROXIMITY_BBOX_DEG)) {
-            DzsIndexCache.LoadedIndex fromCells = DzsIndexCache.tryLoadProximityCells(
-                    sourceFile, cacheKey, indexCacheDir, latitude, longitude, PROXIMITY_BBOX_DEG);
-            if (fromCells != null) {
-                return fromCells;
-            }
-        }
-        return DzsIndexCache.tryLoadProximity(
-                sourceFile, cacheKey, indexCacheDir, latitude, longitude,
-                PROXIMITY_RELOAD_MOVE_KM * 1000.0);
     }
 
     private void ensureGpsRoLookupIndex() {
@@ -447,14 +435,10 @@ public class DzsDatabase implements Closeable {
         final File cacheDir = storageCacheDir;
         Thread t = new Thread(() -> {
             synchronized (this) {
-                if (!proximityLoaded) return;
+                if (!proximityLoaded || vyhybkaGpsStore.isEmpty()) return;
                 File indexCacheDir = new File(cacheDir, "dzs_index");
                 String key = DzsIndexCache.resolveCacheKey(dbFile, indexCacheDir);
-                if (!vyhybkaGpsStore.isEmpty()) {
-                    saveProximityCache(key, centerLatitude, centerLongitude);
-                    saveProximityCellCache(key);
-                }
-                finalizeProximityCellCache(key, centerLatitude, centerLongitude);
+                saveProximityCache(key, centerLatitude, centerLongitude);
             }
         }, "dzs-prox-cache");
         t.setDaemon(true);
@@ -472,12 +456,9 @@ public class DzsDatabase implements Closeable {
                 if (!existing.startsWith("f_")) return;
                 String sha = DzsIndexCache.resolveContentHash(dbFile, indexCacheDir);
                 synchronized (this) {
-                    if (proximityLoaded && proximityCenterLat != null && proximityCenterLon != null) {
+                    if (proximityLoaded && proximityCenterLat != null && proximityCenterLon != null
+                            && !vyhybkaGpsStore.isEmpty()) {
                         saveProximityCache(sha, proximityCenterLat, proximityCenterLon);
-                        if (!vyhybkaGpsStore.isEmpty()) {
-                            saveProximityCellCache(sha);
-                        }
-                        finalizeProximityCellCache(sha, proximityCenterLat, proximityCenterLon);
                     }
                 }
             } catch (Exception ignored) {
@@ -501,79 +482,11 @@ public class DzsDatabase implements Closeable {
         proximityLoaded = true;
     }
 
-    /** Sloučí načtenou cache do stávajícího indexu (např. při přesunu do nové oblasti). */
-    private void mergeLoadedProximity(DzsIndexCache.LoadedIndex cached,
-                                      double latitude, double longitude) {
-        if (cached == null) return;
-        Map<String, List<RoIndexEntry>> converted = convertRoIndex(cached.roByPairKey);
-        for (Map.Entry<String, List<RoIndexEntry>> e : converted.entrySet()) {
-            String[] ids = splitPairKey(e.getKey());
-            for (RoIndexEntry entry : e.getValue()) {
-                if (entry.roId == null) continue;
-                String entryRoKey = roKey(ids[0], ids[1], entry.roId);
-                if (!roByRoKey.containsKey(entryRoKey)) {
-                    mergeRoEntry(ids[0], ids[1], entry);
-                }
-            }
-        }
-        if (cached.vyhybkaGpsStore != null && !cached.vyhybkaGpsStore.isEmpty()) {
-            if (vyhybkaGpsStore.isEmpty()) {
-                vyhybkaGpsStore = cached.vyhybkaGpsStore;
-            } else {
-                vyhybkaGpsStore = VyhybkaGpsStore.merge(vyhybkaGpsStore, cached.vyhybkaGpsStore);
-            }
-        }
-        spatialGrid = null;
-        proximityCenterLat = latitude;
-        proximityCenterLon = longitude;
-        proximityLoaded = true;
-    }
-
-    private DzsIndexCache.LoadedIndex tryLoadProximityCellsResolved(double latitude,
-                                                                    double longitude) {
-        if (storageCacheDir == null || sourceDbFile == null) return null;
-        File indexCacheDir = new File(storageCacheDir, "dzs_index");
-        String cacheKey = DzsIndexCache.resolveCacheKey(sourceDbFile, indexCacheDir);
-        DzsIndexCache.LoadedIndex loaded = loadProximityCellsIfComplete(
-                sourceDbFile, cacheKey, indexCacheDir, latitude, longitude);
-        if (loaded != null) return loaded;
-        String fastKey = DzsIndexCache.fastDbKey(sourceDbFile);
-        if (fastKey.equals(cacheKey)) return null;
-        return loadProximityCellsIfComplete(sourceDbFile, fastKey, indexCacheDir, latitude, longitude);
-    }
-
-    private static DzsIndexCache.LoadedIndex loadProximityCellsIfComplete(
-            File sourceFile, String cacheKey, File indexCacheDir,
-            double latitude, double longitude) {
-        if (!DzsIndexCache.allBBoxCellsCached(cacheKey, indexCacheDir, latitude, longitude,
-                PROXIMITY_BBOX_DEG)) {
-            return null;
-        }
-        return DzsIndexCache.tryLoadProximityCells(
-                sourceFile, cacheKey, indexCacheDir, latitude, longitude, PROXIMITY_BBOX_DEG);
-    }
-
     private void saveProximityCache(String contentHash, double centerLatitude, double centerLongitude) {
         if (sourceDbFile == null || storageCacheDir == null || contentHash == null) return;
         File indexCacheDir = new File(storageCacheDir, "dzs_index");
         DzsIndexCache.saveProximity(sourceDbFile, contentHash, indexCacheDir,
                 centerLatitude, centerLongitude, toRoCache(roByPairKey), vyhybkaGpsStore);
-    }
-
-    private void saveProximityCellCache(String contentHash) {
-        if (sourceDbFile == null || storageCacheDir == null || contentHash == null) return;
-        if (contentHash.isEmpty() || vyhybkaGpsStore.isEmpty()) return;
-        File indexCacheDir = new File(storageCacheDir, "dzs_index");
-        DzsIndexCache.saveProximityCells(sourceDbFile, contentHash, indexCacheDir,
-                toRoCache(roByPairKey), vyhybkaGpsStore);
-    }
-
-    private void finalizeProximityCellCache(String contentHash, double latitude, double longitude) {
-        if (sourceDbFile == null || storageCacheDir == null || contentHash == null) return;
-        if (contentHash.isEmpty()) return;
-        File indexCacheDir = new File(storageCacheDir, "dzs_index");
-        DzsIndexCache.finalizeProximityCellCache(sourceDbFile, contentHash, indexCacheDir,
-                latitude, longitude, PROXIMITY_BBOX_DEG);
     }
 
     private static void report(OpenProgressListener listener, String phase, int percent) {
@@ -1166,20 +1079,6 @@ public class DzsDatabase implements Closeable {
     }
 
     private int loadProximityIndex(double latitude, double longitude, OpenProgressListener listener) {
-        DzsIndexCache.LoadedIndex fromCells = tryLoadProximityCellsResolved(latitude, longitude);
-        if (fromCells != null) {
-            if (roByPairKey.isEmpty() && roByRoKey.isEmpty() && vyhybkaGpsStore.isEmpty()) {
-                applyLoadedProximity(fromCells, latitude, longitude);
-            } else {
-                mergeLoadedProximity(fromCells, latitude, longitude);
-            }
-            if (listener != null) {
-                report(listener, String.format(Locale.ROOT,
-                        "Okolí GPS z cache buněk (%d výhybek)", vyhybkaGpsStore.size()), 80);
-            }
-            return vyhybkaGpsStore.size();
-        }
-
         double minLat = latitude - PROXIMITY_BBOX_DEG;
         double maxLat = latitude + PROXIMITY_BBOX_DEG;
         double minLon = longitude - PROXIMITY_BBOX_DEG;
@@ -1270,12 +1169,6 @@ public class DzsDatabase implements Closeable {
         proximityCenterLat = latitude;
         proximityCenterLon = longitude;
         proximityLoaded = true;
-        File indexCacheDir = storageCacheDir != null ? new File(storageCacheDir, "dzs_index") : null;
-        if (indexCacheDir != null && sourceDbFile != null) {
-            String cacheKey = DzsIndexCache.resolveCacheKey(sourceDbFile, indexCacheDir);
-            saveProximityCellCache(cacheKey);
-            finalizeProximityCellCache(cacheKey, latitude, longitude);
-        }
         if (listener != null) {
             report(listener, String.format(Locale.ROOT,
                     "Okolí GPS načteno (%d výhybek)", added), 80);
