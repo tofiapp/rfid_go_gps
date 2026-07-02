@@ -922,6 +922,25 @@ public class DzsDatabase implements Closeable {
         return new ArrayList<>(sorted.subList(0, limit));
     }
 
+    /** Pro danou stanici (UDU) vrátí vzdálenosti k výhybkám všech podtypů TUDU. */
+    public Map<String, Double> findVyhybkaDistancesForUdu(String uduCode,
+                                                          double latitude, double longitude) {
+        if (uduCode == null || uduCode.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<String, Double> result = new HashMap<>();
+        for (Tudu t : loadTuduForUdu(uduCode)) {
+            Map<Integer, Double> perTudu = findVyhybkaDistancesForTudu(t.code, latitude, longitude);
+            for (Tudu.Vyhybka v : t.vyhybky) {
+                Double dist = perTudu.get(v.cislo);
+                if (dist != null) {
+                    result.put(t.code + "\0" + v.cislo + "\0" + v.iob, dist);
+                }
+            }
+        }
+        return result;
+    }
+
     /** Pro daný TUDU vrátí nejbližší vzdálenost (m) k jednotlivým výhybkám. */
     public Map<Integer, Double> findVyhybkaDistancesForTudu(String tuduCode,
                                                               double latitude, double longitude) {
