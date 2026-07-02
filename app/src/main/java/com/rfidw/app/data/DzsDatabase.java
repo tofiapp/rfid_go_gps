@@ -257,6 +257,7 @@ public class DzsDatabase implements Closeable {
     private volatile String indexProgressPhase = "";
     private volatile int indexProgressPercent = -1;
     private volatile IndexProgressListener indexProgressListener;
+    private volatile String lastIndexError = "";
 
     private DzsDatabase(SQLiteDatabase db, GpsColumns gpsColumns, RoColumns roColumns,
                         Map<String, List<RoIndexEntry>> roByPairKey,
@@ -300,8 +301,8 @@ public class DzsDatabase implements Closeable {
                                    Double initialLatitude, Double initialLongitude) throws Exception {
         File sourceFile = new File(path);
         File dbFile = resolveDatabaseFile(sourceFile, cacheDir, listener);
-        boolean writableCopy = cacheDir != null && !cacheDir.equals(sourceFile.getParentFile());
-        SQLiteDatabase db = openSqliteDatabase(dbFile, writableCopy);
+        // Vždy zapisovatelně, pokud máme cache adresář (běžná cesta dzs_source.db v files/dzs/).
+        SQLiteDatabase db = openSqliteDatabase(dbFile, cacheDir != null);
         try {
             applyReadPragmas(db);
             report(listener, "Kontrola schématu", 5);
@@ -394,6 +395,12 @@ public class DzsDatabase implements Closeable {
         return fullIndexReady;
     }
 
+    /** Poslední chyba pozadí indexace (pro diagnostiku v UI / logcat). */
+    public String getLastIndexError() {
+        String err = lastIndexError;
+        return err != null ? err : "";
+    }
+
     public void setIndexProgressListener(IndexProgressListener listener) {
         indexProgressListener = listener;
         if (listener == null) return;
@@ -419,7 +426,7 @@ public class DzsDatabase implements Closeable {
         if (!source.isFile()) {
             throw new Exception("Databáze nenalezena: " + source.getAbsolutePath());
         }
-        if (cacheDir == null || cacheDir.equals(source.getParentFile())) {
+        if (cacheDir == null) {
             return source;
         }
         report(listener, "Kopíruji databázi do cache", 2);
@@ -432,6 +439,9 @@ public class DzsDatabase implements Closeable {
         if (!cached.isFile() || cached.length() != source.length()
                 || cached.lastModified() < source.lastModified()) {
             copyFile(source, cached);
+        } else if (cached.getAbsolutePath().equals(source.getAbsolutePath())) {
+            // Zdroj už je pracovní kopie – nekopírovat sám do sebe.
+            return source;
         }
         return cached;
     }
@@ -516,6 +526,7 @@ public class DzsDatabase implements Closeable {
 
     private void runBackgroundFullIndex() {
         try {
+            lastIndexError = "";
             reportIndexProgress("Kontrola cache indexu", 0);
             waitForForegroundIdle();
 
@@ -573,7 +584,8 @@ public class DzsDatabase implements Closeable {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
-            Log.w(TAG, "Plná indexace databáze selhala", e);
+            lastIndexError = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            Log.w(TAG, "Plná indexace databáze selhala: " + lastIndexError, e);
             reportIndexProgress("Indexace selhala", -1);
         } finally {
             backgroundIndexRunning = false;

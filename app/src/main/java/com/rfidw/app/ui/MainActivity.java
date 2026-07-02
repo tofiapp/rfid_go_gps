@@ -527,6 +527,12 @@ public class MainActivity extends AppCompatActivity {
                     text = phase;
                 } else {
                     text = getString(R.string.db_index_failed);
+                    if (dzsDatabase != null) {
+                        String detail = dzsDatabase.getLastIndexError();
+                        if (detail != null && !detail.isEmpty()) {
+                            text = text + "\n" + detail;
+                        }
+                    }
                 }
                 tvDbIndexProgress.setText(text);
             }
