@@ -39,6 +39,12 @@ public class DzsDatabase implements Closeable {
     private static final double PROXIMITY_BBOX_DEG = 0.04;
     /** Po přesunu o tuto vzdálenost se znovu načte okolí GPS. */
     private static final double PROXIMITY_RELOAD_MOVE_KM = 3.0;
+    /** Mřížka středů pro pozadí – stejný krok jako reload (~3 km). */
+    private static final double PREFETCH_GRID_KM = PROXIMITY_RELOAD_MOVE_KM;
+    /** Max. poloměr spirály od kotvy (~3 km × 300 ≈ 900 km). */
+    private static final int PREFETCH_MAX_RING = 300;
+    private static final long PREFETCH_BETWEEN_CELLS_MS = 300;
+    private static final long PREFETCH_RING_PAUSE_MS = 30_000;
 
     /** Průběh otevírání databáze (fáze + odhad procent 0–100, nebo -1). */
     public interface OpenProgressListener {
@@ -237,7 +243,20 @@ public class DzsDatabase implements Closeable {
     private volatile Double proximityCenterLon;
     private File sourceDbFile;
     private File storageCacheDir;
-    private volatile int prefetchGeneration;
+    private final Object dbQueryLock = new Object();
+    private volatile boolean prefetchEngineRunning;
+    private volatile int foregroundDbOps;
+    private volatile double prefetchAnchorLat;
+    private volatile double prefetchAnchorLon;
+    private volatile boolean prefetchAnchorSet;
+    private volatile int prefetchRing;
+    private volatile int prefetchRingStep;
+    private final Set<Long> prefetchCellsDone = new HashSet<>();
+    private volatile boolean gpsBoundsLoaded;
+    private volatile double gpsBoundsMinLat;
+    private volatile double gpsBoundsMaxLat;
+    private volatile double gpsBoundsMinLon;
+    private volatile double gpsBoundsMaxLon;
 
     private DzsDatabase(SQLiteDatabase db, GpsColumns gpsColumns, RoColumns roColumns,
                         Map<String, List<RoIndexEntry>> roByPairKey,
@@ -328,7 +347,7 @@ public class DzsDatabase implements Closeable {
                             "Okolí GPS načteno (%d výhybek)", loaded), 90);
                 }
                 opened.scheduleBackgroundProximityCacheSave(initialLatitude, initialLongitude);
-                opened.scheduleBackgroundProximityPrefetch(initialLatitude, initialLongitude);
+                opened.ensureBackgroundPrefetchEngine(initialLatitude, initialLongitude);
                 opened.scheduleBackgroundContentHash();
             } else {
                 report(listener, "Čekám na GPS pro indexaci okolí", 40);
@@ -357,7 +376,11 @@ public class DzsDatabase implements Closeable {
             if (proximityCenterLat != null && proximityCenterLon != null) {
                 double movedKm = haversineM(proximityCenterLat, proximityCenterLon,
                         latitude, longitude) / 1000.0;
-                if (movedKm < PROXIMITY_RELOAD_MOVE_KM) return;
+                if (movedKm < PROXIMITY_RELOAD_MOVE_KM) {
+                    updatePrefetchAnchor(latitude, longitude);
+                    ensureBackgroundPrefetchEngine(latitude, longitude);
+                    return;
+                }
             }
             loadProximityIndex(latitude, longitude, null);
         }
@@ -448,50 +471,189 @@ public class DzsDatabase implements Closeable {
     }
 
     /**
-     * Na pozadí přednačte {@code .pidx} cache pro sousední oblasti (~3 km), aby při jízdě
-     * nemusel uživatel čekat na SQL scan při každém přesunu.
+     * Spustí (nebo udrží) dlouhodobý prefetch engine: po spirále od aktuální GPS
+     * postupně ukládá {@code .pidx} pro celou databázi, jedna oblast najednou,
+     * s pauzou když aplikace potřebuje DB na popředí.
      */
-    private void scheduleBackgroundProximityPrefetch(double centerLatitude, double centerLongitude) {
+    private void ensureBackgroundPrefetchEngine(double centerLatitude, double centerLongitude) {
         if (sourceDbFile == null || storageCacheDir == null) return;
-        final int generation = ++prefetchGeneration;
-        final double lat = centerLatitude;
-        final double lon = centerLongitude;
-        Thread t = new Thread(() -> runProximityPrefetch(generation, lat, lon), "dzs-prox-prefetch");
+        updatePrefetchAnchor(centerLatitude, centerLongitude);
+        if (prefetchEngineRunning) return;
+        prefetchEngineRunning = true;
+        Thread t = new Thread(this::runBackgroundPrefetchEngine, "dzs-prefetch-engine");
         t.setDaemon(true);
+        t.setPriority(Thread.MIN_PRIORITY);
         t.start();
     }
 
-    private void runProximityPrefetch(int generation, double originLat, double originLon) {
-        File indexCacheDir = new File(storageCacheDir, "dzs_index");
-        for (double[] center : prefetchNeighborCenters(originLat, originLon)) {
-            if (generation != prefetchGeneration) return;
-            double cLat = center[0];
-            double cLon = center[1];
-            if (hasProximityCacheResolved(indexCacheDir, cLat, cLon)) continue;
-            try {
-                DzsIndexCache.LoadedIndex loaded = queryProximityBbox(cLat, cLon);
-                if (generation != prefetchGeneration) return;
-                savePrefetchProximity(indexCacheDir, cLat, cLon, loaded);
-            } catch (Exception ignored) {
-            }
+    private void updatePrefetchAnchor(double latitude, double longitude) {
+        if (!prefetchAnchorSet) {
+            prefetchAnchorLat = latitude;
+            prefetchAnchorLon = longitude;
+            prefetchAnchorSet = true;
+            return;
+        }
+        double movedM = haversineM(prefetchAnchorLat, prefetchAnchorLon, latitude, longitude);
+        if (movedM >= PROXIMITY_RELOAD_MOVE_KM * 1000.0) {
+            prefetchAnchorLat = latitude;
+            prefetchAnchorLon = longitude;
+            prefetchRing = 0;
+            prefetchRingStep = 0;
         }
     }
 
-    private static double[][] prefetchNeighborCenters(double latitude, double longitude) {
-        double km = PROXIMITY_RELOAD_MOVE_KM;
-        double dLat = km / 111.0;
-        double cosLat = Math.cos(Math.toRadians(latitude));
-        double dLon = cosLat > 1e-6 ? km / (111.0 * cosLat) : km / 111.0;
-        return new double[][]{
-                {latitude + dLat, longitude},
-                {latitude - dLat, longitude},
-                {latitude, longitude + dLon},
-                {latitude, longitude - dLon},
-                {latitude + dLat, longitude + dLon},
-                {latitude + dLat, longitude - dLon},
-                {latitude - dLat, longitude + dLon},
-                {latitude - dLat, longitude - dLon},
-        };
+    private void runBackgroundPrefetchEngine() {
+        try {
+            loadGpsBoundsIfNeeded();
+            while (prefetchEngineRunning) {
+                waitForForegroundIdle();
+                double[] center = nextPrefetchCenter();
+                if (center == null) {
+                    Thread.sleep(PREFETCH_RING_PAUSE_MS);
+                    if (prefetchRing > PREFETCH_MAX_RING) {
+                        prefetchRing = 0;
+                        prefetchRingStep = 0;
+                    }
+                    continue;
+                }
+                File indexCacheDir = new File(storageCacheDir, "dzs_index");
+                if (hasProximityCacheResolved(indexCacheDir, center[0], center[1])) {
+                    markPrefetchCellDone(center[2], center[3]);
+                    continue;
+                }
+                try {
+                    waitForForegroundIdle();
+                    DzsIndexCache.LoadedIndex loaded;
+                    synchronized (dbQueryLock) {
+                        if (!prefetchEngineRunning) return;
+                        waitForForegroundIdle();
+                        loaded = queryProximityBboxUnlocked(center[0], center[1]);
+                    }
+                    savePrefetchProximity(indexCacheDir, center[0], center[1], loaded);
+                    markPrefetchCellDone(center[2], center[3]);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                } catch (Exception ignored) {
+                }
+                Thread.sleep(PREFETCH_BETWEEN_CELLS_MS);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            prefetchEngineRunning = false;
+        }
+    }
+
+    private void waitForForegroundIdle() throws InterruptedException {
+        while (prefetchEngineRunning && foregroundDbOps > 0) {
+            Thread.sleep(50);
+        }
+    }
+
+    private double[] nextPrefetchCenter() {
+        while (prefetchRing <= PREFETCH_MAX_RING) {
+            List<int[]> ring = prefetchRingOffsets(prefetchRing);
+            while (prefetchRingStep < ring.size()) {
+                int[] offset = ring.get(prefetchRingStep++);
+                int latIdx = latToPrefetchIndex(prefetchAnchorLat) + offset[0];
+                int lonIdx = lonToPrefetchIndex(prefetchAnchorLon) + offset[1];
+                long cellKey = packPrefetchCell(latIdx, lonIdx);
+                synchronized (prefetchCellsDone) {
+                    if (prefetchCellsDone.contains(cellKey)) continue;
+                }
+                double lat = prefetchIndexToLat(latIdx);
+                double lon = prefetchIndexToLon(lonIdx);
+                if (isOutsideGpsBounds(lat, lon)) continue;
+                return new double[]{lat, lon, latIdx, lonIdx};
+            }
+            prefetchRing++;
+            prefetchRingStep = 0;
+        }
+        return null;
+    }
+
+    private static List<int[]> prefetchRingOffsets(int ring) {
+        List<int[]> out = new ArrayList<>();
+        if (ring == 0) {
+            out.add(new int[]{0, 0});
+            return out;
+        }
+        for (int dLat = -ring; dLat <= ring; dLat++) {
+            for (int dLon = -ring; dLon <= ring; dLon++) {
+                if (Math.max(Math.abs(dLat), Math.abs(dLon)) == ring) {
+                    out.add(new int[]{dLat, dLon});
+                }
+            }
+        }
+        return out;
+    }
+
+    private int latToPrefetchIndex(double latitude) {
+        return (int) Math.round(latitude / (PREFETCH_GRID_KM / 111.0));
+    }
+
+    private int lonToPrefetchIndex(double longitude) {
+        double cosLat = Math.cos(Math.toRadians(prefetchAnchorLat));
+        double gridLonDeg = (PREFETCH_GRID_KM / 111.0) / Math.max(cosLat, 1e-6);
+        return (int) Math.round(longitude / gridLonDeg);
+    }
+
+    private double prefetchIndexToLat(int index) {
+        return index * (PREFETCH_GRID_KM / 111.0);
+    }
+
+    private double prefetchIndexToLon(int index) {
+        double cosLat = Math.cos(Math.toRadians(prefetchAnchorLat));
+        double gridLonDeg = (PREFETCH_GRID_KM / 111.0) / Math.max(cosLat, 1e-6);
+        return index * gridLonDeg;
+    }
+
+    private static long packPrefetchCell(int latIndex, int lonIndex) {
+        return ((long) latIndex << 32) | (lonIndex & 0xFFFFFFFFL);
+    }
+
+    private void markPrefetchCellDone(int latIndex, int lonIndex) {
+        synchronized (prefetchCellsDone) {
+            prefetchCellsDone.add(packPrefetchCell(latIndex, lonIndex));
+        }
+    }
+
+    private boolean isOutsideGpsBounds(double latitude, double longitude) {
+        if (!gpsBoundsLoaded) return false;
+        double margin = PROXIMITY_BBOX_DEG;
+        if (latitude < gpsBoundsMinLat - margin || latitude > gpsBoundsMaxLat + margin) {
+            return true;
+        }
+        return longitude < gpsBoundsMinLon - margin || longitude > gpsBoundsMaxLon + margin;
+    }
+
+    private void loadGpsBoundsIfNeeded() {
+        if (gpsBoundsLoaded) return;
+        synchronized (dbQueryLock) {
+            if (gpsBoundsLoaded) return;
+            try {
+                String sql = "SELECT MIN(" + gpsColumns.latitude + "), MAX(" + gpsColumns.latitude
+                        + "), MIN(" + gpsColumns.longitude + "), MAX(" + gpsColumns.longitude
+                        + ") FROM " + TABLE_GPS_KM;
+                try (Cursor c = db.rawQuery(sql, null)) {
+                    if (c.moveToFirst()) {
+                        Double minLat = readDouble(c, 0);
+                        Double maxLat = readDouble(c, 1);
+                        Double minLon = readDouble(c, 2);
+                        Double maxLon = readDouble(c, 3);
+                        if (minLat != null && maxLat != null && minLon != null && maxLon != null) {
+                            gpsBoundsMinLat = minLat;
+                            gpsBoundsMaxLat = maxLat;
+                            gpsBoundsMinLon = minLon;
+                            gpsBoundsMaxLon = maxLon;
+                            gpsBoundsLoaded = true;
+                        }
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     private boolean hasProximityCacheResolved(File indexCacheDir, double latitude, double longitude) {
@@ -510,11 +672,6 @@ public class DzsDatabase implements Closeable {
         String key = DzsIndexCache.resolveCacheKey(sourceDbFile, indexCacheDir);
         DzsIndexCache.saveProximity(sourceDbFile, key, indexCacheDir, centerLat, centerLon,
                 loaded.roByPairKey, loaded.vyhybkaGpsStore);
-        String fastKey = DzsIndexCache.fastDbKey(sourceDbFile);
-        if (!fastKey.equals(key)) {
-            DzsIndexCache.saveProximity(sourceDbFile, fastKey, indexCacheDir, centerLat, centerLon,
-                    loaded.roByPairKey, loaded.vyhybkaGpsStore);
-        }
     }
 
     private DzsIndexCache.LoadedIndex tryLoadProximityFromDisk(double latitude, double longitude) {
@@ -1206,37 +1363,48 @@ public class DzsDatabase implements Closeable {
     }
 
     private int loadProximityIndex(double latitude, double longitude, OpenProgressListener listener) {
-        DzsIndexCache.LoadedIndex cached = tryLoadProximityFromDisk(latitude, longitude);
-        if (cached != null) {
-            int added = mergeProximityLoadedIndex(cached);
+        foregroundDbOps++;
+        try {
+            DzsIndexCache.LoadedIndex cached = tryLoadProximityFromDisk(latitude, longitude);
+            if (cached != null) {
+                int added = mergeProximityLoadedIndex(cached);
+                spatialGrid = null;
+                proximityCenterLat = latitude;
+                proximityCenterLon = longitude;
+                proximityLoaded = true;
+                ensureBackgroundPrefetchEngine(latitude, longitude);
+                if (listener != null) {
+                    report(listener, String.format(Locale.ROOT,
+                            "Okolí GPS z cache (%d výhybek)", vyhybkaGpsStore.size()), 80);
+                }
+                return added;
+            }
+
+            DzsIndexCache.LoadedIndex queried = queryProximityBboxForeground(latitude, longitude);
+            int added = mergeProximityLoadedIndex(queried);
             spatialGrid = null;
             proximityCenterLat = latitude;
             proximityCenterLon = longitude;
             proximityLoaded = true;
-            scheduleBackgroundProximityPrefetch(latitude, longitude);
+            scheduleBackgroundProximityCacheSave(latitude, longitude);
+            ensureBackgroundPrefetchEngine(latitude, longitude);
             if (listener != null) {
                 report(listener, String.format(Locale.ROOT,
-                        "Okolí GPS z cache (%d výhybek)", vyhybkaGpsStore.size()), 80);
+                        "Okolí GPS načteno (%d výhybek)", added), 80);
             }
             return added;
+        } finally {
+            foregroundDbOps--;
         }
-
-        DzsIndexCache.LoadedIndex queried = queryProximityBbox(latitude, longitude);
-        int added = mergeProximityLoadedIndex(queried);
-        spatialGrid = null;
-        proximityCenterLat = latitude;
-        proximityCenterLon = longitude;
-        proximityLoaded = true;
-        scheduleBackgroundProximityCacheSave(latitude, longitude);
-        scheduleBackgroundProximityPrefetch(latitude, longitude);
-        if (listener != null) {
-            report(listener, String.format(Locale.ROOT,
-                    "Okolí GPS načteno (%d výhybek)", added), 80);
-        }
-        return added;
     }
 
-    private DzsIndexCache.LoadedIndex queryProximityBbox(double latitude, double longitude) {
+    private DzsIndexCache.LoadedIndex queryProximityBboxForeground(double latitude, double longitude) {
+        synchronized (dbQueryLock) {
+            return queryProximityBboxUnlocked(latitude, longitude);
+        }
+    }
+
+    private DzsIndexCache.LoadedIndex queryProximityBboxUnlocked(double latitude, double longitude) {
         double minLat = latitude - PROXIMITY_BBOX_DEG;
         double maxLat = latitude + PROXIMITY_BBOX_DEG;
         double minLon = longitude - PROXIMITY_BBOX_DEG;
@@ -1457,7 +1625,7 @@ public class DzsDatabase implements Closeable {
 
     @Override
     public void close() {
-        prefetchGeneration++;
+        prefetchEngineRunning = false;
         db.close();
     }
 
