@@ -654,7 +654,35 @@ public class MainActivity extends AppCompatActivity {
         for (Tudu t : tuduList) {
             if (t.uduCode().equals(udu)) return t;
         }
+        if (dzsDatabase != null) {
+            List<Tudu> loaded = dzsDatabase.loadTuduForUdu(udu);
+            for (Tudu t : loaded) {
+                mergeTuduIntoList(t);
+            }
+            if (!loaded.isEmpty()) {
+                if (epc.tudu != null && Tudu.uduCode(epc.tudu).equals(udu)) {
+                    for (Tudu t : loaded) {
+                        if (t.code.equals(epc.tudu)) return t;
+                    }
+                }
+                return loaded.get(0);
+            }
+        }
         return null;
+    }
+
+    private void mergeTuduIntoList(Tudu loaded) {
+        for (Tudu existing : tuduList) {
+            if (existing.code.equals(loaded.code)) {
+                for (Tudu.Vyhybka v : loaded.vyhybky) {
+                    Tudu.Vyhybka target = existing.findOrCreate(v.cislo, v.iob);
+                    if (v.castMin > 0) target.castMin = v.castMin;
+                    if (v.castMax > 0) target.castMax = v.castMax;
+                }
+                return;
+            }
+        }
+        tuduList.add(loaded);
     }
 
     private void showFullTuduPicker() {
@@ -2348,21 +2376,23 @@ public class MainActivity extends AppCompatActivity {
                     updateCard1DbProgress(phase, percent);
                 });
             };
-            DzsDatabase opened = DzsDatabase.open(path, getDzsStorageDir(), progress);
+            Double initLat = null;
+            Double initLon = null;
+            if (locationCache != null) {
+                LocationCache.Snapshot snap = locationCache.getSnapshot();
+                if (snap.valid) {
+                    initLat = snap.latitude;
+                    initLon = snap.longitude;
+                }
+            }
+            DzsDatabase opened = DzsDatabase.open(path, getDzsStorageDir(), progress, initLat, initLon);
             if (loadId != dbLoadGeneration) {
                 opened.close();
                 return;
             }
             int tuduCount = opened.countDistinctTudu();
             boolean manualMode = !prefs.getBoolean(PREF_TUDU_MODE_GPS, true);
-            List<Tudu> loaded;
-            if (manualMode) {
-                runOnUiThreadIfAlive(loadId, () ->
-                        updateCard1DbProgress("Načítám seznam TUDU", 98));
-                loaded = opened.loadAllTudu();
-            } else {
-                loaded = new ArrayList<>();
-            }
+            List<Tudu> loaded = new ArrayList<>();
             if (loadId != dbLoadGeneration) {
                 opened.close();
                 return;
@@ -2370,7 +2400,7 @@ public class MainActivity extends AppCompatActivity {
             runOnUiThreadIfAlive(loadId, () -> {
                 dzsDatabase = opened;
                 gpsAutoSelection = !manualMode;
-                tuduListFullyLoaded = manualMode;
+                tuduListFullyLoaded = false;
                 gpsLookupNoMatch = false;
                 forceNextGpsLookup = true;
                 lastGpsLookupLat = null;
@@ -2438,6 +2468,14 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         ensureGpsForTuduLookup();
+        if (dzsDatabase != null && locationCache != null && locationCache.getSnapshot().valid) {
+            LocationCache.Snapshot snap = locationCache.getSnapshot();
+            io.execute(() -> {
+                if (dzsDatabase != null) {
+                    dzsDatabase.ensureProximityLoaded(snap.latitude, snap.longitude);
+                }
+            });
+        }
         if (dzsDatabase != null && dzsDatabase.countDistinctTudu() == 0) {
             toast("Databáze neobsahuje žádné TUDU – zkouším určit podle GPS…");
         } else if (!step1Done && locationCache != null && !locationCache.hasFix()) {
