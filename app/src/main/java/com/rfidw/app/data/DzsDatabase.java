@@ -447,11 +447,13 @@ public class DzsDatabase implements Closeable {
         final File cacheDir = storageCacheDir;
         Thread t = new Thread(() -> {
             synchronized (this) {
-                if (!proximityLoaded || vyhybkaGpsStore.isEmpty()) return;
+                if (!proximityLoaded) return;
                 File indexCacheDir = new File(cacheDir, "dzs_index");
                 String key = DzsIndexCache.resolveCacheKey(dbFile, indexCacheDir);
-                saveProximityCache(key, centerLatitude, centerLongitude);
-                saveProximityCellCache(key);
+                if (!vyhybkaGpsStore.isEmpty()) {
+                    saveProximityCache(key, centerLatitude, centerLongitude);
+                    saveProximityCellCache(key);
+                }
                 finalizeProximityCellCache(key, centerLatitude, centerLongitude);
             }
         }, "dzs-prox-cache");
