@@ -2067,12 +2067,16 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         if (cast == 2) {
-            castBranchHlavni = true;
-            castBranchGroup.check(R.id.btnCastHlavni);
+            // Z čipu 3 zpět na 2 – obnovit volbu zrcadlenou z čipu 3
+            if (lastCastBranchDefault == 3) {
+                castBranchHlavni = !castBranchHlavni;
+            }
         } else if (cast == 3) {
-            castBranchHlavni = false;
-            castBranchGroup.check(R.id.btnCastVedlejsi);
+            // Čip 3 = opačná větev než u čipu 2 (hlavní ↔ vedlejší)
+            castBranchHlavni = !castBranchHlavni;
         }
+        int checkedId = castBranchHlavni ? R.id.btnCastHlavni : R.id.btnCastVedlejsi;
+        castBranchGroup.check(checkedId);
     }
 
     private Tudu.Vyhybka.RoBranch resolveBranchForCast(int cast) {
