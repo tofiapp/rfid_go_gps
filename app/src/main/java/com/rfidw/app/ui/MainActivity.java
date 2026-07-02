@@ -1704,7 +1704,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Po otevření databáze bez GPS souřadnic index okolí 5 km ještě neexistuje.
+     * Po otevření databáze bez GPS souřadnic index okolí 4 km ještě neexistuje.
      * Doplní ho podle aktuální (nebo testovací) polohy, pak zavolá {@code after}.
      */
     private void ensureProximityFromGpsIfNeeded(Runnable after) {
@@ -2039,6 +2039,14 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    private void resetCastBranchSelection() {
+        castBranchHlavni = true;
+        lastCastBranchDefault = -1;
+        if (castBranchGroup != null) {
+            castBranchGroup.check(R.id.btnCastHlavni);
+        }
+    }
+
     private boolean isDualRoVyhybka(Tudu.Vyhybka v) {
         return v != null && v.castMax - v.castMin + 1 == 3 && v.hasDualRoBranches();
     }
@@ -2059,12 +2067,16 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         if (cast == 2) {
-            castBranchHlavni = true;
-            castBranchGroup.check(R.id.btnCastHlavni);
+            // Z čipu 3 zpět na 2 – obnovit volbu zrcadlenou z čipu 3
+            if (lastCastBranchDefault == 3) {
+                castBranchHlavni = !castBranchHlavni;
+            }
         } else if (cast == 3) {
-            castBranchHlavni = false;
-            castBranchGroup.check(R.id.btnCastVedlejsi);
+            // Čip 3 = opačná větev než u čipu 2 (hlavní ↔ vedlejší)
+            castBranchHlavni = !castBranchHlavni;
         }
+        int checkedId = castBranchHlavni ? R.id.btnCastHlavni : R.id.btnCastVedlejsi;
+        castBranchGroup.check(checkedId);
     }
 
     private Tudu.Vyhybka.RoBranch resolveBranchForCast(int cast) {
@@ -2926,6 +2938,9 @@ public class MainActivity extends AppCompatActivity {
         boolean vyhybkaChanged = epc.vyhybka != v.cislo;
         currentVyhybka = v;
         epc.vyhybka = v.cislo;
+        if (vyhybkaChanged) {
+            resetCastBranchSelection();
+        }
         if (uduChanged || vyhybkaChanged || epc.cast <= 0
                 || epc.cast < v.castMin || epc.cast > v.castMax) {
             epc.cast = firstMissingCast(tudu.code, v);
@@ -3148,8 +3163,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void selectVyhybka(Tudu.Vyhybka v, boolean resetCast) {
+        boolean vyhybkaChanged = currentVyhybka == null || currentVyhybka.cislo != v.cislo;
         currentVyhybka = v;
         epc.vyhybka = v.cislo;
+        if (vyhybkaChanged) {
+            resetCastBranchSelection();
+        }
         if (resetCast) {
             epc.cast = currentTudu != null
                     ? firstMissingCast(currentTudu.code, v)

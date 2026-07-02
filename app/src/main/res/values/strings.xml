@@ -55,7 +55,7 @@
     <string name="db_loading_progress">%1$s · %2$d %%</string>
     <string name="gps_db_wait">Čekám na GPS pro indexaci okolí…</string>
     <string name="gps_db_indexing">GPS připravena, indexuji okolí…</string>
-    <string name="gps_db_load_no_fix">Načtení zrušeno – pro indexaci okolí 5 km je potřeba GPS poloha</string>
+    <string name="gps_db_load_no_fix">Načtení zrušeno – pro indexaci okolí 4 km je potřeba GPS poloha</string>
     <string name="db_select_required">Nejdříve vyberte databázi SQLite</string>
     <string name="db_file_type_error">Podporovaný formát je SQLite (.db / .sqlite)</string>
     <string name="gps_reload_location">Načíst polohu</string>
