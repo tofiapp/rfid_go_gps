@@ -3192,9 +3192,15 @@ public class MainActivity extends AppCompatActivity {
         }
         if (currentTudu != null && currentVyhybka != null) {
             if (!row.roId.isEmpty()) {
-                for (String roId : CsvStore.parseRoIds(row.roId)) {
-                    if (!roId.isEmpty()) {
-                        currentVyhybka.addRoBranch(roId, "");
+                List<String> roIds = CsvStore.parseRoIds(row.roId);
+                if (roIds.size() == 1 && !roIds.get(0).isEmpty()) {
+                    currentVyhybka.addRoBranch(roIds.get(0),
+                            row.poloha != null ? row.poloha : "");
+                } else {
+                    for (String roId : roIds) {
+                        if (!roId.isEmpty()) {
+                            currentVyhybka.addRoBranch(roId, "");
+                        }
                     }
                 }
             } else {
@@ -3206,6 +3212,8 @@ public class MainActivity extends AppCompatActivity {
                     if (roIds.size() == 1 && !roIds.get(0).isEmpty()) {
                         Tudu.Vyhybka.RoBranch hlavni = currentVyhybka.findHlavniBranch();
                         castBranchHlavni = hlavni != null && hlavni.roId.equals(roIds.get(0));
+                    } else if (row.poloha != null && !row.poloha.isEmpty()) {
+                        castBranchHlavni = Tudu.Vyhybka.RoBranch.isHlavniPoloha(row.poloha);
                     }
                 }
             }
@@ -3486,7 +3494,7 @@ public class MainActivity extends AppCompatActivity {
         row.tudu = d.tudu;
         row.vyhybka = csvVyhybkaLabel(d.vyhybka);
         row.cast = d.cast;
-        row.poloha = "";
+        row.poloha = branch != null ? branch.poloha : "";
         row.roId = branch != null ? branch.roId : "";
         LocationCache.Snapshot gps = locationCache != null
                 ? locationCache.getSnapshot() : LocationCache.Snapshot.empty();

@@ -254,7 +254,7 @@ public class CsvStore {
     }
 
     /** Jedno RO_ID nebo více hodnot oddělených mezerou (čip 1 u dvojvětvé výhybky). */
-    static List<String> parseRoIds(String roIdField) {
+    public static List<String> parseRoIds(String roIdField) {
         if (roIdField == null || roIdField.trim().isEmpty()) {
             return Collections.singletonList("");
         }
