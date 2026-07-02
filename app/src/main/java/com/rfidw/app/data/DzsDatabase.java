@@ -54,14 +54,21 @@ public class DzsDatabase implements Closeable {
         public final double longitude;
         public final double distanceM;
         public final String poloha;
+        public final String roId;
 
         public GpsMatch(String superZId, String superDId, String tudu, int vyhybka,
                         double latitude, double longitude, double distanceM) {
-            this(superZId, superDId, tudu, vyhybka, latitude, longitude, distanceM, "");
+            this(superZId, superDId, tudu, vyhybka, latitude, longitude, distanceM, "", "");
         }
 
         public GpsMatch(String superZId, String superDId, String tudu, int vyhybka,
                         double latitude, double longitude, double distanceM, String poloha) {
+            this(superZId, superDId, tudu, vyhybka, latitude, longitude, distanceM, poloha, "");
+        }
+
+        public GpsMatch(String superZId, String superDId, String tudu, int vyhybka,
+                        double latitude, double longitude, double distanceM, String poloha,
+                        String roId) {
             this.superZId = superZId;
             this.superDId = superDId;
             this.tudu = tudu;
@@ -70,6 +77,7 @@ public class DzsDatabase implements Closeable {
             this.longitude = longitude;
             this.distanceM = distanceM;
             this.poloha = poloha != null ? poloha : "";
+            this.roId = roId != null ? roId : "";
         }
     }
 
@@ -570,6 +578,7 @@ public class DzsDatabase implements Closeable {
                 Tudu.Vyhybka v = tudu.findOrCreate(ro.vyhybka, ro.iob);
                 if (ro.castMin != null) v.castMin = ro.castMin;
                 if (ro.castMax != null) v.castMax = ro.castMax;
+                v.addRoBranch(ro.roId, ro.poloha);
             }
         }
         List<Tudu> out = new ArrayList<>(map.values());
@@ -586,6 +595,7 @@ public class DzsDatabase implements Closeable {
         if (roColumns.castMax != null) sql.append(", ").append(roColumns.castMax);
         if (roColumns.poloha != null) sql.append(", ").append(roColumns.poloha);
         if (roColumns.iob != null) sql.append(", ").append(roColumns.iob);
+        sql.append(", ").append(roColumns.roId);
         sql.append(" FROM ").append(TABLE_RO_TPI)
                 .append(" WHERE ").append(roColumns.tudu).append(" IS NOT NULL AND ")
                 .append(roColumns.tudu).append(" <> ''")
@@ -636,10 +646,63 @@ public class DzsDatabase implements Closeable {
         Integer cmax = roColumns.castMax != null ? readInt(c, col++) : null;
         String poloha = roColumns.poloha != null ? readTrimmedText(c, col++) : null;
         String iob = roColumns.iob != null ? readIobLetter(c, col++) : null;
+        String roId = readId(c, col++);
         Tudu.Vyhybka v = tudu.findOrCreate(cislo, iob);
         CastRange cast = resolveCastRange(cmin, cmax, poloha);
         if (cast.castMin != null) v.castMin = cast.castMin;
         if (cast.castMax != null) v.castMax = cast.castMax;
+        v.addRoBranch(roId, poloha);
+    }
+
+    /** Vrátí RO větve výhybky z indexu nebo SQL dotazu. */
+    public List<Tudu.Vyhybka.RoBranch> findRoBranchesForVyhybka(String tuduCode, int cislo, String iob) {
+        if (tuduCode == null || tuduCode.isEmpty() || cislo <= 0) {
+            return Collections.emptyList();
+        }
+        String normIob = Tudu.Vyhybka.normalizeIob(iob);
+        List<Tudu.Vyhybka.RoBranch> found = new ArrayList<>();
+        for (List<RoIndexEntry> entries : roByPairKey.values()) {
+            for (RoIndexEntry ro : entries) {
+                if (!tuduCode.equals(ro.tudu) || ro.vyhybka != cislo) continue;
+                if (!normIob.isEmpty() && !normIob.equals(ro.iob)) continue;
+                found.add(new Tudu.Vyhybka.RoBranch(ro.roId, ro.poloha));
+            }
+        }
+        if (!found.isEmpty()) return dedupeBranches(found);
+
+        String vyhybkaExpr = roColumns.vyhybkaSelectExpr(null);
+        StringBuilder sql = new StringBuilder("SELECT DISTINCT ")
+                .append(roColumns.roId).append(", ");
+        if (roColumns.poloha != null) sql.append(roColumns.poloha);
+        else sql.append("''");
+        sql.append(" FROM ").append(TABLE_RO_TPI)
+                .append(" WHERE ").append(roColumns.tudu).append(" = ?")
+                .append(" AND ").append(vyhybkaExpr).append(" = ?");
+        roColumns.appendPolohaFilter(sql, null);
+        List<String> args = new ArrayList<>();
+        args.add(tuduCode);
+        args.add(String.valueOf(cislo));
+        if (roColumns.iob != null && !normIob.isEmpty()) {
+            sql.append(" AND ").append(roColumns.iob).append(" = ?");
+            args.add(normIob);
+        }
+        try (Cursor c = db.rawQuery(sql.toString(), args.toArray(new String[0]))) {
+            while (c.moveToNext()) {
+                String roId = readId(c, 0);
+                String poloha = roColumns.poloha != null ? readTrimmedText(c, 1) : "";
+                if (roId != null) found.add(new Tudu.Vyhybka.RoBranch(roId, poloha));
+            }
+        } catch (Exception ignored) {
+        }
+        return dedupeBranches(found);
+    }
+
+    private static List<Tudu.Vyhybka.RoBranch> dedupeBranches(List<Tudu.Vyhybka.RoBranch> branches) {
+        Map<String, Tudu.Vyhybka.RoBranch> map = new LinkedHashMap<>();
+        for (Tudu.Vyhybka.RoBranch b : branches) {
+            if (!b.roId.isEmpty()) map.putIfAbsent(b.roId, b);
+        }
+        return new ArrayList<>(map.values());
     }
 
     /** Najde nejbližší výhybku podle předpočítaných souřadnic (RO_ID). */
@@ -676,7 +739,7 @@ public class DzsDatabase implements Closeable {
                 if (dist < bestDistM[0]) {
                     bestDistM[0] = dist;
                     best[0] = new GpsMatch(point.superZId, point.superDId, ro.tudu, ro.vyhybka,
-                            point.latitude, point.longitude, dist, ro.poloha);
+                            point.latitude, point.longitude, dist, ro.poloha, point.roId);
                 }
             });
 
@@ -744,7 +807,7 @@ public class DzsDatabase implements Closeable {
                 if (existing != null && dist >= existing.distanceM) return;
 
                 bestByUdu.put(udu, new GpsMatch(point.superZId, point.superDId, ro.tudu,
-                        ro.vyhybka, point.latitude, point.longitude, dist, ro.poloha));
+                        ro.vyhybka, point.latitude, point.longitude, dist, ro.poloha, point.roId));
             });
 
             if (bestByUdu.size() >= limit) {
@@ -992,7 +1055,7 @@ public class DzsDatabase implements Closeable {
         double dist = haversineM(userLat, userLon, lat, lon);
         return new GpsMatch(ids[0], ids[1], vyhybkaGpsStore.tuduAt(idx),
                 vyhybkaGpsStore.vyhybkaAt(idx), lat, lon, dist,
-                vyhybkaGpsStore.polohaAt(idx));
+                vyhybkaGpsStore.polohaAt(idx), vyhybkaGpsStore.roIdAt(idx));
     }
 
     private static double approximateDistSq(double lat, double lon, double targetLat, double targetLon,

@@ -59,6 +59,7 @@ public class Tudu {
         public final String iob;      // volitelné písmeno z DB (např. A)
         public int castMin = 1;       // nejmenší část (obvykle 1)
         public int castMax = 3;       // největší část (obvykle 3, někdy 4)
+        private final List<RoBranch> roBranches = new ArrayList<>();
 
         public Vyhybka(int cislo) {
             this(cislo, "");
@@ -67,6 +68,70 @@ public class Tudu {
         public Vyhybka(int cislo, String iob) {
             this.cislo = cislo;
             this.iob = normalizeIob(iob);
+        }
+
+        /** Jeden řádek výhybky v DB – párování GPS přes RO_ID, větev z POLOHA. */
+        public static final class RoBranch {
+            public final String roId;
+            public final String poloha;
+
+            public RoBranch(String roId, String poloha) {
+                this.roId = roId != null ? roId : "";
+                this.poloha = poloha != null ? poloha : "";
+            }
+
+            /** POLOHA JAx / JCx – hlavní větev. */
+            public static boolean isHlavniPoloha(String poloha) {
+                if (poloha == null || poloha.length() < 2) return false;
+                char c = Character.toUpperCase(poloha.trim().charAt(1));
+                return c == 'A' || c == 'C';
+            }
+
+            /** POLOHA JBx / JDx – vedlejší větev. */
+            public static boolean isVedlejsiPoloha(String poloha) {
+                if (poloha == null || poloha.length() < 2) return false;
+                char c = Character.toUpperCase(poloha.trim().charAt(1));
+                return c == 'B' || c == 'D';
+            }
+
+            public boolean isHlavni() {
+                return isHlavniPoloha(poloha);
+            }
+
+            public boolean isVedlejsi() {
+                return isVedlejsiPoloha(poloha);
+            }
+        }
+
+        public List<RoBranch> getRoBranches() {
+            return roBranches;
+        }
+
+        public void addRoBranch(String roId, String poloha) {
+            if (roId == null || roId.trim().isEmpty()) return;
+            String id = roId.trim();
+            for (RoBranch existing : roBranches) {
+                if (existing.roId.equals(id)) return;
+            }
+            roBranches.add(new RoBranch(id, poloha));
+        }
+
+        public RoBranch findHlavniBranch() {
+            for (RoBranch b : roBranches) {
+                if (b.isHlavni()) return b;
+            }
+            return null;
+        }
+
+        public RoBranch findVedlejsiBranch() {
+            for (RoBranch b : roBranches) {
+                if (b.isVedlejsi()) return b;
+            }
+            return null;
+        }
+
+        public boolean hasDualRoBranches() {
+            return findHlavniBranch() != null && findVedlejsiBranch() != null;
         }
 
         /** Číslo výhybky s volitelným IOB pro náhled a CSV (např. 10A). */

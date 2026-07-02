@@ -183,9 +183,12 @@ public class MainActivity extends AppCompatActivity {
     private boolean gpsTestMode;
     private MaterialButtonToggleGroup powerPresetGroup;
     private MaterialButtonToggleGroup tuduModeGroup;
+    private MaterialButtonToggleGroup castBranchGroup;
     private MaterialButton btnGpsReloadLocation;
     private TextView tvTuduModeHint;
     private boolean tuduListFullyLoaded;
+    private boolean castBranchHlavni = true;
+    private int lastChip1WriteCount = 1;
     private Boolean powerPresetInKoleji;
     private boolean showGpsStatus;
     private boolean gpsUnavailableToastShown;
@@ -216,6 +219,7 @@ public class MainActivity extends AppCompatActivity {
         setupTemplateRows();
         setupCsv();
         setupListeners();
+        setupCastBranchSelection();
         setupTuduSelectionMode();
         setupGpsReloadLocation();
         setupGpsTestMode();
@@ -681,6 +685,9 @@ public class MainActivity extends AppCompatActivity {
                     Tudu.Vyhybka target = existing.findOrCreate(v.cislo, v.iob);
                     if (v.castMin > 0) target.castMin = v.castMin;
                     if (v.castMax > 0) target.castMax = v.castMax;
+                    for (Tudu.Vyhybka.RoBranch branch : v.getRoBranches()) {
+                        target.addRoBranch(branch.roId, branch.poloha);
+                    }
                 }
                 return;
             }
@@ -1288,11 +1295,17 @@ public class MainActivity extends AppCompatActivity {
         if (currentVyhybka == null || epc.cast <= 0
                 || currentVyhybka.castMax - currentVyhybka.castMin + 1 != 3) {
             castHintBox.setVisibility(View.GONE);
+            if (castBranchGroup != null) castBranchGroup.setVisibility(View.GONE);
             return;
         }
-        String partName = castPartName(epc.cast);
+        ensureVyhybkaRoBranches(currentTudu != null ? currentTudu.code : null, currentVyhybka);
+        boolean dualRo = isDualRoVyhybka(currentVyhybka);
+        String partName = dualRo && epc.cast >= 2
+                ? getString(R.string.cast_branch_select)
+                : castPartName(epc.cast);
         if (partName == null) {
             castHintBox.setVisibility(View.GONE);
+            if (castBranchGroup != null) castBranchGroup.setVisibility(View.GONE);
             return;
         }
         String prefix = getString(R.string.cast_hint_prefix);
@@ -1312,7 +1325,15 @@ public class MainActivity extends AppCompatActivity {
         applyVyhybkaAccent(span, vyhStart, vyhEnd);
 
         tvCastHintAction.setText(span);
-        tvCastHintPart.setText(partName);
+        if (dualRo && epc.cast >= 2) {
+            tvCastHintPart.setVisibility(View.GONE);
+            castBranchGroup.setVisibility(View.VISIBLE);
+            updateDefaultCastBranch(epc.cast);
+        } else {
+            tvCastHintPart.setVisibility(View.VISIBLE);
+            tvCastHintPart.setText(partName);
+            castBranchGroup.setVisibility(View.GONE);
+        }
         castHintBox.setVisibility(View.VISIBLE);
     }
 
@@ -1836,6 +1857,67 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.btnScanDoneRetry).setOnClickListener(v -> onScanDoneRetry());
         findViewById(R.id.btnDeleteConfirmYes).setOnClickListener(v -> onDeleteConfirmYes());
         findViewById(R.id.btnDeleteConfirmNo).setOnClickListener(v -> onDeleteConfirmNo());
+    }
+
+    private void setupCastBranchSelection() {
+        castBranchGroup = findViewById(R.id.castBranchGroup);
+        if (castBranchGroup == null) return;
+        castBranchGroup.check(R.id.btnCastHlavni);
+        castBranchGroup.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
+            if (!isChecked) return;
+            castBranchHlavni = checkedId == R.id.btnCastHlavni;
+        });
+    }
+
+    private boolean isDualRoVyhybka(Tudu.Vyhybka v) {
+        return v != null && v.castMax - v.castMin + 1 == 3 && v.hasDualRoBranches();
+    }
+
+    private void ensureVyhybkaRoBranches(String tuduCode, Tudu.Vyhybka v) {
+        if (tuduCode == null || tuduCode.isEmpty() || v == null || !v.getRoBranches().isEmpty()
+                || dzsDatabase == null) {
+            return;
+        }
+        List<Tudu.Vyhybka.RoBranch> loaded = dzsDatabase.findRoBranchesForVyhybka(
+                tuduCode, v.cislo, v.iob);
+        for (Tudu.Vyhybka.RoBranch branch : loaded) {
+            v.addRoBranch(branch.roId, branch.poloha);
+        }
+    }
+
+    private void updateDefaultCastBranch(int cast) {
+        if (castBranchGroup == null || currentVyhybka == null || !isDualRoVyhybka(currentVyhybka)) {
+            return;
+        }
+        if (cast == 2) {
+            castBranchHlavni = true;
+            castBranchGroup.check(R.id.btnCastHlavni);
+        } else if (cast == 3) {
+            castBranchHlavni = false;
+            castBranchGroup.check(R.id.btnCastVedlejsi);
+        }
+    }
+
+    private Tudu.Vyhybka.RoBranch resolveBranchForCast(int cast) {
+        if (currentVyhybka == null || currentTudu == null) return null;
+        ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
+        List<Tudu.Vyhybka.RoBranch> branches = currentVyhybka.getRoBranches();
+        if (branches.isEmpty()) return null;
+        if (cast == 1 || !isDualRoVyhybka(currentVyhybka)) {
+            return branches.get(0);
+        }
+        Tudu.Vyhybka.RoBranch chosen = castBranchHlavni
+                ? currentVyhybka.findHlavniBranch()
+                : currentVyhybka.findVedlejsiBranch();
+        return chosen != null ? chosen : branches.get(0);
+    }
+
+    private boolean hasCastWrittenOnAnyBranch(String tuduCode, Tudu.Vyhybka v, int cast) {
+        if (csvStore == null) return false;
+        for (Tudu.Vyhybka.RoBranch branch : v.getRoBranches()) {
+            if (csvStore.hasWrittenCast(tuduCode, v.cislo, branch.roId, cast)) return true;
+        }
+        return csvStore.getWrittenCasts(tuduCode, v.cislo).contains(cast);
     }
 
     private void setupGpsTestMode() {
@@ -2618,6 +2700,11 @@ public class MainActivity extends AppCompatActivity {
         currentTudu = tudu;
         epc.tudu = match.tudu;
         Tudu.Vyhybka v = tudu.findOrCreate(match.vyhybka);
+        if (!match.roId.isEmpty()) {
+            v.addRoBranch(match.roId, match.poloha);
+        } else {
+            ensureVyhybkaRoBranches(tudu.code, v);
+        }
         if (gpsAutoSelection && isVyhybkaCompleteInCsv(tudu.code, v)) {
             Tudu.Vyhybka nearestIncomplete = nearestIncompleteVyhybkaByGps(tudu);
             if (nearestIncomplete != null) {
@@ -2891,6 +2978,21 @@ public class MainActivity extends AppCompatActivity {
             }
             break;
         }
+        if (currentTudu != null && currentVyhybka != null) {
+            if (!row.roId.isEmpty()) {
+                currentVyhybka.addRoBranch(row.roId, row.poloha);
+            } else {
+                ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
+            }
+            if (epc.cast >= 2 && isDualRoVyhybka(currentVyhybka)) {
+                if (!row.roId.isEmpty()) {
+                    Tudu.Vyhybka.RoBranch hlavni = currentVyhybka.findHlavniBranch();
+                    castBranchHlavni = hlavni != null && hlavni.roId.equals(row.roId);
+                } else if (row.poloha != null && !row.poloha.isEmpty()) {
+                    castBranchHlavni = Tudu.Vyhybka.RoBranch.isHlavniPoloha(row.poloha);
+                }
+            }
+        }
     }
 
     private void deleteLastCsvRow() {
@@ -3126,32 +3228,35 @@ public class MainActivity extends AppCompatActivity {
         if (csvStore == null) return;
         try {
             EpcModel.Decoded d = EpcModel.decode(epc24);
-            CsvStore.Row row = new CsvStore.Row();
-            row.idRfid = d.idRfid;
-            row.epc = d.epc;
-            row.tid = tid == null ? "" : tid;
-            row.rok = d.rok;
-            row.tudu = d.tudu;
-            row.vyhybka = csvVyhybkaLabel(d.vyhybka);
-            row.cast = d.cast;
-            LocationCache.Snapshot gps = locationCache != null ? locationCache.getSnapshot() : LocationCache.Snapshot.empty();
-            if (gps.valid) {
-                row.latitude = LocationCache.formatLatitude(gps.latitude);
-                row.longitude = LocationCache.formatLongitude(gps.longitude);
-                row.accuracyM = LocationCache.formatAccuracyM(gps.accuracyM);
-                row.gpsTime = LocationCache.formatGpsTime(gps.gpsTimeMs);
-            } else {
-                row.latitude = "";
-                row.longitude = "";
-                row.accuracyM = "";
-                row.gpsTime = "";
-                if (!gpsUnavailableToastShown) {
-                    gpsUnavailableToastShown = true;
-                    toast(getString(R.string.gps_unavailable_toast));
+            int cast = parseInt(d.cast, 0);
+            ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
+            lastChip1WriteCount = 1;
+
+            if (cast == 1 && currentVyhybka != null
+                    && currentVyhybka.getRoBranches().size() >= 2) {
+                long baseId = parseLong(d.idRfid, epc.idRfid);
+                List<Tudu.Vyhybka.RoBranch> branches = currentVyhybka.getRoBranches();
+                for (int i = 0; i < branches.size(); i++) {
+                    CsvStore.Row row = buildCsvRow(d, epc24, tid, branches.get(i));
+                    row.idRfid = String.valueOf(baseId + i);
+                    csvStore.upsert(row);
                 }
+                lastChip1WriteCount = branches.size();
+            } else {
+                Tudu.Vyhybka.RoBranch branch = resolveBranchForCast(cast);
+                if (branch == null) {
+                    toast(getString(R.string.cast_branch_select));
+                    return;
+                }
+                if (cast >= 2 && isDualRoVyhybka(currentVyhybka)
+                        && ((castBranchHlavni && currentVyhybka.findHlavniBranch() == null)
+                        || (!castBranchHlavni && currentVyhybka.findVedlejsiBranch() == null))) {
+                    toast(getString(R.string.cast_branch_select));
+                    return;
+                }
+                CsvStore.Row row = buildCsvRow(d, epc24, tid, branch);
+                csvStore.upsert(row);
             }
-            row.userId = UserSession.getUserId(prefs);
-            csvStore.upsert(row);
             persistCsvAsync();
             refreshCsvTable();
         } catch (Exception e) {
@@ -3159,10 +3264,44 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private CsvStore.Row buildCsvRow(EpcModel.Decoded d, String epc24, String tid,
+                                     Tudu.Vyhybka.RoBranch branch) {
+        CsvStore.Row row = new CsvStore.Row();
+        row.idRfid = d.idRfid;
+        row.epc = d.epc;
+        row.tid = tid == null ? "" : tid;
+        row.rok = d.rok;
+        row.tudu = d.tudu;
+        row.vyhybka = csvVyhybkaLabel(d.vyhybka);
+        row.cast = d.cast;
+        row.poloha = branch != null ? branch.poloha : "";
+        row.roId = branch != null ? branch.roId : "";
+        LocationCache.Snapshot gps = locationCache != null
+                ? locationCache.getSnapshot() : LocationCache.Snapshot.empty();
+        if (gps.valid) {
+            row.latitude = LocationCache.formatLatitude(gps.latitude);
+            row.longitude = LocationCache.formatLongitude(gps.longitude);
+            row.accuracyM = LocationCache.formatAccuracyM(gps.accuracyM);
+            row.gpsTime = LocationCache.formatGpsTime(gps.gpsTimeMs);
+        } else {
+            row.latitude = "";
+            row.longitude = "";
+            row.accuracyM = "";
+            row.gpsTime = "";
+            if (!gpsUnavailableToastShown) {
+                gpsUnavailableToastShown = true;
+                toast(getString(R.string.gps_unavailable_toast));
+            }
+        }
+        row.userId = UserSession.getUserId(prefs);
+        return row;
+    }
+
     /** Po dokončení zápisu tagu (EPC samostatně, nebo celý řetězec EPC→heslo→lock). */
     private void onTagCycleComplete() {
         maybeClearGpsVyhybkaLock();
-        epc.idRfid += 1;
+        epc.idRfid += Math.max(1, lastChip1WriteCount);
+        lastChip1WriteCount = 1;
         prefs.edit().putLong("idRfid", epc.idRfid).apply();
         advanceCastAndVyhybka();
         refreshTemplate();
@@ -3282,6 +3421,19 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private int countMissingCasts(String tuduCode, Tudu.Vyhybka v) {
+        if (csvStore == null) {
+            return v.castMax - v.castMin + 1;
+        }
+        ensureVyhybkaRoBranches(tuduCode, v);
+        if (isDualRoVyhybka(v)) {
+            int missing = 0;
+            for (Tudu.Vyhybka.RoBranch branch : v.getRoBranches()) {
+                if (!csvStore.hasWrittenCast(tuduCode, v.cislo, branch.roId, 1)) missing++;
+            }
+            if (!hasCastWrittenOnAnyBranch(tuduCode, v, 2)) missing++;
+            if (!hasCastWrittenOnAnyBranch(tuduCode, v, 3)) missing++;
+            return missing;
+        }
         Set<Integer> written = getWrittenCastsForVyhybka(tuduCode, v);
         int missing = 0;
         for (int c = v.castMin; c <= v.castMax; c++) {
@@ -3368,6 +3520,15 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private int firstMissingCast(String tuduCode, Tudu.Vyhybka v) {
+        ensureVyhybkaRoBranches(tuduCode, v);
+        if (csvStore != null && isDualRoVyhybka(v)) {
+            for (Tudu.Vyhybka.RoBranch branch : v.getRoBranches()) {
+                if (!csvStore.hasWrittenCast(tuduCode, v.cislo, branch.roId, 1)) return 1;
+            }
+            if (!hasCastWrittenOnAnyBranch(tuduCode, v, 2)) return 2;
+            if (!hasCastWrittenOnAnyBranch(tuduCode, v, 3)) return 3;
+            return v.castMax + 1;
+        }
         Set<Integer> written = getWrittenCastsForVyhybka(tuduCode, v);
         for (int c = v.castMin; c <= v.castMax; c++) {
             if (!written.contains(c)) return c;

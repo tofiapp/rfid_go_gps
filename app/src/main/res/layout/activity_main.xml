@@ -332,6 +332,30 @@
                         android:textColor="@color/accent"
                         android:textSize="13sp"
                         android:textStyle="bold"/>
+
+                    <com.google.android.material.button.MaterialButtonToggleGroup
+                        android:id="@+id/castBranchGroup"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:visibility="gone"
+                        app:singleSelection="true"
+                        app:selectionRequired="true">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnCastHlavni"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/cast_branch_hlavni"/>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnCastVedlejsi"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/cast_branch_vedlejsi"/>
+                    </com.google.android.material.button.MaterialButtonToggleGroup>
                 </LinearLayout>
             </LinearLayout>
 
