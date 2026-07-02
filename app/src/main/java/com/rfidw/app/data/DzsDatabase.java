@@ -223,30 +223,6 @@ public class DzsDatabase implements Closeable {
         }
     }
 
-    private static final class GpsKmPoint {
-        final String superZId;
-        final String superDId;
-        final String roId;
-        final double latitude;
-        final double longitude;
-
-        GpsKmPoint(String superZId, String superDId, String roId, double latitude, double longitude) {
-            this.superZId = superZId;
-            this.superDId = superDId;
-            this.roId = roId;
-            this.latitude = latitude;
-            this.longitude = longitude;
-        }
-    }
-
-    @FunctionalInterface
-    private interface GpsKmPointConsumer {
-        void accept(GpsKmPoint point);
-    }
-
-    private static final double BBOX_CELL_DEG = 0.005;
-    private static final int BBOX_MAX_RING = 40;
-
     private final SQLiteDatabase db;
     private final GpsColumns gpsColumns;
     private final RoColumns roColumns;
@@ -255,7 +231,6 @@ public class DzsDatabase implements Closeable {
     private VyhybkaGpsStore vyhybkaGpsStore;
     private final Map<String, double[]> coordMemo = new HashMap<>();
     private volatile boolean gpsRoLookupIndexReady;
-    private volatile boolean gpsLatLonIndexReady;
     private volatile SpatialGrid spatialGrid;
     private volatile boolean proximityLoaded;
     private volatile Double proximityCenterLat;
@@ -449,19 +424,6 @@ public class DzsDatabase implements Closeable {
         }
     }
 
-    private void ensureGpsLatLonIndex() {
-        if (gpsLatLonIndexReady) return;
-        synchronized (this) {
-            if (gpsLatLonIndexReady) return;
-            try {
-                db.execSQL("CREATE INDEX IF NOT EXISTS _dzs_gps_latlon ON " + TABLE_GPS_KM
-                        + " (" + gpsColumns.latitude + ", " + gpsColumns.longitude + ")");
-                gpsLatLonIndexReady = true;
-            } catch (Exception ignored) {
-            }
-        }
-    }
-
     private void scheduleBackgroundProximityCacheSave(double centerLatitude, double centerLongitude) {
         if (sourceDbFile == null || storageCacheDir == null || !proximityLoaded) return;
         final File dbFile = sourceDbFile;
@@ -592,6 +554,17 @@ public class DzsDatabase implements Closeable {
             map.put(e.getKey(), entries);
         }
         return map;
+    }
+
+    /** Počet UDU v načteném okolí GPS (bez SQL průchodu celé tabulky). */
+    public int countDistinctTuduNearby() {
+        Set<String> codes = new HashSet<>();
+        for (List<RoIndexEntry> entries : roByPairKey.values()) {
+            for (RoIndexEntry entry : entries) {
+                codes.add(Tudu.uduCode(entry.tudu));
+            }
+        }
+        return codes.size();
     }
 
     public int countDistinctTudu() {
@@ -805,117 +778,55 @@ public class DzsDatabase implements Closeable {
     /** Najde nejbližší výhybku podle předpočítaných souřadnic (RO_ID). */
     public GpsMatch findNearest(double latitude, double longitude) {
         ensureProximityLoaded(latitude, longitude);
-        if (roByRoKey.isEmpty()) return null;
-        if (!vyhybkaGpsStore.isEmpty()) {
-            final int[] bestIdx = {-1};
-            final double[] bestDistSq = {Double.MAX_VALUE};
-            double cosLat = Math.cos(Math.toRadians(latitude));
-            spatialGrid().forEachNearest(latitude, longitude, idx -> {
-                double dLat = vyhybkaGpsStore.latitudeAt(idx) - latitude;
-                double dLon = (vyhybkaGpsStore.longitudeAt(idx) - longitude) * cosLat;
-                double distSq = dLat * dLat + dLon * dLon;
-                if (distSq < bestDistSq[0]) {
-                    bestDistSq[0] = distSq;
-                    bestIdx[0] = idx;
-                }
-            });
-            if (bestIdx[0] < 0) return null;
-            return vyhybkaToMatch(bestIdx[0], latitude, longitude);
-        }
-        ensureGpsLatLonIndex();
-
-        final GpsMatch[] best = {null};
-        final double[] bestDistM = {Double.MAX_VALUE};
-
-        for (int ring = 0; ring <= BBOX_MAX_RING; ring++) {
-            double delta = BBOX_CELL_DEG * (ring + 1);
-            queryGpsPointsInBox(latitude, longitude, delta, point -> {
-                RoIndexEntry ro = roByRoKey.get(roKey(point.superZId, point.superDId, point.roId));
-                if (ro == null) return;
-                double dist = haversineM(latitude, longitude, point.latitude, point.longitude);
-                if (dist < bestDistM[0]) {
-                    bestDistM[0] = dist;
-                    best[0] = new GpsMatch(point.superZId, point.superDId, ro.tudu, ro.vyhybka,
-                            point.latitude, point.longitude, dist, ro.poloha, point.roId);
-                }
-            });
-
-            if (best[0] != null) {
-                double ringBoundM = delta * 111_000.0;
-                if (bestDistM[0] <= ringBoundM) {
-                    return best[0];
-                }
+        if (vyhybkaGpsStore.isEmpty()) return null;
+        final int[] bestIdx = {-1};
+        final double[] bestDistSq = {Double.MAX_VALUE};
+        double cosLat = Math.cos(Math.toRadians(latitude));
+        spatialGrid().forEachNearest(latitude, longitude, idx -> {
+            double dLat = vyhybkaGpsStore.latitudeAt(idx) - latitude;
+            double dLon = (vyhybkaGpsStore.longitudeAt(idx) - longitude) * cosLat;
+            double distSq = dLat * dLat + dLon * dLon;
+            if (distSq < bestDistSq[0]) {
+                bestDistSq[0] = distSq;
+                bestIdx[0] = idx;
             }
-        }
-        return best[0];
+        });
+        if (bestIdx[0] < 0) return null;
+        return vyhybkaToMatch(bestIdx[0], latitude, longitude);
     }
 
     /** Nejbližší výhybka pro každý unikátní UDU (prvních 5 znaků TUDU), seřazené podle vzdálenosti. */
     public List<GpsMatch> findNearestDistinctTudu(double latitude, double longitude, int limit) {
         if (limit <= 0) return Collections.emptyList();
         ensureProximityLoaded(latitude, longitude);
-        if (roByRoKey.isEmpty()) return Collections.emptyList();
-        if (!vyhybkaGpsStore.isEmpty()) {
-            Map<String, GpsMatch> bestByUdu = new HashMap<>();
-            double cosLat = Math.cos(Math.toRadians(latitude));
-            SpatialGrid grid = spatialGrid();
-            for (int ring = 0; ring <= SpatialGrid.MAX_RING; ring++) {
-                grid.forEachInRing(latitude, longitude, ring, idx -> {
-                    String udu = Tudu.uduCode(vyhybkaGpsStore.tuduAt(idx));
-                    double dLat = vyhybkaGpsStore.latitudeAt(idx) - latitude;
-                    double dLon = (vyhybkaGpsStore.longitudeAt(idx) - longitude) * cosLat;
-                    double distSq = dLat * dLat + dLon * dLon;
-                    GpsMatch existing = bestByUdu.get(udu);
-                    if (existing != null) {
-                        double existingDistSq = approximateDistSq(
-                                latitude, longitude, existing.latitude, existing.longitude, cosLat);
-                        if (distSq >= existingDistSq) return;
-                    }
-                    bestByUdu.put(udu, vyhybkaToMatch(idx, latitude, longitude));
-                });
-                if (bestByUdu.size() >= limit) {
-                    List<GpsMatch> candidates = new ArrayList<>(bestByUdu.values());
-                    candidates.sort(Comparator.comparingDouble(m -> m.distanceM));
-                    GpsMatch nth = candidates.get(limit - 1);
-                    double nthDistSq = approximateDistSq(
-                            latitude, longitude, nth.latitude, nth.longitude, cosLat);
-                    double ringBoundDeg = (ring + 1) * SpatialGrid.CELL_DEG;
-                    if (nthDistSq <= ringBoundDeg * ringBoundDeg) break;
-                }
-            }
-            List<GpsMatch> sorted = new ArrayList<>(bestByUdu.values());
-            sorted.sort(Comparator.comparingDouble(m -> m.distanceM));
-            if (sorted.size() <= limit) return sorted;
-            return new ArrayList<>(sorted.subList(0, limit));
-        }
-        ensureGpsLatLonIndex();
-
+        if (vyhybkaGpsStore.isEmpty()) return Collections.emptyList();
         Map<String, GpsMatch> bestByUdu = new HashMap<>();
-
-        for (int ring = 0; ring <= BBOX_MAX_RING; ring++) {
-            double delta = BBOX_CELL_DEG * (ring + 1);
-            queryGpsPointsInBox(latitude, longitude, delta, point -> {
-                RoIndexEntry ro = roByRoKey.get(roKey(point.superZId, point.superDId, point.roId));
-                if (ro == null) return;
-                double dist = haversineM(latitude, longitude, point.latitude, point.longitude);
-                String udu = Tudu.uduCode(ro.tudu);
-
+        double cosLat = Math.cos(Math.toRadians(latitude));
+        SpatialGrid grid = spatialGrid();
+        for (int ring = 0; ring <= SpatialGrid.MAX_RING; ring++) {
+            grid.forEachInRing(latitude, longitude, ring, idx -> {
+                String udu = Tudu.uduCode(vyhybkaGpsStore.tuduAt(idx));
+                double dLat = vyhybkaGpsStore.latitudeAt(idx) - latitude;
+                double dLon = (vyhybkaGpsStore.longitudeAt(idx) - longitude) * cosLat;
+                double distSq = dLat * dLat + dLon * dLon;
                 GpsMatch existing = bestByUdu.get(udu);
-                if (existing != null && dist >= existing.distanceM) return;
-
-                bestByUdu.put(udu, new GpsMatch(point.superZId, point.superDId, ro.tudu,
-                        ro.vyhybka, point.latitude, point.longitude, dist, ro.poloha, point.roId));
+                if (existing != null) {
+                    double existingDistSq = approximateDistSq(
+                            latitude, longitude, existing.latitude, existing.longitude, cosLat);
+                    if (distSq >= existingDistSq) return;
+                }
+                bestByUdu.put(udu, vyhybkaToMatch(idx, latitude, longitude));
             });
-
             if (bestByUdu.size() >= limit) {
-                double ringBoundM = delta * 111_000.0;
-                double worstDist = bestByUdu.values().stream()
-                        .mapToDouble(m -> m.distanceM)
-                        .max().orElse(Double.MAX_VALUE);
-                if (worstDist <= ringBoundM) break;
+                List<GpsMatch> candidates = new ArrayList<>(bestByUdu.values());
+                candidates.sort(Comparator.comparingDouble(m -> m.distanceM));
+                GpsMatch nth = candidates.get(limit - 1);
+                double nthDistSq = approximateDistSq(
+                        latitude, longitude, nth.latitude, nth.longitude, cosLat);
+                double ringBoundDeg = (ring + 1) * SpatialGrid.CELL_DEG;
+                if (nthDistSq <= ringBoundDeg * ringBoundDeg) break;
             }
         }
-
         List<GpsMatch> sorted = new ArrayList<>(bestByUdu.values());
         sorted.sort(Comparator.comparingDouble(m -> m.distanceM));
         if (sorted.size() <= limit) return sorted;
@@ -951,35 +862,6 @@ public class DzsDatabase implements Closeable {
             }
         }
         return bestByVyhybka;
-    }
-
-    private void queryGpsPointsInBox(double latitude, double longitude, double deltaDeg,
-                                     GpsKmPointConsumer consumer) {
-        String sql = "SELECT " + gpsColumns.superZId + ", " + gpsColumns.superDId + ", "
-                + gpsColumns.roId + ", " + gpsColumns.latitude + ", " + gpsColumns.longitude
-                + " FROM " + TABLE_GPS_KM
-                + " WHERE " + gpsColumns.latitude + " BETWEEN ? AND ?"
-                + " AND " + gpsColumns.longitude + " BETWEEN ? AND ?";
-        String[] args = {
-                String.valueOf(latitude - deltaDeg),
-                String.valueOf(latitude + deltaDeg),
-                String.valueOf(longitude - deltaDeg),
-                String.valueOf(longitude + deltaDeg)
-        };
-        try (Cursor c = db.rawQuery(sql, args)) {
-            while (c.moveToNext()) {
-                String superZId = readId(c, 0);
-                String superDId = readId(c, 1);
-                String roId = readId(c, 2);
-                Double lat = readDouble(c, 3);
-                Double lon = readDouble(c, 4);
-                if (superZId == null || superDId == null || roId == null || lat == null || lon == null) {
-                    continue;
-                }
-                consumer.accept(new GpsKmPoint(superZId, superDId, roId, lat, lon));
-            }
-        } catch (Exception ignored) {
-        }
     }
 
     private double[] resolveVyhybkaCoord(String pairKey, RoIndexEntry ro) {
@@ -1178,7 +1060,16 @@ public class DzsDatabase implements Closeable {
         double minLon = longitude - PROXIMITY_BBOX_DEG;
         double maxLon = longitude + PROXIMITY_BBOX_DEG;
 
-        String gpsRoIdExpr = "TRIM(CAST(g." + gpsColumns.roId + " AS TEXT))";
+        String gRoIdExpr = "TRIM(CAST(g." + gpsColumns.roId + " AS TEXT))";
+        String groupedGps = "(SELECT g." + gpsColumns.superZId + " AS super_z_id, g."
+                + gpsColumns.superDId + " AS super_d_id, " + gRoIdExpr + " AS ro_id, MIN(g."
+                + gpsColumns.latitude + ") AS lat, MIN(g." + gpsColumns.longitude + ") AS lon"
+                + " FROM " + TABLE_GPS_KM + " g"
+                + " WHERE g." + gpsColumns.latitude + " BETWEEN ? AND ?"
+                + " AND g." + gpsColumns.longitude + " BETWEEN ? AND ?"
+                + " GROUP BY g." + gpsColumns.superZId + ", g." + gpsColumns.superDId + ", "
+                + gRoIdExpr + ") g";
+
         String roRoIdExpr = "TRIM(CAST(ro." + roColumns.roId + " AS TEXT))";
         String vyhybkaExpr = roColumns.vyhybkaSelectExpr("ro");
         StringBuilder sql = new StringBuilder("SELECT ro.")
@@ -1189,15 +1080,13 @@ public class DzsDatabase implements Closeable {
         if (roColumns.castMax != null) sql.append(", ro.").append(roColumns.castMax);
         if (roColumns.poloha != null) sql.append(", ro.").append(roColumns.poloha);
         if (roColumns.iob != null) sql.append(", ro.").append(roColumns.iob);
-        sql.append(", g.").append(gpsColumns.latitude).append(", g.").append(gpsColumns.longitude);
-        sql.append(" FROM ").append(TABLE_GPS_KM).append(" g");
-        sql.append(" INNER JOIN ").append(TABLE_RO_TPI).append(" ro ON g.")
-                .append(gpsColumns.superZId).append(" = ro.").append(roColumns.superZId);
-        sql.append(" AND g.").append(gpsColumns.superDId).append(" = ro.").append(roColumns.superDId);
-        sql.append(" AND ").append(gpsRoIdExpr).append(" = ").append(roRoIdExpr);
-        sql.append(" WHERE g.").append(gpsColumns.latitude).append(" BETWEEN ? AND ?");
-        sql.append(" AND g.").append(gpsColumns.longitude).append(" BETWEEN ? AND ?");
-        sql.append(" AND ro.").append(roColumns.tudu).append(" IS NOT NULL AND ro.")
+        sql.append(", g.lat, g.lon");
+        sql.append(" FROM ").append(groupedGps);
+        sql.append(" INNER JOIN ").append(TABLE_RO_TPI).append(" ro ON g.super_z_id = ro.")
+                .append(roColumns.superZId);
+        sql.append(" AND g.super_d_id = ro.").append(roColumns.superDId);
+        sql.append(" AND g.ro_id = ").append(roRoIdExpr);
+        sql.append(" WHERE ro.").append(roColumns.tudu).append(" IS NOT NULL AND ro.")
                 .append(roColumns.tudu).append(" <> ''");
         sql.append(" AND ").append(vyhybkaExpr).append(" IS NOT NULL");
         sql.append(" AND ro.").append(roColumns.roId).append(" IS NOT NULL AND ")
@@ -1252,7 +1141,7 @@ public class DzsDatabase implements Closeable {
         proximityCenterLat = latitude;
         proximityCenterLon = longitude;
         proximityLoaded = true;
-        if (listener != null && added > 0) {
+        if (listener != null) {
             report(listener, String.format(Locale.ROOT,
                     "Okolí GPS načteno (%d výhybek)", added), 80);
         }

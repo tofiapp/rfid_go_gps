@@ -2524,17 +2524,23 @@ public class MainActivity extends AppCompatActivity {
                 scrollToCard1();
                 onDatabaseLoaded();
             });
-            Thread countThread = new Thread(() -> {
-                int tuduCount = dbForCount.countDistinctTudu();
+            if (!autoMode) {
+                Thread countThread = new Thread(() -> {
+                    int tuduCount = dbForCount.countDistinctTudu();
+                    runOnUiThreadIfAlive(loadId, () -> {
+                        if (dzsDatabase != dbForCount) return;
+                        tvSourceFile.setText(getString(R.string.db_loaded_manual, displayName, tuduCount));
+                    });
+                }, "dzs-tudu-count");
+                countThread.setDaemon(true);
+                countThread.start();
+            } else {
                 runOnUiThreadIfAlive(loadId, () -> {
                     if (dzsDatabase != dbForCount) return;
-                    tvSourceFile.setText(autoMode
-                            ? getString(R.string.db_loaded_gps, displayName, tuduCount)
-                            : getString(R.string.db_loaded_manual, displayName, tuduCount));
+                    int nearby = dbForCount.countDistinctTuduNearby();
+                    tvSourceFile.setText(getString(R.string.db_loaded_gps, displayName, nearby));
                 });
-            }, "dzs-tudu-count");
-            countThread.setDaemon(true);
-            countThread.start();
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             Log.w(TAG, "Načtení databáze přerušeno", e);
