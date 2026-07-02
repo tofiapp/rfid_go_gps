@@ -27,8 +27,9 @@ import java.util.function.IntConsumer;
 /**
  * SQLite zdroj TUDU / výhybek z tabulek DZS_SUPERTRA_GPS_KM a DZS_SUPER_RO_TPI.
  *
- * Při otevření se indexuje jen okolí ~4 km kolem GPS (bbox ±0,04°). Zbytek databáze
- * se doplňuje za běhu při pohybu nebo při výběru TUDU přes SQL dotazy.
+ * Při otevření se indexuje jen okolí ~4 km kolem GPS (bbox ±0,04°). Plný index databáze
+ * se staví na pozadí do souboru {@code dzs_{hash}.idx}; po dokončení jsou GPS/TUDU
+ * dostupné kdekoli bez opakovaného SQL při pohybu.
  */
 public class DzsDatabase implements Closeable {
 
@@ -37,11 +38,16 @@ public class DzsDatabase implements Closeable {
     private static final String TEMP_RO_GPS_LOOKUP = "_dzs_ro_gps_lookup";
     /** Bbox ±0,04° kolem GPS (~4 km) – odpovídá SQL dotazu v dokumentaci. */
     private static final double PROXIMITY_BBOX_DEG = 0.04;
-    /** Po přesunu o tuto vzdálenost se znovu načte okolí GPS. */
+    /** Po přesunu o tuto vzdálenost se znovu načte okolí GPS (jen dokud není plný index). */
     private static final double PROXIMITY_RELOAD_MOVE_KM = 3.0;
 
     /** Průběh otevírání databáze (fáze + odhad procent 0–100, nebo -1). */
     public interface OpenProgressListener {
+        void onProgress(String phase, int percent);
+    }
+
+    /** Průběh pozadí plné indexace (fáze + odhad procent 0–100, nebo -1 při chybě). */
+    public interface IndexProgressListener {
         void onProgress(String phase, int percent);
     }
 
@@ -237,6 +243,13 @@ public class DzsDatabase implements Closeable {
     private volatile Double proximityCenterLon;
     private File sourceDbFile;
     private File storageCacheDir;
+    private final Object dbQueryLock = new Object();
+    private volatile int foregroundDbOps;
+    private volatile boolean fullIndexReady;
+    private volatile boolean backgroundIndexRunning;
+    private volatile String indexProgressPhase = "";
+    private volatile int indexProgressPercent = -1;
+    private volatile IndexProgressListener indexProgressListener;
 
     private DzsDatabase(SQLiteDatabase db, GpsColumns gpsColumns, RoColumns roColumns,
                         Map<String, List<RoIndexEntry>> roByPairKey,
@@ -325,13 +338,15 @@ public class DzsDatabase implements Closeable {
                     int loaded = opened.loadProximityIndex(initialLatitude, initialLongitude, listener);
                     report(listener, String.format(Locale.ROOT,
                             "Okolí GPS načteno (%d výhybek)", loaded), 90);
-                    opened.scheduleBackgroundProximityCacheSave(initialLatitude, initialLongitude);
                 }
-                opened.scheduleBackgroundContentHash();
+                opened.scheduleBackgroundProximityCacheSave(initialLatitude, initialLongitude);
+                opened.ensureBackgroundFullIndex();
             } else {
                 report(listener, "Čekám na GPS pro indexaci okolí", 40);
+                opened.ensureBackgroundFullIndex();
             }
 
+            opened.scheduleBackgroundContentHash();
             report(listener, "Hotovo", 100);
             return opened;
         } catch (OutOfMemoryError e) {
@@ -347,17 +362,38 @@ public class DzsDatabase implements Closeable {
      * Doplní index výhybek v okolí GPS, pokud ještě nebyl načten nebo se poloha výrazně změnila.
      */
     public void ensureProximityLoaded(double latitude, double longitude) {
+        if (fullIndexReady) return;
         synchronized (this) {
+            if (fullIndexReady) return;
             if (!proximityLoaded) {
                 loadProximityIndex(latitude, longitude, null);
+                ensureBackgroundFullIndex();
                 return;
             }
             if (proximityCenterLat != null && proximityCenterLon != null) {
                 double movedKm = haversineM(proximityCenterLat, proximityCenterLon,
                         latitude, longitude) / 1000.0;
-                if (movedKm < PROXIMITY_RELOAD_MOVE_KM) return;
+                if (movedKm < PROXIMITY_RELOAD_MOVE_KM) {
+                    return;
+                }
             }
             loadProximityIndex(latitude, longitude, null);
+            ensureBackgroundFullIndex();
+        }
+    }
+
+    /** Plný index databáze je načten – GPS/TUDU fungují bez opakovaného SQL při pohybu. */
+    public boolean isFullIndexReady() {
+        return fullIndexReady;
+    }
+
+    public void setIndexProgressListener(IndexProgressListener listener) {
+        indexProgressListener = listener;
+        if (listener == null) return;
+        if (fullIndexReady) {
+            listener.onProgress("Indexace dokončena", 100);
+        } else if (backgroundIndexRunning && indexProgressPercent >= 0) {
+            listener.onProgress(indexProgressPhase, indexProgressPercent);
         }
     }
 
@@ -443,6 +479,239 @@ public class DzsDatabase implements Closeable {
         }, "dzs-prox-cache");
         t.setDaemon(true);
         t.start();
+    }
+
+    private void ensureBackgroundFullIndex() {
+        if (fullIndexReady || backgroundIndexRunning || sourceDbFile == null) return;
+        synchronized (this) {
+            if (fullIndexReady || backgroundIndexRunning) return;
+            backgroundIndexRunning = true;
+        }
+        Thread t = new Thread(this::runBackgroundFullIndex, "dzs-full-index");
+        t.setDaemon(true);
+        t.setPriority(Thread.MIN_PRIORITY);
+        t.start();
+    }
+
+    private void runBackgroundFullIndex() {
+        try {
+            reportIndexProgress("Kontrola cache indexu", 0);
+            waitForForegroundIdle();
+
+            File indexCacheDir = storageCacheDir != null ? new File(storageCacheDir, "dzs_index") : null;
+            DzsIndexCache.LoadedIndex cached = tryLoadFullIndexFromDisk(indexCacheDir);
+            if (cached != null) {
+                reportIndexProgress("Načítám cache indexu", 60);
+                synchronized (this) {
+                    if (!backgroundIndexRunning) return;
+                    applyLoadedFullIndex(cached);
+                }
+                reportIndexProgress("Indexace dokončena", 100);
+                return;
+            }
+
+            reportIndexProgress("Indexuji výhybky (RO)", 10);
+            waitForForegroundIdle();
+            RoIndexBuildResult built;
+            synchronized (dbQueryLock) {
+                waitForForegroundIdle();
+                if (!backgroundIndexRunning) return;
+                built = buildRoIndex(db, roColumns);
+            }
+            if (built.byRoKey.isEmpty()) {
+                reportIndexProgress("Varování: prázdný RO index", -1);
+                return;
+            }
+            reportIndexProgress("Indexuji výhybky (RO)", 40);
+
+            reportIndexProgress("Indexuji GPS souřadnice výhybek", 45);
+            waitForForegroundIdle();
+            VyhybkaGpsStore gpsStore;
+            synchronized (dbQueryLock) {
+                waitForForegroundIdle();
+                if (!backgroundIndexRunning) return;
+                foregroundDbOps++;
+                try {
+                    gpsStore = buildVyhybkaGpsStore(built.byRoKey, indexGpsProgressListener());
+                } finally {
+                    foregroundDbOps--;
+                }
+            }
+            reportIndexProgress("Indexuji GPS souřadnice výhybek", 85);
+
+            if (indexCacheDir != null && storageCacheDir != null) {
+                reportIndexProgress("Ukládám cache indexu", 88);
+                String contentHash = DzsIndexCache.fastDbKey(sourceDbFile);
+                try {
+                    contentHash = DzsIndexCache.resolveContentHash(sourceDbFile, indexCacheDir);
+                } catch (Exception ignored) {
+                }
+                saveIndexCache(sourceDbFile, contentHash, storageCacheDir, built.byPairKey, gpsStore,
+                        indexSaveProgressListener());
+            }
+
+            synchronized (this) {
+                if (!backgroundIndexRunning) return;
+                applyFullIndexInMemory(built.byPairKey, built.byRoKey, gpsStore);
+            }
+            reportIndexProgress("Indexace dokončena", 100);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception ignored) {
+            reportIndexProgress("Indexace selhala", -1);
+        } finally {
+            backgroundIndexRunning = false;
+        }
+    }
+
+    private DzsIndexCache.LoadedIndex tryLoadFullIndexFromDisk(File indexCacheDir) {
+        if (sourceDbFile == null || indexCacheDir == null) return null;
+        String fastKey = DzsIndexCache.fastDbKey(sourceDbFile);
+        DzsIndexCache.LoadedIndex loaded = DzsIndexCache.tryLoad(sourceDbFile, fastKey, indexCacheDir);
+        if (loaded != null) return loaded;
+        String cacheKey = DzsIndexCache.resolveCacheKey(sourceDbFile, indexCacheDir);
+        if (fastKey.equals(cacheKey)) return null;
+        return DzsIndexCache.tryLoad(sourceDbFile, cacheKey, indexCacheDir);
+    }
+
+    private OpenProgressListener indexGpsProgressListener() {
+        return (phase, percent) -> {
+            if (percent < 0) {
+                reportIndexProgress(phase, -1);
+                return;
+            }
+            int mapped = 45;
+            if (percent >= 50) {
+                mapped = 45 + (int) ((percent - 50L) * 40L / 30L);
+            }
+            reportIndexProgress(phase, Math.min(mapped, 85));
+        };
+    }
+
+    private OpenProgressListener indexSaveProgressListener() {
+        return (phase, percent) -> {
+            if (percent < 0) {
+                reportIndexProgress(phase, -1);
+                return;
+            }
+            int mapped = 88 + (percent - 85) / 3;
+            reportIndexProgress(phase, Math.min(Math.max(mapped, 88), 98));
+        };
+    }
+
+    private void applyLoadedFullIndex(DzsIndexCache.LoadedIndex cached) {
+        roByPairKey.clear();
+        roByRoKey.clear();
+        roByPairKey.putAll(convertRoIndex(cached.roByPairKey));
+        roByRoKey.putAll(buildRoByRoKey(roByPairKey));
+        vyhybkaGpsStore = cached.vyhybkaGpsStore != null ? cached.vyhybkaGpsStore
+                : VyhybkaGpsStore.empty();
+        coordMemo.clear();
+        preloadCoordsFromStore(vyhybkaGpsStore);
+        spatialGrid = null;
+        fullIndexReady = true;
+        proximityLoaded = true;
+    }
+
+    private void applyFullIndexInMemory(Map<String, List<RoIndexEntry>> byPairKey,
+                                        Map<String, RoIndexEntry> byRoKey,
+                                        VyhybkaGpsStore gpsStore) {
+        roByPairKey.clear();
+        roByRoKey.clear();
+        roByPairKey.putAll(byPairKey);
+        roByRoKey.putAll(byRoKey);
+        vyhybkaGpsStore = gpsStore != null ? gpsStore : VyhybkaGpsStore.empty();
+        coordMemo.clear();
+        preloadCoordsFromStore(vyhybkaGpsStore);
+        spatialGrid = null;
+        fullIndexReady = true;
+        proximityLoaded = true;
+    }
+
+    private void preloadCoordsFromStore(VyhybkaGpsStore store) {
+        if (store == null || store.isEmpty()) return;
+        for (int i = 0; i < store.size(); i++) {
+            coordMemo.put(memoKey(store.pairKeyAt(i), store.tuduAt(i), store.vyhybkaAt(i)),
+                    new double[]{store.latitudeAt(i), store.longitudeAt(i)});
+        }
+    }
+
+    private void reportIndexProgress(String phase, int percent) {
+        if (percent >= 0) {
+            if (indexProgressPercent >= 0 && percent < indexProgressPercent) {
+                percent = indexProgressPercent;
+            }
+            indexProgressPhase = phase != null ? phase : "";
+            indexProgressPercent = percent;
+        } else {
+            indexProgressPhase = phase != null ? phase : "";
+            indexProgressPercent = percent;
+        }
+        IndexProgressListener listener = indexProgressListener;
+        if (listener != null) {
+            listener.onProgress(indexProgressPhase, indexProgressPercent);
+        }
+    }
+
+    private void waitForForegroundIdle() throws InterruptedException {
+        while (backgroundIndexRunning && foregroundDbOps > 0) {
+            Thread.sleep(50);
+        }
+    }
+
+    private DzsIndexCache.LoadedIndex tryLoadProximityFromDisk(double latitude, double longitude) {
+        if (sourceDbFile == null || storageCacheDir == null) return null;
+        File indexCacheDir = new File(storageCacheDir, "dzs_index");
+        String key = DzsIndexCache.resolveCacheKey(sourceDbFile, indexCacheDir);
+        double maxDistM = PROXIMITY_RELOAD_MOVE_KM * 1000.0;
+        DzsIndexCache.LoadedIndex loaded = DzsIndexCache.tryLoadProximity(
+                sourceDbFile, key, indexCacheDir, latitude, longitude, maxDistM);
+        if (loaded != null) return loaded;
+        String fastKey = DzsIndexCache.fastDbKey(sourceDbFile);
+        if (fastKey.equals(key)) return null;
+        return DzsIndexCache.tryLoadProximity(
+                sourceDbFile, fastKey, indexCacheDir, latitude, longitude, maxDistM);
+    }
+
+    private int mergeProximityLoadedIndex(DzsIndexCache.LoadedIndex cached) {
+        if (cached == null) return 0;
+        int added = 0;
+        Set<String> newlyAdded = new HashSet<>();
+        for (Map.Entry<String, List<DzsIndexCache.RoEntry>> e : cached.roByPairKey.entrySet()) {
+            String pairKey = e.getKey();
+            String[] ids = splitPairKey(pairKey);
+            for (DzsIndexCache.RoEntry ro : e.getValue()) {
+                if (ro.roId == null || ro.roId.isEmpty()) continue;
+                String entryRoKey = roKey(ids[0], ids[1], ro.roId);
+                if (roByRoKey.containsKey(entryRoKey)) continue;
+                Integer castMin = ro.castMin >= 0 ? ro.castMin : null;
+                Integer castMax = ro.castMax >= 0 ? ro.castMax : null;
+                RoIndexEntry entry = new RoIndexEntry(ro.tudu, ro.vyhybka, ro.iob, ro.roId,
+                        castMin, castMax, ro.poloha);
+                mergeRoEntry(ids[0], ids[1], entry);
+                newlyAdded.add(entryRoKey);
+                added++;
+            }
+        }
+        VyhybkaGpsStore store = cached.vyhybkaGpsStore;
+        if (store == null || store.isEmpty()) return added;
+        if (vyhybkaGpsStore.isEmpty()) {
+            vyhybkaGpsStore = store;
+            return added;
+        }
+        if (newlyAdded.isEmpty()) return added;
+        VyhybkaGpsStore.Builder gpsBuilder = VyhybkaGpsStore.builder();
+        VyhybkaGpsStore.appendAll(gpsBuilder, vyhybkaGpsStore);
+        for (int i = 0; i < store.size(); i++) {
+            String pairKey = store.pairKeyAt(i);
+            String[] ids = splitPairKey(pairKey);
+            String entryRoKey = roKey(ids[0], ids[1], store.roIdAt(i));
+            if (!newlyAdded.contains(entryRoKey)) continue;
+            gpsBuilder.add(pairKey, store.tuduAt(i), store.vyhybkaAt(i), store.roIdAt(i),
+                    store.polohaAt(i), store.latitudeAt(i), store.longitudeAt(i));
+        }
+        vyhybkaGpsStore = gpsBuilder.build();
+        return added;
     }
 
     private void scheduleBackgroundContentHash() {
@@ -1079,6 +1348,48 @@ public class DzsDatabase implements Closeable {
     }
 
     private int loadProximityIndex(double latitude, double longitude, OpenProgressListener listener) {
+        foregroundDbOps++;
+        try {
+            DzsIndexCache.LoadedIndex cached = tryLoadProximityFromDisk(latitude, longitude);
+            if (cached != null) {
+                int added = mergeProximityLoadedIndex(cached);
+                spatialGrid = null;
+                proximityCenterLat = latitude;
+                proximityCenterLon = longitude;
+                proximityLoaded = true;
+                ensureBackgroundFullIndex();
+                if (listener != null) {
+                    report(listener, String.format(Locale.ROOT,
+                            "Okolí GPS z cache (%d výhybek)", vyhybkaGpsStore.size()), 80);
+                }
+                return added;
+            }
+
+            DzsIndexCache.LoadedIndex queried = queryProximityBboxForeground(latitude, longitude);
+            int added = mergeProximityLoadedIndex(queried);
+            spatialGrid = null;
+            proximityCenterLat = latitude;
+            proximityCenterLon = longitude;
+            proximityLoaded = true;
+            scheduleBackgroundProximityCacheSave(latitude, longitude);
+            ensureBackgroundFullIndex();
+            if (listener != null) {
+                report(listener, String.format(Locale.ROOT,
+                        "Okolí GPS načteno (%d výhybek)", added), 80);
+            }
+            return added;
+        } finally {
+            foregroundDbOps--;
+        }
+    }
+
+    private DzsIndexCache.LoadedIndex queryProximityBboxForeground(double latitude, double longitude) {
+        synchronized (dbQueryLock) {
+            return queryProximityBboxUnlocked(latitude, longitude);
+        }
+    }
+
+    private DzsIndexCache.LoadedIndex queryProximityBboxUnlocked(double latitude, double longitude) {
         double minLat = latitude - PROXIMITY_BBOX_DEG;
         double maxLat = latitude + PROXIMITY_BBOX_DEG;
         double minLon = longitude - PROXIMITY_BBOX_DEG;
@@ -1122,10 +1433,9 @@ public class DzsDatabase implements Closeable {
                 String.valueOf(minLon), String.valueOf(maxLon)
         };
 
-        Set<String> seenRoKeys = new HashSet<>(roByRoKey.keySet());
-        int added = 0;
+        Map<String, List<RoIndexEntry>> localRoByPair = new HashMap<>();
         VyhybkaGpsStore.Builder gpsBuilder = VyhybkaGpsStore.builder();
-        VyhybkaGpsStore.appendAll(gpsBuilder, vyhybkaGpsStore);
+        Set<String> seenRoKeys = new HashSet<>();
 
         try (Cursor c = db.rawQuery(sql.toString(), args)) {
             while (c.moveToNext()) {
@@ -1151,25 +1461,15 @@ public class DzsDatabase implements Closeable {
                 RoIndexEntry entry = new RoIndexEntry(tudu, vyhybka, iob, roId, cast.castMin,
                         cast.castMax, poloha);
                 String entryRoKey = roKey(superZId, superDId, roId);
-                if (seenRoKeys.add(entryRoKey)) {
-                    mergeRoEntry(superZId, superDId, entry);
-                    gpsBuilder.add(pairKey(superZId, superDId), tudu, vyhybka, roId, poloha, lat, lon);
-                    added++;
-                }
+                if (!seenRoKeys.add(entryRoKey)) continue;
+                localRoByPair.computeIfAbsent(pairKey(superZId, superDId), k -> new ArrayList<>())
+                        .add(entry);
+                gpsBuilder.add(pairKey(superZId, superDId), tudu, vyhybka, roId, poloha, lat, lon);
             }
         } catch (Exception ignored) {
         }
 
-        vyhybkaGpsStore = gpsBuilder.build();
-        spatialGrid = null;
-        proximityCenterLat = latitude;
-        proximityCenterLon = longitude;
-        proximityLoaded = true;
-        if (listener != null) {
-            report(listener, String.format(Locale.ROOT,
-                    "Okolí GPS načteno (%d výhybek)", added), 80);
-        }
-        return added;
+        return new DzsIndexCache.LoadedIndex(toRoCache(localRoByPair), gpsBuilder.build());
     }
 
     private void mergeRoEntry(String superZId, String superDId, RoIndexEntry entry) {
@@ -1310,6 +1610,7 @@ public class DzsDatabase implements Closeable {
 
     @Override
     public void close() {
+        backgroundIndexRunning = false;
         db.close();
     }
 

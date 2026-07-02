@@ -134,6 +134,12 @@ final class DzsIndexCache {
         }
     }
 
+    static boolean hasProximityCache(String contentHash, File cacheDir,
+                                     double latitude, double longitude) {
+        if (contentHash == null || contentHash.isEmpty() || cacheDir == null) return false;
+        return proximityCacheFileFor(contentHash, cacheDir, latitude, longitude).isFile();
+    }
+
   /**
      * Načte cache okolí GPS, pokud sedí otisk DB a střed cache je blízko požadované polohy.
      *
