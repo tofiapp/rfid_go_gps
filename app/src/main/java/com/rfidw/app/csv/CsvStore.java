@@ -21,7 +21,7 @@ import java.util.Set;
  *
  * Sloupce:
  *   ID_RFID ; EPC ; TID ; rok ; TUDU ; vyhybka ; cip ; POLOHA ; RO_ID ;
- *   latitude ; longitude ; accuracy_m ; gps_time
+ *   LAT ; LON ; accuracy_m ; gps_time
  *
  * Klíčem je ID_RFID – při zápisu stejného ID_RFID se daný řádek přepíše.
  */
@@ -29,7 +29,7 @@ public class CsvStore {
 
     public static final String[] HEADER = {
             "ID_RFID", "EPC", "TID", "rok", "TUDU", "vyhybka", "cip", "POLOHA", "RO_ID",
-            "latitude", "longitude", "accuracy_m", "gps_time"
+            "LAT", "LON", "accuracy_m", "gps_time"
     };
     private static final String SEP = ";";
 

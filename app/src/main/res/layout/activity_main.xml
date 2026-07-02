@@ -313,23 +313,27 @@
                     android:textStyle="bold"/>
 
                 <LinearLayout
+                    android:id="@+id/castHintPartContainer"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
                     android:gravity="center"
+                    android:minHeight="38dp"
                     android:orientation="vertical"
                     android:paddingStart="16dp"
-                    android:paddingTop="6dp"
-                    android:paddingEnd="16dp"
-                    android:paddingBottom="6dp">
+                    android:paddingEnd="16dp">
 
                     <TextView
                         android:id="@+id/tvCastHintPart"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:background="@drawable/cast_hint_part_bg"
                         android:gravity="center"
+                        android:minHeight="32dp"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
                         android:textColor="@color/accent"
-                        android:textSize="13sp"
+                        android:textSize="12sp"
                         android:textStyle="bold"/>
 
                     <com.google.android.material.button.MaterialButtonToggleGroup

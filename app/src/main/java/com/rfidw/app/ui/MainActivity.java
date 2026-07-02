@@ -1704,7 +1704,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Po otevření databáze bez GPS souřadnic index okolí 5 km ještě neexistuje.
+     * Po otevření databáze bez GPS souřadnic index okolí 4 km ještě neexistuje.
      * Doplní ho podle aktuální (nebo testovací) polohy, pak zavolá {@code after}.
      */
     private void ensureProximityFromGpsIfNeeded(Runnable after) {
@@ -2037,6 +2037,14 @@ public class MainActivity extends AppCompatActivity {
             if (!isChecked) return;
             castBranchHlavni = checkedId == R.id.btnCastHlavni;
         });
+    }
+
+    private void resetCastBranchSelection() {
+        castBranchHlavni = true;
+        lastCastBranchDefault = -1;
+        if (castBranchGroup != null) {
+            castBranchGroup.check(R.id.btnCastHlavni);
+        }
     }
 
     private boolean isDualRoVyhybka(Tudu.Vyhybka v) {
@@ -2926,6 +2934,9 @@ public class MainActivity extends AppCompatActivity {
         boolean vyhybkaChanged = epc.vyhybka != v.cislo;
         currentVyhybka = v;
         epc.vyhybka = v.cislo;
+        if (vyhybkaChanged) {
+            resetCastBranchSelection();
+        }
         if (uduChanged || vyhybkaChanged || epc.cast <= 0
                 || epc.cast < v.castMin || epc.cast > v.castMax) {
             epc.cast = firstMissingCast(tudu.code, v);
@@ -3148,8 +3159,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void selectVyhybka(Tudu.Vyhybka v, boolean resetCast) {
+        boolean vyhybkaChanged = currentVyhybka == null || currentVyhybka.cislo != v.cislo;
         currentVyhybka = v;
         epc.vyhybka = v.cislo;
+        if (vyhybkaChanged) {
+            resetCastBranchSelection();
+        }
         if (resetCast) {
             epc.cast = currentTudu != null
                     ? firstMissingCast(currentTudu.code, v)

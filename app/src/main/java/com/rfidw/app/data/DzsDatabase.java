@@ -27,7 +27,7 @@ import java.util.function.IntConsumer;
 /**
  * SQLite zdroj TUDU / výhybek z tabulek DZS_SUPERTRA_GPS_KM a DZS_SUPER_RO_TPI.
  *
- * Při otevření se indexuje jen okolí ~5 km kolem GPS (bbox ±0,05°). Zbytek databáze
+ * Při otevření se indexuje jen okolí ~4 km kolem GPS (bbox ±0,04°). Zbytek databáze
  * se doplňuje za běhu při pohybu nebo při výběru TUDU přes SQL dotazy.
  */
 public class DzsDatabase implements Closeable {
@@ -35,8 +35,8 @@ public class DzsDatabase implements Closeable {
     public static final String TABLE_GPS_KM = "DZS_SUPERTRA_GPS_KM";
     public static final String TABLE_RO_TPI = "DZS_SUPER_RO_TPI";
     private static final String TEMP_RO_GPS_LOOKUP = "_dzs_ro_gps_lookup";
-    /** Bbox ±0,05° kolem GPS (~5 km) – odpovídá SQL dotazu v dokumentaci. */
-    private static final double PROXIMITY_BBOX_DEG = 0.05;
+    /** Bbox ±0,04° kolem GPS (~4 km) – odpovídá SQL dotazu v dokumentaci. */
+    private static final double PROXIMITY_BBOX_DEG = 0.04;
     /** Po přesunu o tuto vzdálenost se znovu načte okolí GPS. */
     private static final double PROXIMITY_RELOAD_MOVE_KM = 3.0;
 
@@ -273,7 +273,7 @@ public class DzsDatabase implements Closeable {
     }
 
     /**
-     * Otevře databázi. Pokud jsou k dispozici souřadnice GPS, načte jen výhybky v okolí 5 km.
+     * Otevře databázi. Pokud jsou k dispozici souřadnice GPS, načte jen výhybky v okolí 4 km.
      * Zbytek se indexuje za běhu přes {@link #ensureProximityLoaded(double, double)}.
      */
     public static DzsDatabase open(String path, File cacheDir, OpenProgressListener listener,
@@ -321,7 +321,7 @@ public class DzsDatabase implements Closeable {
                     report(listener, String.format(Locale.ROOT,
                             "Okolí GPS z cache (%d výhybek)", opened.vyhybkaGpsStore.size()), 90);
                 } else {
-                    report(listener, "Načítám okolí GPS (5 km)", 40);
+                    report(listener, "Načítám okolí GPS (4 km)", 40);
                     int loaded = opened.loadProximityIndex(initialLatitude, initialLongitude, listener);
                     report(listener, String.format(Locale.ROOT,
                             "Okolí GPS načteno (%d výhybek)", loaded), 90);
