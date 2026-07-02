@@ -130,6 +130,7 @@ public class MainActivity extends AppCompatActivity {
     /** Ruční výběr výhybky v GPS režimu – GPS lookup nepřepíše, dokud nejsou načteny všechny části. */
     private boolean gpsVyhybkaLocked;
     private volatile boolean gpsLookupInFlight;
+    private volatile boolean proximityLoadInFlight;
     private boolean gpsLookupNoMatch;
     private boolean forceNextGpsLookup;
     private Double lastGpsLookupLat;
@@ -561,7 +562,7 @@ public class MainActivity extends AppCompatActivity {
         }
         final double lat = locationCache.getSnapshot().latitude;
         final double lon = locationCache.getSnapshot().longitude;
-        gpsIo.execute(() -> {
+        ensureProximityFromGpsIfNeeded(() -> gpsIo.execute(() -> {
             List<DzsDatabase.GpsMatch> matches = Collections.emptyList();
             try {
                 if (dzsDatabase != null) {
@@ -578,7 +579,7 @@ public class MainActivity extends AppCompatActivity {
                 }
                 showNearbyTuduPickerDialog(result);
             });
-        });
+        }));
     }
 
     private void showNearbyTuduPickerDialog(List<DzsDatabase.GpsMatch> matches) {
@@ -1656,14 +1657,73 @@ public class MainActivity extends AppCompatActivity {
     private void setupLocation() {
         locationCache = new LocationCache(this);
         locationCache.setListener(() -> {
-            scheduleGpsTuduLookup();
-            if (!workflowRunning) {
-                setActionStatusReady();
-            } else if (showGpsStatus) {
-                refreshGpsStatus();
-            }
+            ensureProximityFromGpsIfNeeded(() -> {
+                scheduleGpsTuduLookup();
+                if (!workflowRunning) {
+                    setActionStatusReady();
+                } else if (showGpsStatus) {
+                    refreshGpsStatus();
+                }
+            });
         });
         ensureLocationPermission();
+    }
+
+    /**
+     * Po otevření databáze bez GPS souřadnic index okolí 5 km ještě neexistuje.
+     * Doplní ho podle aktuální (nebo testovací) polohy, pak zavolá {@code after}.
+     */
+    private void ensureProximityFromGpsIfNeeded(Runnable after) {
+        if (dzsDatabase == null) {
+            if (after != null) after.run();
+            return;
+        }
+        if (dzsDatabase.isProximityIndexed()) {
+            if (after != null) after.run();
+            return;
+        }
+        if (locationCache == null) {
+            if (after != null) after.run();
+            return;
+        }
+        LocationCache.Snapshot snap = locationCache.getSnapshot();
+        if (!snap.valid) {
+            if (after != null) after.run();
+            return;
+        }
+        if (proximityLoadInFlight) {
+            if (after != null) after.run();
+            return;
+        }
+        proximityLoadInFlight = true;
+        final double lat = snap.latitude;
+        final double lon = snap.longitude;
+        gpsIo.execute(() -> {
+            try {
+                DzsDatabase db = dzsDatabase;
+                if (db != null) {
+                    db.ensureProximityLoaded(lat, lon);
+                }
+            } finally {
+                proximityLoadInFlight = false;
+                ui.post(() -> {
+                    updateNearbyTuduCountInSourceLabel();
+                    if (after != null) after.run();
+                });
+            }
+        });
+    }
+
+    private void updateNearbyTuduCountInSourceLabel() {
+        if (tvSourceFile == null || dzsDatabase == null || !gpsAutoSelection) return;
+        CharSequence current = tvSourceFile.getText();
+        if (current == null) return;
+        String text = current.toString();
+        int sep = text.indexOf("  •  TUDU:");
+        if (sep < 0) return;
+        String displayName = text.substring(0, sep);
+        int nearby = dzsDatabase.countDistinctTuduNearby();
+        tvSourceFile.setText(getString(R.string.db_loaded_gps, displayName, nearby));
     }
 
     private void ensureGpsForTuduLookup() {
@@ -2137,8 +2197,9 @@ public class MainActivity extends AppCompatActivity {
             expandCard1Body();
             return;
         }
-        io.execute(() -> {
-            List<DzsDatabase.GpsPoint> points = dzsDatabase.listGpsPoints();
+        ensureProximityFromGpsIfNeeded(() -> io.execute(() -> {
+            List<DzsDatabase.GpsPoint> points = dzsDatabase != null
+                    ? dzsDatabase.listGpsPoints() : Collections.emptyList();
             ui.post(() -> {
                 if (points.isEmpty()) {
                     toast(getString(R.string.gps_test_no_gps_point));
@@ -2146,7 +2207,7 @@ public class MainActivity extends AppCompatActivity {
                 }
                 showTestLocationPickerDialog(points);
             });
-        });
+        }));
     }
 
     private void showTestLocationPickerDialog(List<DzsDatabase.GpsPoint> points) {
@@ -2550,7 +2611,17 @@ public class MainActivity extends AppCompatActivity {
                 uiReady.await(3, TimeUnit.SECONDS);
                 LocationCache.Snapshot snap = waitForGpsFix(loadId);
                 if (loadId != dbLoadGeneration) return;
-                if (!snap.valid) return;
+                if (!snap.valid) {
+                    runOnUiThreadIfAlive(loadId, () -> {
+                        endCard1DbLoad();
+                        expandCard1Body();
+                        tvSourceFile.setText(getString(R.string.gps_db_load_no_fix));
+                        if (showErrorToast) {
+                            toast(getString(R.string.gps_db_load_no_fix));
+                        }
+                    });
+                    return;
+                }
                 initLat = snap.latitude;
                 initLon = snap.longitude;
                 runOnUiThreadIfAlive(loadId, () ->
@@ -2663,33 +2734,47 @@ public class MainActivity extends AppCompatActivity {
         if (skipCsvTuduRestore) {
             skipCsvTuduRestore = false;
         }
-        if (!gpsAutoSelection) {
-            if (epc.tudu != null && !epc.tudu.isEmpty()) {
-                for (Tudu t : tuduList) {
-                    if (t.code.equals(epc.tudu)) {
-                        selectTuduPreservingEpc(t);
-                        return;
+        Runnable afterProximity = () -> {
+            if (!gpsAutoSelection) {
+                if (epc.tudu != null && !epc.tudu.isEmpty()) {
+                    for (Tudu t : tuduList) {
+                        if (t.code.equals(epc.tudu)) {
+                            selectTuduPreservingEpc(t);
+                            return;
+                        }
                     }
                 }
+                ensureGpsForTuduLookup();
+                return;
             }
             ensureGpsForTuduLookup();
-            return;
-        }
-        ensureGpsForTuduLookup();
-        if (dzsDatabase != null && !dzsDatabase.hasProximityData()) {
-            toast("V okolí GPS nebyla nalezena výhybka – zkuste ruční výběr TUDU");
-        } else if (!step1Done && locationCache != null && !locationCache.hasFix()) {
-            if (gpsTestMode) {
-                if (!locationCache.hasTestOverride()) {
-                    toast(getString(R.string.gps_test_enabled_toast));
+            if (dzsDatabase != null && dzsDatabase.isProximityIndexed() && !dzsDatabase.hasProximityData()) {
+                toast("V okolí GPS nebyla nalezena výhybka – zkuste ruční výběr TUDU");
+            } else if (!step1Done && locationCache != null && !locationCache.hasFix()) {
+                if (gpsTestMode) {
+                    if (!locationCache.hasTestOverride()) {
+                        toast(getString(R.string.gps_test_enabled_toast));
+                    }
+                } else {
+                    toast(getString(R.string.gps_tudu_wait));
                 }
-            } else {
-                toast(getString(R.string.gps_tudu_wait));
             }
-        }
+        };
+        ensureProximityFromGpsIfNeeded(afterProximity);
     }
 
     private void scheduleGpsTuduLookup() {
+        if (!gpsAutoSelection || dzsDatabase == null || locationCache == null || gpsLookupInFlight) {
+            return;
+        }
+        if (!dzsDatabase.isProximityIndexed()) {
+            ensureProximityFromGpsIfNeeded(this::scheduleGpsTuduLookupNow);
+            return;
+        }
+        scheduleGpsTuduLookupNow();
+    }
+
+    private void scheduleGpsTuduLookupNow() {
         if (!gpsAutoSelection || dzsDatabase == null || locationCache == null || gpsLookupInFlight) {
             return;
         }
