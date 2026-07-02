@@ -30,6 +30,8 @@ final class DzsIndexCache {
 
     private static final int MAGIC = 0x445A5349; // "DZSI"
     private static final int VERSION = 18;
+    /** Cache indexu okolí GPS (jen výhybky v bbox ±0,05°). */
+    private static final int PROXIMITY_VERSION = 19;
     private static final int VERSION_LEGACY_V16 = 16;
     private static final int VERSION_LEGACY_V14 = 14;
     private static final int VERSION_LEGACY_V13 = 13;
@@ -110,6 +112,70 @@ final class DzsIndexCache {
         } catch (Exception e) {
             throw new IOException("Nelze spočítat otisk databáze", e);
         }
+    }
+
+  /**
+     * Načte cache okolí GPS, pokud sedí otisk DB a střed cache je blízko požadované polohy.
+     *
+     * @param maxCenterDistM maximální vzdálenost středů (m); typicky {@code PROXIMITY_RELOAD_MOVE_KM * 1000}
+     */
+    static LoadedIndex tryLoadProximity(File dbFile, String contentHash, File cacheDir,
+                                        double latitude, double longitude, double maxCenterDistM) {
+        if (dbFile == null || !dbFile.isFile() || contentHash == null || contentHash.isEmpty()) {
+            return null;
+        }
+        if (cacheDir == null) return null;
+        File cacheFile = proximityCacheFileFor(contentHash, cacheDir, latitude, longitude);
+        if (!cacheFile.isFile()) return null;
+        return readProximityIndex(dbFile.length(), contentHash, cacheFile, latitude, longitude,
+                maxCenterDistM);
+    }
+
+    static boolean saveProximity(File dbFile, String contentHash, File cacheDir,
+                                 double centerLatitude, double centerLongitude,
+                                 Map<String, List<RoEntry>> roByPairKey,
+                                 VyhybkaGpsStore vyhybkaGpsStore) {
+        if (dbFile == null || cacheDir == null || !dbFile.isFile()) return false;
+        if (contentHash == null || contentHash.length() != HASH_HEX_LEN) return false;
+        if (!cacheDir.exists() && !cacheDir.mkdirs()) return false;
+        File cacheFile = proximityCacheFileFor(contentHash, cacheDir, centerLatitude, centerLongitude);
+        File tmp = new File(cacheDir, cacheFile.getName() + ".tmp");
+        try (DataOutputStream out = new DataOutputStream(
+                new GZIPOutputStream(new FileOutputStream(tmp)))) {
+            out.writeInt(MAGIC);
+            out.writeInt(PROXIMITY_VERSION);
+            out.writeLong(dbFile.length());
+            out.writeUTF(contentHash);
+            out.writeDouble(centerLatitude);
+            out.writeDouble(centerLongitude);
+            int roCount = 0;
+            for (List<RoEntry> entries : roByPairKey.values()) {
+                roCount += entries.size();
+            }
+            out.writeInt(roCount);
+            for (Map.Entry<String, List<RoEntry>> e : roByPairKey.entrySet()) {
+                for (RoEntry ro : e.getValue()) {
+                    out.writeUTF(e.getKey());
+                    out.writeUTF(ro.tudu);
+                    out.writeInt(ro.vyhybka);
+                    out.writeUTF(ro.iob);
+                    out.writeUTF(ro.roId);
+                    out.writeInt(ro.castMin);
+                    out.writeInt(ro.castMax);
+                    out.writeUTF(ro.poloha);
+                }
+            }
+            writeVyhybkaGpsStore(out, vyhybkaGpsStore, true);
+            out.flush();
+        } catch (Exception ignored) {
+            tmp.delete();
+            return false;
+        }
+        if (!tmp.renameTo(cacheFile)) {
+            tmp.delete();
+            return false;
+        }
+        return true;
     }
 
     static LoadedIndex tryLoad(File dbFile, String contentHash, File cacheDir) {
@@ -260,8 +326,71 @@ final class DzsIndexCache {
         return builder.build();
     }
 
+    private static LoadedIndex readProximityIndex(long dbSize, String contentHash, File indexFile,
+                                                    double latitude, double longitude,
+                                                    double maxCenterDistM) {
+        if (indexFile == null || !indexFile.isFile()) return null;
+        try (DataInputStream in = new DataInputStream(
+                new GZIPInputStream(new FileInputStream(indexFile)))) {
+            if (in.readInt() != MAGIC) return null;
+            if (in.readInt() != PROXIMITY_VERSION) return null;
+            long cachedSize = in.readLong();
+            String cachedHash = in.readUTF();
+            if (cachedSize != dbSize || !contentHash.equals(cachedHash)) {
+                return null;
+            }
+            double centerLat = in.readDouble();
+            double centerLon = in.readDouble();
+            if (haversineM(centerLat, centerLon, latitude, longitude) > maxCenterDistM) {
+                return null;
+            }
+            int roCount = in.readInt();
+            Map<String, List<RoEntry>> ro = new HashMap<>(Math.max(roCount / 2, 16));
+            boolean hasRoId = false;
+            for (int i = 0; i < roCount; i++) {
+                String pairKey = in.readUTF();
+                String tudu = in.readUTF();
+                int vyhybka = in.readInt();
+                String iob = in.readUTF();
+                String roId = in.readUTF();
+                int castMin = in.readInt();
+                int castMax = in.readInt();
+                String poloha = in.readUTF();
+                if (roId == null || roId.isEmpty()) continue;
+                hasRoId = true;
+                RoEntry entry = new RoEntry(tudu, vyhybka, iob, roId, castMin, castMax, poloha);
+                ro.computeIfAbsent(pairKey, k -> new ArrayList<>()).add(entry);
+            }
+            if (!hasRoId) return null;
+            VyhybkaGpsStore vyhybkaGpsStore = readVyhybkaGpsStore(in, true);
+            return new LoadedIndex(ro, vyhybkaGpsStore);
+        } catch (OutOfMemoryError e) {
+            throw e;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static double haversineM(double lat1, double lon1, double lat2, double lon2) {
+        double r = 6_371_000.0;
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLon = Math.toRadians(lon2 - lon1);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
+                * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        return 2 * r * Math.asin(Math.sqrt(a));
+    }
+
     private static File cacheFileFor(String contentHash, File cacheDir) {
         return new File(cacheDir, "dzs_" + contentHash + ".idx");
+    }
+
+    /** Buňka ~0,01° (~1 km) pro název souboru cache okolí. */
+    private static File proximityCacheFileFor(String contentHash, File cacheDir,
+                                              double latitude, double longitude) {
+        int latCell = (int) Math.round(latitude * 100.0);
+        int lonCell = (int) Math.round(longitude * 100.0);
+        return new File(cacheDir, "dzs_" + contentHash + "_p_" + latCell + "_" + lonCell + ".pidx");
     }
 
     private static File hashSidecarFile(File dbFile, File cacheDir) {
