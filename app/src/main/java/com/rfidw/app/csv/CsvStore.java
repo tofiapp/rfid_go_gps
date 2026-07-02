@@ -21,7 +21,7 @@ import java.util.Set;
  *
  * Sloupce:
  *   ID_RFID ; EPC ; TID ; rok ; TUDU ; vyhybka ; cip ; POLOHA ; RO_ID ;
- *   latitude ; longitude ; accuracy_m ; gps_time ; USER_ID
+ *   latitude ; longitude ; accuracy_m ; gps_time
  *
  * Klíčem je ID_RFID – při zápisu stejného ID_RFID se daný řádek přepíše.
  */
@@ -29,7 +29,7 @@ public class CsvStore {
 
     public static final String[] HEADER = {
             "ID_RFID", "EPC", "TID", "rok", "TUDU", "vyhybka", "cip", "POLOHA", "RO_ID",
-            "latitude", "longitude", "accuracy_m", "gps_time", "USER_ID"
+            "latitude", "longitude", "accuracy_m", "gps_time"
     };
     private static final String SEP = ";";
 
@@ -47,12 +47,11 @@ public class CsvStore {
         public String longitude;
         public String accuracyM;
         public String gpsTime;
-        public String userId;
 
         public String[] toArray() {
             return new String[]{
                     idRfid, epc, tid, rok, tudu, vyhybka, cast, poloha, roId,
-                    latitude, longitude, accuracyM, gpsTime, userId
+                    latitude, longitude, accuracyM, gpsTime
             };
         }
     }
@@ -151,7 +150,6 @@ public class CsvStore {
             boolean first = true;
             boolean hasPolohaColumn = false;
             boolean hasRoIdColumn = false;
-            boolean hasUserIdColumn = false;
             while ((line = br.readLine()) != null) {
                 if (line.trim().isEmpty()) continue;
                 String[] c = line.split(SEP, -1);
@@ -162,7 +160,6 @@ public class CsvStore {
                             String name = col.trim();
                             if ("POLOHA".equalsIgnoreCase(name)) hasPolohaColumn = true;
                             if ("RO_ID".equalsIgnoreCase(name)) hasRoIdColumn = true;
-                            if ("USER_ID".equalsIgnoreCase(name)) hasUserIdColumn = true;
                         }
                         continue;
                     }
@@ -182,7 +179,6 @@ public class CsvStore {
                     r.longitude = get(c, 10);
                     r.accuracyM = get(c, 11);
                     r.gpsTime = get(c, 12);
-                    r.userId = hasUserIdColumn ? get(c, 13) : "";
                 } else if (hasPolohaColumn) {
                     r.poloha = get(c, 7);
                     r.roId = "";
@@ -190,7 +186,6 @@ public class CsvStore {
                     r.longitude = get(c, 9);
                     r.accuracyM = get(c, 10);
                     r.gpsTime = get(c, 11);
-                    r.userId = hasUserIdColumn ? get(c, 12) : "";
                 } else {
                     r.poloha = "";
                     r.roId = "";
@@ -198,7 +193,6 @@ public class CsvStore {
                     r.longitude = get(c, 8);
                     r.accuracyM = get(c, 9);
                     r.gpsTime = get(c, 10);
-                    r.userId = hasUserIdColumn ? get(c, 11) : "";
                 }
                 if (r.idRfid != null && !r.idRfid.isEmpty()) {
                     rows.put(r.idRfid, r);
@@ -238,21 +232,38 @@ public class CsvStore {
         int cast = parseInt(row.cast, -1);
         int vyhybka = parseInt(row.vyhybka, -1);
         if (row.tudu == null || row.tudu.isEmpty() || vyhybka < 0 || cast < 0) return;
-        castsByVyhybkaRo
-                .computeIfAbsent(vyhybkaRoKey(row.tudu, vyhybka, row.roId), k -> new HashSet<>())
-                .add(cast);
+        for (String roId : parseRoIds(row.roId)) {
+            castsByVyhybkaRo
+                    .computeIfAbsent(vyhybkaRoKey(row.tudu, vyhybka, roId), k -> new HashSet<>())
+                    .add(cast);
+        }
     }
 
     private void removeFromCastIndex(Row row) {
         int cast = parseInt(row.cast, -1);
         int vyhybka = parseInt(row.vyhybka, -1);
         if (row.tudu == null || row.tudu.isEmpty() || vyhybka < 0 || cast < 0) return;
-        Set<Integer> casts = castsByVyhybkaRo.get(vyhybkaRoKey(row.tudu, vyhybka, row.roId));
-        if (casts == null) return;
-        casts.remove(cast);
-        if (casts.isEmpty()) {
-            castsByVyhybkaRo.remove(vyhybkaRoKey(row.tudu, vyhybka, row.roId));
+        for (String roId : parseRoIds(row.roId)) {
+            Set<Integer> casts = castsByVyhybkaRo.get(vyhybkaRoKey(row.tudu, vyhybka, roId));
+            if (casts == null) continue;
+            casts.remove(cast);
+            if (casts.isEmpty()) {
+                castsByVyhybkaRo.remove(vyhybkaRoKey(row.tudu, vyhybka, roId));
+            }
         }
+    }
+
+    /** Jedno RO_ID nebo více hodnot oddělených mezerou (čip 1 u dvojvětvé výhybky). */
+    public static List<String> parseRoIds(String roIdField) {
+        if (roIdField == null || roIdField.trim().isEmpty()) {
+            return Collections.singletonList("");
+        }
+        String[] parts = roIdField.trim().split("\\s+");
+        List<String> result = new ArrayList<>();
+        for (String part : parts) {
+            if (!part.isEmpty()) result.add(part);
+        }
+        return result.isEmpty() ? Collections.singletonList("") : result;
     }
 
     private static String get(String[] arr, int i) {

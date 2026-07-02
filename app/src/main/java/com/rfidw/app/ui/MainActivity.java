@@ -51,7 +51,6 @@ import com.google.android.material.button.MaterialButton;
 import com.google.android.material.button.MaterialButtonToggleGroup;
 
 import com.rfidw.app.R;
-import com.rfidw.app.auth.UserSession;
 import com.rfidw.app.csv.CsvStore;
 import com.rfidw.app.data.DzsDatabase;
 import com.rfidw.app.data.Tudu;
@@ -141,6 +140,7 @@ public class MainActivity extends AppCompatActivity {
     private static final long GPS_LOOKUP_TIMEOUT_MS = 10_000;
     private static final long GPS_DB_LOAD_POLL_MS = 500;
     private static final int GPS_NEARBY_TUDU_LIMIT = 10;
+    private static final String PREFS_NAME = "rfidgogps";
     private static final String PREF_GPS_TEST_MODE = "gpsTestMode";
     private static final String PREF_TUDU_MODE_GPS = "tuduModeGps";
     private static final String PREF_TEST_LAT = "testLat";
@@ -163,7 +163,7 @@ public class MainActivity extends AppCompatActivity {
     private int activeStep;
 
     // view reference
-    private TextView tvReaderStatus, tvGpsStatus, tvUserId, tvEpcPreview, tvEpcValid, tvSourceFile,
+    private TextView tvReaderStatus, tvGpsStatus, tvEpcPreview, tvEpcValid, tvSourceFile,
             tvCard1DbProgress,
             tvWriteResult, tvCsvPath, tvPwdWriteResult, tvLockResult,
             tvSummaryTudu, tvSummaryVyhybka, tvSummaryCast,
@@ -189,6 +189,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvTuduModeHint;
     private boolean tuduListFullyLoaded;
     private boolean castBranchHlavni = true;
+    private int lastCastBranchDefault = -1;
     private int lastChip1WriteCount = 1;
     private Boolean powerPresetInKoleji;
     private boolean showGpsStatus;
@@ -202,13 +203,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        prefs = getSharedPreferences(UserSession.PREFS_NAME, MODE_PRIVATE);
-        if (!UserSession.isLoggedIn(prefs)) {
-            startActivity(new Intent(this, LoginActivity.class));
-            finish();
-            return;
-        }
-
+        prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         setContentView(R.layout.activity_main);
 
         bindViews();
@@ -238,33 +233,11 @@ public class MainActivity extends AppCompatActivity {
         updateStepIndicators();
 
         setActionStatusReady();
-        updateUserIdDisplay();
-    }
-
-    private void updateUserIdDisplay() {
-        if (tvUserId == null) return;
-        String userId = UserSession.getUserId(prefs);
-        tvUserId.setText(getString(R.string.user_id_label, userId));
-    }
-
-    private void confirmLogout() {
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.logout_confirm_title)
-                .setPositiveButton(R.string.logout_confirm_yes, (d, w) -> logout())
-                .setNegativeButton(R.string.logout_confirm_no, null)
-                .show();
-    }
-
-    private void logout() {
-        UserSession.logout(prefs);
-        startActivity(new Intent(this, LoginActivity.class));
-        finish();
     }
 
     private void bindViews() {
         tvReaderStatus = findViewById(R.id.tvReaderStatus);
         tvGpsStatus = findViewById(R.id.tvGpsStatus);
-        tvUserId = findViewById(R.id.tvUserId);
         tvEpcPreview = findViewById(R.id.tvEpcPreview);
         tvEpcValid = findViewById(R.id.tvEpcValid);
         tvSourceFile = findViewById(R.id.tvSourceFile);
@@ -812,7 +785,7 @@ public class MainActivity extends AppCompatActivity {
                 expandCard1Body();
                 return;
             }
-            showVyhybkaPickerDialog(items, null);
+            showVyhybkaPickerDialog(prepareVyhybkaPickerItems(items, null, false), 0);
             return;
         }
 
@@ -833,6 +806,9 @@ public class MainActivity extends AppCompatActivity {
                     if (withDistances && !loadedItems.isEmpty()) {
                         distances = db.findVyhybkaDistancesForUdu(uduCode, lat, lon);
                     }
+                    for (VyhybkaPickerItem item : loadedItems) {
+                        ensureVyhybkaRoBranches(item.tuduCode, item.vyhybka);
+                    }
                 }
             } catch (Exception e) {
                 Log.w(TAG, "Načtení výhybek pro picker selhalo", e);
@@ -841,6 +817,7 @@ public class MainActivity extends AppCompatActivity {
                     sortVyhybkaItemsForPicker(loadedItems, distances);
             final List<Tudu> tudusSnapshot = loadedTudus;
             final Map<String, Double> distancesSnapshot = distances;
+            final boolean showDistanceHints = withDistances;
             runOnUiThreadIfAlive(loadId, () -> {
                 for (Tudu t : tudusSnapshot) {
                     mergeTuduIntoList(t);
@@ -856,15 +833,46 @@ public class MainActivity extends AppCompatActivity {
                     expandCard1Body();
                     return;
                 }
-                showVyhybkaPickerDialog(pickerItems, distancesSnapshot);
+                List<VyhybkaPickerPreparedItem> prepared = prepareVyhybkaPickerItems(
+                        pickerItems, distancesSnapshot, showDistanceHints);
+                int missingGps = countVyhybkaPickerMissingGps(prepared, distancesSnapshot, showDistanceHints);
+                showVyhybkaPickerDialog(prepared, missingGps);
             });
         });
     }
 
-    private void showVyhybkaPickerDialog(List<VyhybkaPickerItem> itemsSource,
-                                         Map<String, Double> distancesM) {
-        final List<VyhybkaPickerItem> allItems = new ArrayList<>(itemsSource);
-        final List<VyhybkaPickerItem> filteredItems = new ArrayList<>(allItems);
+    private List<VyhybkaPickerPreparedItem> prepareVyhybkaPickerItems(
+            List<VyhybkaPickerItem> items, Map<String, Double> distancesM, boolean showDistanceHints) {
+        List<VyhybkaPickerPreparedItem> prepared = new ArrayList<>(items.size());
+        for (VyhybkaPickerItem item : items) {
+            boolean complete = isVyhybkaCompleteInCsv(item.tuduCode, item.vyhybka);
+            Double dist = distancesM != null
+                    ? distancesM.get(vyhybkaPickerKey(item.tuduCode, item.vyhybka)) : null;
+            CharSequence label = formatVyhybkaPickerLabel(
+                    item.tuduCode, item.vyhybka, dist, showDistanceHints);
+            prepared.add(new VyhybkaPickerPreparedItem(item, label, complete));
+        }
+        return prepared;
+    }
+
+    private int countVyhybkaPickerMissingGps(List<VyhybkaPickerPreparedItem> items,
+                                             Map<String, Double> distancesM,
+                                             boolean showDistanceHints) {
+        if (!showDistanceHints || distancesM == null) return 0;
+        int missing = 0;
+        for (VyhybkaPickerPreparedItem item : items) {
+            if (!distancesM.containsKey(
+                    vyhybkaPickerKey(item.item.tuduCode, item.item.vyhybka))) {
+                missing++;
+            }
+        }
+        return missing;
+    }
+
+    private void showVyhybkaPickerDialog(List<VyhybkaPickerPreparedItem> itemsSource,
+                                         int missingGpsCount) {
+        final List<VyhybkaPickerPreparedItem> allItems = new ArrayList<>(itemsSource);
+        final List<VyhybkaPickerPreparedItem> filteredItems = new ArrayList<>(allItems);
 
         View dialogView = getLayoutInflater().inflate(R.layout.dialog_tudu_picker, null);
         EditText etSearch = dialogView.findViewById(R.id.etTuduSearch);
@@ -872,12 +880,11 @@ public class MainActivity extends AppCompatActivity {
         ListView listView = dialogView.findViewById(R.id.lvTudu);
         listView.setChoiceMode(ListView.CHOICE_MODE_SINGLE);
 
-        ArrayAdapter<VyhybkaPickerItem> adapter = new ArrayAdapter<VyhybkaPickerItem>(this,
+        ArrayAdapter<VyhybkaPickerPreparedItem> adapter = new ArrayAdapter<VyhybkaPickerPreparedItem>(this,
                 android.R.layout.simple_list_item_single_choice, filteredItems) {
             @Override
             public boolean isEnabled(int position) {
-                VyhybkaPickerItem item = filteredItems.get(position);
-                return !isVyhybkaCompleteInCsv(item.tuduCode, item.vyhybka);
+                return !filteredItems.get(position).complete;
             }
 
             @Override
@@ -885,12 +892,9 @@ public class MainActivity extends AppCompatActivity {
                     android.view.ViewGroup parent) {
                 android.view.View view = super.getView(position, convertView, parent);
                 TextView tv = (TextView) view;
-                VyhybkaPickerItem item = filteredItems.get(position);
-                boolean done = isVyhybkaCompleteInCsv(item.tuduCode, item.vyhybka);
-                Double dist = distancesM != null
-                        ? distancesM.get(vyhybkaPickerKey(item.tuduCode, item.vyhybka)) : null;
-                tv.setText(formatVyhybkaPickerLabel(item.tuduCode, item.vyhybka, dist));
-                if (done) {
+                VyhybkaPickerPreparedItem item = filteredItems.get(position);
+                tv.setText(item.label);
+                if (item.complete) {
                     tv.setTextColor(ContextCompat.getColor(MainActivity.this, R.color.text_muted));
                     tv.setAlpha(0.45f);
                 } else {
@@ -911,20 +915,23 @@ public class MainActivity extends AppCompatActivity {
         refreshChecked.run();
 
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Vyberte výhybku")
+                .setTitle(missingGpsCount > 0
+                        ? getString(R.string.vyhybka_picker_title_missing_gps, missingGpsCount)
+                        : getString(R.string.vyhybka_picker_title))
                 .setView(dialogView)
                 .setNegativeButton("Zrušit", null)
                 .create();
 
         listView.setOnItemClickListener((parent, v, position, id) -> {
-            VyhybkaPickerItem item = filteredItems.get(position);
-            if (isVyhybkaCompleteInCsv(item.tuduCode, item.vyhybka)) {
+            VyhybkaPickerPreparedItem prepared = filteredItems.get(position);
+            if (prepared.complete) {
                 toast("výhybka je již zapsaná v CSV");
                 return;
             }
             if (gpsAutoSelection) {
                 gpsVyhybkaLocked = true;
             }
+            VyhybkaPickerItem item = prepared.item;
             Tudu owner = findTuduByCode(item.tuduCode);
             if (owner != null) {
                 currentTudu = owner;
@@ -940,9 +947,9 @@ public class MainActivity extends AppCompatActivity {
             if (q.isEmpty()) {
                 filteredItems.addAll(allItems);
             } else {
-                for (VyhybkaPickerItem item : allItems) {
-                    if (item.vyhybka.displayLabel().contains(q)
-                            || String.valueOf(item.vyhybka.cislo).contains(q)) {
+                for (VyhybkaPickerPreparedItem item : allItems) {
+                    if (item.item.vyhybka.displayLabel().contains(q)
+                            || String.valueOf(item.item.vyhybka.cislo).contains(q)) {
                         filteredItems.add(item);
                     }
                 }
@@ -1038,6 +1045,23 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public String toString() {
             return vyhybka.displayLabel();
+        }
+    }
+
+    private static final class VyhybkaPickerPreparedItem {
+        final VyhybkaPickerItem item;
+        final CharSequence label;
+        final boolean complete;
+
+        VyhybkaPickerPreparedItem(VyhybkaPickerItem item, CharSequence label, boolean complete) {
+            this.item = item;
+            this.label = label;
+            this.complete = complete;
+        }
+
+        @Override
+        public String toString() {
+            return label.toString();
         }
     }
 
@@ -1160,23 +1184,23 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private int findVyhybkaPickerCheckedIndex(List<VyhybkaPickerItem> items) {
+    private int findVyhybkaPickerCheckedIndex(List<VyhybkaPickerPreparedItem> items) {
         String tuduCode = currentTudu != null ? currentTudu.code : epc.tudu;
         int cislo = currentVyhybka != null ? currentVyhybka.cislo : epc.vyhybka;
         String iob = currentVyhybka != null ? currentVyhybka.iob : "";
         if (cislo > 0) {
             for (int i = 0; i < items.size(); i++) {
-                VyhybkaPickerItem item = items.get(i);
+                VyhybkaPickerItem item = items.get(i).item;
                 if (!item.tuduCode.equals(tuduCode)) continue;
                 if (item.vyhybka.cislo == cislo
                         && (iob.isEmpty() || item.vyhybka.iob.equals(iob))) return i;
             }
             for (int i = 0; i < items.size(); i++) {
-                VyhybkaPickerItem item = items.get(i);
+                VyhybkaPickerItem item = items.get(i).item;
                 if (item.tuduCode.equals(tuduCode) && item.vyhybka.cislo == cislo) return i;
             }
             for (int i = 0; i < items.size(); i++) {
-                if (items.get(i).vyhybka.cislo == cislo) return i;
+                if (items.get(i).item.vyhybka.cislo == cislo) return i;
             }
         }
         return 0;
@@ -1405,8 +1429,18 @@ public class MainActivity extends AppCompatActivity {
         if (dualRo && epc.cast >= 2) {
             tvCastHintPart.setVisibility(View.GONE);
             castBranchGroup.setVisibility(View.VISIBLE);
-            updateDefaultCastBranch(epc.cast);
+            if (epc.cast != lastCastBranchDefault) {
+                lastCastBranchDefault = epc.cast;
+                updateDefaultCastBranch(epc.cast);
+            } else {
+                int checkedId = castBranchHlavni
+                        ? R.id.btnCastHlavni : R.id.btnCastVedlejsi;
+                if (castBranchGroup.getCheckedButtonId() != checkedId) {
+                    castBranchGroup.check(checkedId);
+                }
+            }
         } else {
+            lastCastBranchDefault = -1;
             tvCastHintPart.setVisibility(View.VISIBLE);
             tvCastHintPart.setText(partName);
             castBranchGroup.setVisibility(View.GONE);
@@ -1976,7 +2010,6 @@ public class MainActivity extends AppCompatActivity {
 
     private void setupListeners() {
         findViewById(R.id.btnPickSource).setOnClickListener(v -> pickSourceFile());
-        tvUserId.setOnClickListener(v -> confirmLogout());
 
         powerPresetGroup.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
             if (!isChecked) return;
@@ -3159,16 +3192,29 @@ public class MainActivity extends AppCompatActivity {
         }
         if (currentTudu != null && currentVyhybka != null) {
             if (!row.roId.isEmpty()) {
-                currentVyhybka.addRoBranch(row.roId, row.poloha);
+                List<String> roIds = CsvStore.parseRoIds(row.roId);
+                if (roIds.size() == 1 && !roIds.get(0).isEmpty()) {
+                    currentVyhybka.addRoBranch(roIds.get(0),
+                            row.poloha != null ? row.poloha : "");
+                } else {
+                    for (String roId : roIds) {
+                        if (!roId.isEmpty()) {
+                            currentVyhybka.addRoBranch(roId, "");
+                        }
+                    }
+                }
             } else {
                 ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
             }
             if (epc.cast >= 2 && isDualRoVyhybka(currentVyhybka)) {
                 if (!row.roId.isEmpty()) {
-                    Tudu.Vyhybka.RoBranch hlavni = currentVyhybka.findHlavniBranch();
-                    castBranchHlavni = hlavni != null && hlavni.roId.equals(row.roId);
-                } else if (row.poloha != null && !row.poloha.isEmpty()) {
-                    castBranchHlavni = Tudu.Vyhybka.RoBranch.isHlavniPoloha(row.poloha);
+                    List<String> roIds = CsvStore.parseRoIds(row.roId);
+                    if (roIds.size() == 1 && !roIds.get(0).isEmpty()) {
+                        Tudu.Vyhybka.RoBranch hlavni = currentVyhybka.findHlavniBranch();
+                        castBranchHlavni = hlavni != null && hlavni.roId.equals(roIds.get(0));
+                    } else if (row.poloha != null && !row.poloha.isEmpty()) {
+                        castBranchHlavni = Tudu.Vyhybka.RoBranch.isHlavniPoloha(row.poloha);
+                    }
                 }
             }
         }
@@ -3413,14 +3459,9 @@ public class MainActivity extends AppCompatActivity {
 
             if (cast == 1 && currentVyhybka != null
                     && currentVyhybka.getRoBranches().size() >= 2) {
-                long baseId = parseLong(d.idRfid, epc.idRfid);
-                List<Tudu.Vyhybka.RoBranch> branches = currentVyhybka.getRoBranches();
-                for (int i = 0; i < branches.size(); i++) {
-                    CsvStore.Row row = buildCsvRow(d, epc24, tid, branches.get(i));
-                    row.idRfid = String.valueOf(baseId + i);
-                    csvStore.upsert(row);
-                }
-                lastChip1WriteCount = branches.size();
+                CsvStore.Row row = buildCsvRow(d, epc24, tid, null);
+                row.roId = joinRoIds(currentVyhybka.getRoBranches());
+                csvStore.upsert(row);
             } else {
                 Tudu.Vyhybka.RoBranch branch = resolveBranchForCast(cast);
                 if (branch == null) {
@@ -3472,7 +3513,6 @@ public class MainActivity extends AppCompatActivity {
                 toast(getString(R.string.gps_unavailable_toast));
             }
         }
-        row.userId = UserSession.getUserId(prefs);
         return row;
     }
 
@@ -3606,9 +3646,7 @@ public class MainActivity extends AppCompatActivity {
         ensureVyhybkaRoBranches(tuduCode, v);
         if (isDualRoVyhybka(v)) {
             int missing = 0;
-            for (Tudu.Vyhybka.RoBranch branch : v.getRoBranches()) {
-                if (!csvStore.hasWrittenCast(tuduCode, v.cislo, branch.roId, 1)) missing++;
-            }
+            if (!hasCastWrittenOnAnyBranch(tuduCode, v, 1)) missing++;
             if (!hasCastWrittenOnAnyBranch(tuduCode, v, 2)) missing++;
             if (!hasCastWrittenOnAnyBranch(tuduCode, v, 3)) missing++;
             return missing;
@@ -3650,13 +3688,25 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private CharSequence formatVyhybkaPickerLabel(String tuduCode, Tudu.Vyhybka v) {
-        return formatVyhybkaPickerLabel(tuduCode, v, null);
+        return formatVyhybkaPickerLabel(tuduCode, v, null, false);
     }
 
     private CharSequence formatVyhybkaPickerLabel(String tuduCode, Tudu.Vyhybka v, Double distanceM) {
+        return formatVyhybkaPickerLabel(tuduCode, v, distanceM, distanceM != null);
+    }
+
+    private CharSequence formatVyhybkaPickerLabel(String tuduCode, Tudu.Vyhybka v,
+                                                   Double distanceM, boolean showDistanceHints) {
         CharSequence base = formatVyhybkaPickerLabelCore(tuduCode, v);
-        if (distanceM == null) return base;
-        String full = base.toString() + " · " + formatDistanceM(distanceM);
+        if (!showDistanceHints) return base;
+        if (distanceM != null) {
+            return appendVyhybkaLabelSuffix(base, " · " + formatDistanceM(distanceM));
+        }
+        return appendVyhybkaLabelSuffix(base, " · " + getString(R.string.vyhybka_picker_no_gps));
+    }
+
+    private CharSequence appendVyhybkaLabelSuffix(CharSequence base, String suffix) {
+        String full = base.toString() + suffix;
         if (!(base instanceof SpannableString)) {
             return full;
         }
@@ -3701,9 +3751,7 @@ public class MainActivity extends AppCompatActivity {
     private int firstMissingCast(String tuduCode, Tudu.Vyhybka v) {
         ensureVyhybkaRoBranches(tuduCode, v);
         if (csvStore != null && isDualRoVyhybka(v)) {
-            for (Tudu.Vyhybka.RoBranch branch : v.getRoBranches()) {
-                if (!csvStore.hasWrittenCast(tuduCode, v.cislo, branch.roId, 1)) return 1;
-            }
+            if (!hasCastWrittenOnAnyBranch(tuduCode, v, 1)) return 1;
             if (!hasCastWrittenOnAnyBranch(tuduCode, v, 2)) return 2;
             if (!hasCastWrittenOnAnyBranch(tuduCode, v, 3)) return 3;
             return v.castMax + 1;
@@ -3713,6 +3761,16 @@ public class MainActivity extends AppCompatActivity {
             if (!written.contains(c)) return c;
         }
         return v.castMin;
+    }
+
+    private static String joinRoIds(List<Tudu.Vyhybka.RoBranch> branches) {
+        StringBuilder sb = new StringBuilder();
+        for (Tudu.Vyhybka.RoBranch branch : branches) {
+            if (branch.roId == null || branch.roId.isEmpty()) continue;
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(branch.roId.trim());
+        }
+        return sb.toString();
     }
 
     private Set<Integer> getWrittenCastsForVyhybka(String tuduCode, Tudu.Vyhybka v) {
