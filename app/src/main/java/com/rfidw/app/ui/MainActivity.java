@@ -52,6 +52,7 @@ import com.google.android.material.button.MaterialButton;
 import com.google.android.material.button.MaterialButtonToggleGroup;
 
 import com.rfidw.app.R;
+import com.rfidw.app.csv.CsvRecordBuilder;
 import com.rfidw.app.csv.CsvStore;
 import com.rfidw.app.data.DzsDatabase;
 import com.rfidw.app.data.Tudu;
@@ -3498,14 +3499,13 @@ public class MainActivity extends AppCompatActivity {
     private void saveRowToCsv(String epc24, String tid) {
         if (csvStore == null) return;
         try {
-            EpcModel.Decoded d = EpcModel.decode(epc24);
-            int cast = parseInt(d.cast, 0);
+            int cast = epc.cast;
             ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
             lastChip1WriteCount = 1;
 
             if (cast == 1 && currentVyhybka != null
                     && currentVyhybka.getRoBranches().size() >= 2) {
-                CsvStore.Row row = buildCsvRow(d, epc24, tid, null);
+                CsvStore.Row row = buildCsvRow(epc24, tid, null);
                 row.roId = joinRoIds(currentVyhybka.getRoBranches());
                 csvStore.upsert(row);
             } else {
@@ -3520,7 +3520,7 @@ public class MainActivity extends AppCompatActivity {
                     toast(getString(R.string.cast_branch_select));
                     return;
                 }
-                CsvStore.Row row = buildCsvRow(d, epc24, tid, branch);
+                CsvStore.Row row = buildCsvRow(epc24, tid, branch);
                 csvStore.upsert(row);
             }
             persistCsvAsync();
@@ -3530,36 +3530,37 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private CsvStore.Row buildCsvRow(EpcModel.Decoded d, String epc24, String tid,
-                                     Tudu.Vyhybka.RoBranch branch) {
-        CsvStore.Row row = new CsvStore.Row();
-        row.idRfid = d.idRfid;
-        row.epc = d.epc;
-        row.tid = tid == null ? "" : tid;
-        row.rok = d.rok;
-        row.tudu = d.tudu;
-        row.vyhybka = csvVyhybkaLabel(d.vyhybka);
-        row.cast = d.cast;
-        row.poloha = branch != null ? branch.poloha : "";
-        row.roId = branch != null ? branch.roId : "";
+    /** Sestaví řádek CSV z provozního stavu – nezávisle na rozložení šablony EPC. */
+    private CsvStore.Row buildCsvRow(String epc24, String tid, Tudu.Vyhybka.RoBranch branch) {
         LocationCache.Snapshot gps = locationCache != null
                 ? locationCache.getSnapshot() : LocationCache.Snapshot.empty();
+        String latitude = "";
+        String longitude = "";
+        String accuracyM = "";
+        String gpsTime = "";
         if (gps.valid) {
-            row.latitude = LocationCache.formatLatitude(gps.latitude);
-            row.longitude = LocationCache.formatLongitude(gps.longitude);
-            row.accuracyM = LocationCache.formatAccuracyM(gps.accuracyM);
-            row.gpsTime = LocationCache.formatGpsTime(gps.gpsTimeMs);
-        } else {
-            row.latitude = "";
-            row.longitude = "";
-            row.accuracyM = "";
-            row.gpsTime = "";
-            if (!gpsUnavailableToastShown) {
-                gpsUnavailableToastShown = true;
-                toast(getString(R.string.gps_unavailable_toast));
-            }
+            latitude = LocationCache.formatLatitude(gps.latitude);
+            longitude = LocationCache.formatLongitude(gps.longitude);
+            accuracyM = LocationCache.formatAccuracyM(gps.accuracyM);
+            gpsTime = LocationCache.formatGpsTime(gps.gpsTimeMs);
+        } else if (!gpsUnavailableToastShown) {
+            gpsUnavailableToastShown = true;
+            toast(getString(R.string.gps_unavailable_toast));
         }
-        return row;
+        return CsvRecordBuilder.build(
+                epc.idRfid,
+                epc24,
+                tid,
+                epc.year,
+                epc.tudu,
+                csvVyhybkaLabel(String.valueOf(epc.vyhybka)),
+                epc.cast,
+                branch != null ? branch.poloha : "",
+                branch != null ? branch.roId : "",
+                latitude,
+                longitude,
+                accuracyM,
+                gpsTime);
     }
 
     /** Po dokončení zápisu tagu (EPC samostatně, nebo celý řetězec EPC→heslo→lock). */
