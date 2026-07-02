@@ -2491,15 +2491,16 @@ public class MainActivity extends AppCompatActivity {
                 opened.close();
                 return;
             }
-            int tuduCount = opened.countDistinctTudu();
             List<Tudu> loaded = new ArrayList<>();
             if (loadId != dbLoadGeneration) {
                 opened.close();
                 return;
             }
+            final boolean autoMode = !manualMode;
+            final DzsDatabase dbForCount = opened;
             runOnUiThreadIfAlive(loadId, () -> {
                 dzsDatabase = opened;
-                gpsAutoSelection = !manualMode;
+                gpsAutoSelection = autoMode;
                 tuduListFullyLoaded = false;
                 gpsLookupNoMatch = false;
                 forceNextGpsLookup = true;
@@ -2513,9 +2514,9 @@ public class MainActivity extends AppCompatActivity {
                 tuduList = loaded;
                 tuduModeGroup.check(gpsAutoSelection ? R.id.btnTuduModeGps : R.id.btnTuduModeManual);
                 updateTuduModeUi();
-                tvSourceFile.setText(gpsAutoSelection
-                        ? getString(R.string.db_loaded_gps, displayName, tuduCount)
-                        : getString(R.string.db_loaded_manual, displayName, tuduCount));
+                tvSourceFile.setText(autoMode
+                        ? getString(R.string.db_loaded_gps, displayName, 0)
+                        : getString(R.string.db_loaded_manual, displayName, 0));
                 pendingAutoLoadAfterStorage = false;
                 persistDbSource(path, displayName, sourceUri);
                 endCard1DbLoad();
@@ -2523,6 +2524,17 @@ public class MainActivity extends AppCompatActivity {
                 scrollToCard1();
                 onDatabaseLoaded();
             });
+            Thread countThread = new Thread(() -> {
+                int tuduCount = dbForCount.countDistinctTudu();
+                runOnUiThreadIfAlive(loadId, () -> {
+                    if (dzsDatabase != dbForCount) return;
+                    tvSourceFile.setText(autoMode
+                            ? getString(R.string.db_loaded_gps, displayName, tuduCount)
+                            : getString(R.string.db_loaded_manual, displayName, tuduCount));
+                });
+            }, "dzs-tudu-count");
+            countThread.setDaemon(true);
+            countThread.start();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             Log.w(TAG, "Načtení databáze přerušeno", e);
@@ -2795,7 +2807,7 @@ public class MainActivity extends AppCompatActivity {
         for (File child : children) {
             if (!child.isFile()) continue;
             String name = child.getName();
-            if (!name.endsWith(".idx") && !name.startsWith("hash")) continue;
+            if (!name.endsWith(".idx") && !name.endsWith(".pidx") && !name.startsWith("hash")) continue;
             File dest = new File(targetDir, name);
             if (!dest.exists()) {
                 child.renameTo(dest);
