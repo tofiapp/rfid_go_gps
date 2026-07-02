@@ -2,6 +2,8 @@ package com.rfidw.app.epc;
 
 import androidx.annotation.NonNull;
 
+import com.rfidw.app.data.Tudu;
+
 import java.util.Locale;
 
 /**
@@ -46,30 +48,24 @@ public class EpcModel {
         return padRight(y, 4, '0');
     }
 
-    /** první 4 znaky TUDU */
+    /** první 4 znaky TUDU (základ 5 znaků, 6. se ignoruje) */
     public String f2Tudu14() {
-        String t = safe(tudu).toUpperCase(Locale.ROOT);
+        String t = tuduForEpc().toUpperCase(Locale.ROOT);
         String first = t.length() >= 4 ? t.substring(0, 4) : padRight(t, 4, '0');
         return first;
     }
 
     /** 5. znak TUDU -> ASCII hex (J = 4A) */
     public String f3Tudu5() {
-        String t = safe(tudu);
+        String t = tuduForEpc();
         if (t.length() < 5) return "00";
         char c = t.charAt(4);
         return String.format(Locale.ROOT, "%02X", (int) c);
     }
 
-    /** 6. znak TUDU -> 2 znaky (číslice 1 = 01, jinak ASCII hex) */
+    /** 6. znak TUDU – při základním kódu (5 znaků) vždy 00 */
     public String f4Tudu6() {
-        String t = safe(tudu);
-        if (t.length() < 6) return "00";
-        char c = t.charAt(5);
-        if (Character.isDigit(c)) {
-            return String.format(Locale.ROOT, "%02d", c - '0');
-        }
-        return String.format(Locale.ROOT, "%02X", (int) c);
+        return "00";
     }
 
     /** výhybka 3-místně dekadicky (10 = 010) */
@@ -174,6 +170,11 @@ public class EpcModel {
     // ---- pomocné ----
 
     private static String safe(String s) { return s == null ? "" : s.trim(); }
+
+    /** TUDU pro EPC a náhled – jen prvních 5 znaků. */
+    private String tuduForEpc() {
+        return Tudu.baseCode(safe(tudu));
+    }
 
     private static String padRight(String s, int len, char pad) {
         StringBuilder sb = new StringBuilder(s);

@@ -27,16 +27,17 @@ import java.util.function.IntConsumer;
 /**
  * SQLite zdroj TUDU / výhybek z tabulek DZS_SUPERTRA_GPS_KM a DZS_SUPER_RO_TPI.
  *
- * Při otevření se indexuje tabulka výhybek (RO) a předpočítají se GPS souřadnice
- * výhybek (jeden indexovaný dotaz na RO_ID). Výsledek se ukládá do diskové cache v18.
- * Vyhledávání TUDU podle GPS pak probíhá nad tisíci předpočítaných bodů v paměti,
- * ne nad celou km tabulkou za běhu.
+ * Při otevření se indexuje tabulka výhybek (RO). GPS souřadnice výhybek se načtou
+ * nejdřív v okolí aktuální polohy (5 km), zbytek se doplní na pozadí. Výsledek se
+ * ukládá do diskové cache v18.
  */
 public class DzsDatabase implements Closeable {
 
     public static final String TABLE_GPS_KM = "DZS_SUPERTRA_GPS_KM";
     public static final String TABLE_RO_TPI = "DZS_SUPER_RO_TPI";
     private static final String TEMP_RO_GPS_LOOKUP = "_dzs_ro_gps_lookup";
+    /** Poloměr rychlého indexu GPS při startu (m). */
+    public static final double NEARBY_INDEX_RADIUS_M = 5_000.0;
 
     /** Průběh otevírání databáze (fáze + odhad procent 0–100, nebo -1). */
     public interface OpenProgressListener {
@@ -242,11 +243,15 @@ public class DzsDatabase implements Closeable {
     private final RoColumns roColumns;
     private final Map<String, List<RoIndexEntry>> roByPairKey;
     private final Map<String, RoIndexEntry> roByRoKey;
-    private final VyhybkaGpsStore vyhybkaGpsStore;
+    private volatile VyhybkaGpsStore vyhybkaGpsStore;
     private final Map<String, double[]> coordMemo = new HashMap<>();
     private volatile boolean gpsRoLookupIndexReady;
     private volatile boolean gpsLatLonIndexReady;
     private volatile SpatialGrid spatialGrid;
+    private volatile boolean gpsIndexFullyBuilt;
+    private volatile boolean gpsIndexCompletionInFlight;
+    private File sourceDbFile;
+    private File storageCacheDir;
 
     private DzsDatabase(SQLiteDatabase db, GpsColumns gpsColumns, RoColumns roColumns,
                         Map<String, List<RoIndexEntry>> roByPairKey,
@@ -258,6 +263,27 @@ public class DzsDatabase implements Closeable {
         this.roByPairKey = roByPairKey;
         this.roByRoKey = roByRoKey;
         this.vyhybkaGpsStore = vyhybkaGpsStore != null ? vyhybkaGpsStore : VyhybkaGpsStore.empty();
+        this.gpsIndexFullyBuilt = !this.vyhybkaGpsStore.isEmpty();
+    }
+
+    private void replaceGpsStore(VyhybkaGpsStore store, boolean fullyBuilt) {
+        synchronized (this) {
+            vyhybkaGpsStore = store != null ? store : VyhybkaGpsStore.empty();
+            spatialGrid = null;
+            if (fullyBuilt) {
+                gpsIndexFullyBuilt = true;
+            }
+        }
+    }
+
+    private void invalidateSpatialGrid() {
+        synchronized (this) {
+            spatialGrid = null;
+        }
+    }
+
+    public boolean isGpsIndexFullyBuilt() {
+        return gpsIndexFullyBuilt;
     }
 
     private SpatialGrid spatialGrid() {
@@ -331,11 +357,16 @@ public class DzsDatabase implements Closeable {
             DzsDatabase opened = new DzsDatabase(db, gpsColumns, roColumns, roByPairKey, roByRoKey, gpsStore);
             boolean needsFullSave = false;
 
-            if (gpsStore.isEmpty()) {
+            if (gpsStore.isEmpty() && cached == null) {
+                // Bez cache: GPS index se doplní až po získání polohy (5 km) a na pozadí celý.
+                report(listener, "Výhybky připraveny – GPS index po získání polohy", 90);
+            } else if (gpsStore.isEmpty()) {
                 report(listener, "Indexuji souřadnice výhybek", 50);
                 gpsStore = opened.buildVyhybkaGpsStore(roByRoKey, listener);
-                opened = new DzsDatabase(db, gpsColumns, roColumns, roByPairKey, roByRoKey, gpsStore);
+                opened.replaceGpsStore(gpsStore, true);
                 needsFullSave = cacheDir != null && !gpsStore.isEmpty();
+            } else {
+                opened.gpsIndexFullyBuilt = true;
             }
 
             if (needsFullSave && cacheDir != null) {
@@ -349,6 +380,8 @@ public class DzsDatabase implements Closeable {
             }
 
             report(listener, "Hotovo", 100);
+            opened.sourceDbFile = sourceFile;
+            opened.storageCacheDir = cacheDir;
             return opened;
         } catch (OutOfMemoryError e) {
             db.close();
@@ -506,7 +539,7 @@ public class DzsDatabase implements Closeable {
         Set<String> codes = new HashSet<>();
         for (List<RoIndexEntry> entries : roByPairKey.values()) {
             for (RoIndexEntry entry : entries) {
-                codes.add(entry.tudu);
+                codes.add(Tudu.baseCode(entry.tudu));
             }
         }
         return codes.size();
@@ -520,31 +553,32 @@ public class DzsDatabase implements Closeable {
         if (codes == null || codes.isEmpty()) {
             return buildTuduListFromRoIndex(null);
         }
-        Set<String> wanted = new HashSet<>();
+        Set<String> wantedBases = new HashSet<>();
         for (String code : codes) {
             if (code != null && !code.trim().isEmpty()) {
-                wanted.add(code.trim());
+                wantedBases.add(Tudu.baseCode(code));
             }
         }
-        if (wanted.isEmpty()) {
+        if (wantedBases.isEmpty()) {
             return Collections.emptyList();
         }
-        List<Tudu> fromMemory = buildTuduListFromRoIndex(wanted);
+        List<Tudu> fromMemory = buildTuduListFromRoIndex(wantedBases);
         if (!fromMemory.isEmpty()) {
             return fromMemory;
         }
-        return loadTuduForCodesFromSql(wanted);
+        return loadTuduForCodesFromSql(wantedBases);
     }
 
-    private List<Tudu> buildTuduListFromRoIndex(Set<String> codes) {
+    private List<Tudu> buildTuduListFromRoIndex(Set<String> wantedBases) {
         Map<String, Tudu> map = new LinkedHashMap<>();
         for (List<RoIndexEntry> entries : roByPairKey.values()) {
             for (RoIndexEntry ro : entries) {
-                if (codes != null && !codes.contains(ro.tudu)) continue;
-                Tudu tudu = map.get(ro.tudu);
+                String base = Tudu.baseCode(ro.tudu);
+                if (wantedBases != null && !wantedBases.contains(base)) continue;
+                Tudu tudu = map.get(base);
                 if (tudu == null) {
-                    tudu = new Tudu(ro.tudu);
-                    map.put(ro.tudu, tudu);
+                    tudu = new Tudu(base);
+                    map.put(base, tudu);
                 }
                 Tudu.Vyhybka v = tudu.findOrCreate(ro.vyhybka, ro.iob);
                 if (ro.castMin != null) v.castMin = ro.castMin;
@@ -556,7 +590,7 @@ public class DzsDatabase implements Closeable {
         return out;
     }
 
-    private List<Tudu> loadTuduForCodesFromSql(Set<String> codes) {
+    private List<Tudu> loadTuduForCodesFromSql(Set<String> wantedBases) {
         Map<String, Tudu> map = new LinkedHashMap<>();
         String vyhybkaExpr = roColumns.vyhybkaSelectExpr(null);
         StringBuilder sql = new StringBuilder("SELECT ")
@@ -570,15 +604,16 @@ public class DzsDatabase implements Closeable {
                 .append(roColumns.tudu).append(" <> ''")
                 .append(" AND ").append(vyhybkaExpr).append(" IS NOT NULL");
         roColumns.appendPolohaFilter(sql, null);
-        String[] args = new String[codes.size()];
+        String[] args = new String[wantedBases.size()];
         int i = 0;
         StringBuilder placeholders = new StringBuilder();
-        for (String code : codes) {
+        for (String base : wantedBases) {
             if (i > 0) placeholders.append(", ");
             placeholders.append('?');
-            args[i++] = code;
+            args[i++] = base;
         }
-        sql.append(" AND ").append(roColumns.tudu).append(" IN (").append(placeholders).append(')');
+        sql.append(" AND substr(").append(roColumns.tudu).append(", 1, 5) IN (")
+                .append(placeholders).append(')');
         sql.append(" ORDER BY ").append(roColumns.tudu).append(", ").append(vyhybkaExpr);
 
         try (Cursor c = db.rawQuery(sql.toString(), args)) {
@@ -588,10 +623,11 @@ public class DzsDatabase implements Closeable {
                 Integer cislo = readInt(c, 1);
                 if (cislo == null) continue;
 
-                Tudu tudu = map.get(tuduCode);
+                String base = Tudu.baseCode(tuduCode);
+                Tudu tudu = map.get(base);
                 if (tudu == null) {
-                    tudu = new Tudu(tuduCode);
-                    map.put(tuduCode, tudu);
+                    tudu = new Tudu(base);
+                    map.put(base, tudu);
                 }
                 int col = 2;
                 Integer cmin = roColumns.castMin != null ? readInt(c, col++) : null;
@@ -639,7 +675,7 @@ public class DzsDatabase implements Closeable {
                 double dist = haversineM(latitude, longitude, point.latitude, point.longitude);
                 if (dist < bestDistM[0]) {
                     bestDistM[0] = dist;
-                    best[0] = new GpsMatch(point.superZId, point.superDId, ro.tudu, ro.vyhybka,
+                    best[0] = new GpsMatch(point.superZId, point.superDId, Tudu.baseCode(ro.tudu), ro.vyhybka,
                             point.latitude, point.longitude, dist, ro.poloha);
                 }
             });
@@ -664,7 +700,7 @@ public class DzsDatabase implements Closeable {
             SpatialGrid grid = spatialGrid();
             for (int ring = 0; ring <= SpatialGrid.MAX_RING; ring++) {
                 grid.forEachInRing(latitude, longitude, ring, idx -> {
-                    String tudu = vyhybkaGpsStore.tuduAt(idx);
+                    String tudu = Tudu.baseCode(vyhybkaGpsStore.tuduAt(idx));
                     double dLat = vyhybkaGpsStore.latitudeAt(idx) - latitude;
                     double dLon = (vyhybkaGpsStore.longitudeAt(idx) - longitude) * cosLat;
                     double distSq = dLat * dLat + dLon * dLon;
@@ -705,7 +741,8 @@ public class DzsDatabase implements Closeable {
                 GpsMatch existing = bestByTudu.get(ro.tudu);
                 if (existing != null && dist >= existing.distanceM) return;
 
-                bestByTudu.put(ro.tudu, new GpsMatch(point.superZId, point.superDId, ro.tudu,
+                bestByTudu.put(Tudu.baseCode(ro.tudu), new GpsMatch(point.superZId, point.superDId,
+                        Tudu.baseCode(ro.tudu),
                         ro.vyhybka, point.latitude, point.longitude, dist, ro.poloha));
             });
 
@@ -730,13 +767,13 @@ public class DzsDatabase implements Closeable {
         if (tuduCode == null || tuduCode.isEmpty()) {
             return Collections.emptyMap();
         }
-        String trimmedTudu = tuduCode.trim();
-        if (trimmedTudu.isEmpty()) return Collections.emptyMap();
+        String trimmedBase = Tudu.baseCode(tuduCode);
+        if (trimmedBase.isEmpty()) return Collections.emptyMap();
 
         Map<Integer, Double> bestByVyhybka = new HashMap<>();
         if (!vyhybkaGpsStore.isEmpty()) {
             for (int i = 0; i < vyhybkaGpsStore.size(); i++) {
-                if (!trimmedTudu.equals(vyhybkaGpsStore.tuduAt(i))) continue;
+                if (!Tudu.sameBase(trimmedBase, vyhybkaGpsStore.tuduAt(i))) continue;
                 recordVyhybkaDistance(bestByVyhybka, vyhybkaGpsStore.vyhybkaAt(i),
                         latitude, longitude,
                         vyhybkaGpsStore.latitudeAt(i), vyhybkaGpsStore.longitudeAt(i));
@@ -745,7 +782,7 @@ public class DzsDatabase implements Closeable {
         }
         for (Map.Entry<String, List<RoIndexEntry>> e : roByPairKey.entrySet()) {
             for (RoIndexEntry ro : e.getValue()) {
-                if (!trimmedTudu.equals(ro.tudu)) continue;
+                if (!Tudu.sameBase(trimmedBase, ro.tudu)) continue;
                 double[] coord = resolveVyhybkaCoord(e.getKey(), ro);
                 if (coord == null) continue;
                 recordVyhybkaDistance(bestByVyhybka, ro.vyhybka,
@@ -762,15 +799,15 @@ public class DzsDatabase implements Closeable {
     public String findPolohaForVyhybka(String tuduCode, int vyhybka, double latitude,
                                        double longitude) {
         if (tuduCode == null || tuduCode.isEmpty() || vyhybka <= 0) return "";
-        String trimmedTudu = tuduCode.trim();
-        if (trimmedTudu.isEmpty()) return "";
+        String trimmedBase = Tudu.baseCode(tuduCode);
+        if (trimmedBase.isEmpty()) return "";
 
         if (!vyhybkaGpsStore.isEmpty()) {
             int bestIdx = -1;
             double bestDistSq = Double.MAX_VALUE;
             double cosLat = Math.cos(Math.toRadians(latitude));
             for (int i = 0; i < vyhybkaGpsStore.size(); i++) {
-                if (!trimmedTudu.equals(vyhybkaGpsStore.tuduAt(i))) continue;
+                if (!Tudu.sameBase(trimmedBase, vyhybkaGpsStore.tuduAt(i))) continue;
                 if (vyhybkaGpsStore.vyhybkaAt(i) != vyhybka) continue;
                 double dLat = vyhybkaGpsStore.latitudeAt(i) - latitude;
                 double dLon = (vyhybkaGpsStore.longitudeAt(i) - longitude) * cosLat;
@@ -788,7 +825,7 @@ public class DzsDatabase implements Closeable {
         double bestDistM = Double.MAX_VALUE;
         for (Map.Entry<String, List<RoIndexEntry>> e : roByPairKey.entrySet()) {
             for (RoIndexEntry ro : e.getValue()) {
-                if (!trimmedTudu.equals(ro.tudu) || ro.vyhybka != vyhybka) continue;
+                if (!Tudu.sameBase(trimmedBase, ro.tudu) || ro.vyhybka != vyhybka) continue;
                 double[] coord = resolveVyhybkaCoord(e.getKey(), ro);
                 if (coord == null) continue;
                 double dist = haversineM(latitude, longitude, coord[0], coord[1]);
@@ -867,6 +904,70 @@ public class DzsDatabase implements Closeable {
             return batch;
         }
         return buildVyhybkaGpsStorePerEntry(roByRoKey, listener);
+    }
+
+    /**
+     * Rychlý index GPS výhybek v okolí aktuální polohy (typicky 5 km).
+     * Volat po získání GPS fixu, pokud plný index ještě není k dispozici.
+     */
+    public boolean ensureNearbyGpsIndex(double latitude, double longitude) {
+        if (gpsIndexFullyBuilt) return true;
+        synchronized (this) {
+            if (gpsIndexFullyBuilt) return true;
+            VyhybkaGpsStore nearby = buildVyhybkaGpsStoreNearby(latitude, longitude,
+                    NEARBY_INDEX_RADIUS_M);
+            if (nearby.isEmpty()) return false;
+            vyhybkaGpsStore = VyhybkaGpsStore.merge(vyhybkaGpsStore, nearby);
+            invalidateSpatialGrid();
+            return true;
+        }
+    }
+
+    /**
+     * Doplní celý GPS index na pozadí a uloží diskovou cache.
+     * Vrací true, pokud se indexování spustilo; false pokud už je hotovo nebo běží.
+     */
+    public boolean startCompleteGpsIndexIfNeeded(OpenProgressListener listener) {
+        if (gpsIndexFullyBuilt) return false;
+        synchronized (this) {
+            if (gpsIndexFullyBuilt || gpsIndexCompletionInFlight) return false;
+            gpsIndexCompletionInFlight = true;
+        }
+        try {
+            VyhybkaGpsStore full = buildVyhybkaGpsStore(roByRoKey, listener);
+            replaceGpsStore(full, true);
+            if (sourceDbFile != null && storageCacheDir != null && !full.isEmpty()) {
+                try {
+                    File indexCacheDir = new File(storageCacheDir, "dzs_index");
+                    String hash = DzsIndexCache.resolveContentHash(sourceDbFile, indexCacheDir);
+                    saveIndexCache(sourceDbFile, hash, storageCacheDir, roByPairKey, full, listener);
+                } catch (Exception ignored) {
+                }
+            }
+            return true;
+        } finally {
+            gpsIndexCompletionInFlight = false;
+        }
+    }
+
+    private VyhybkaGpsStore buildVyhybkaGpsStoreNearby(double latitude, double longitude,
+                                                       double radiusM) {
+        if (roByRoKey.isEmpty()) return VyhybkaGpsStore.empty();
+        ensureGpsLatLonIndex();
+        double deltaDeg = (radiusM / 111_000.0) * 1.15;
+        VyhybkaGpsStore.Builder builder = VyhybkaGpsStore.builder();
+        HashSet<String> seen = new HashSet<>();
+        queryGpsPointsInBox(latitude, longitude, deltaDeg, point -> {
+            double dist = haversineM(latitude, longitude, point.latitude, point.longitude);
+            if (dist > radiusM) return;
+            String key = roKey(point.superZId, point.superDId, point.roId);
+            if (!seen.add(key)) return;
+            RoIndexEntry ro = roByRoKey.get(key);
+            if (ro == null) return;
+            builder.add(pairKey(point.superZId, point.superDId), ro.tudu, ro.vyhybka, ro.roId,
+                    ro.poloha, point.latitude, point.longitude);
+        });
+        return builder.build();
     }
 
     private boolean populateRoGpsLookupTempTable(Map<String, RoIndexEntry> roByRoKey) {
@@ -998,7 +1099,7 @@ public class DzsDatabase implements Closeable {
         double lat = vyhybkaGpsStore.latitudeAt(idx);
         double lon = vyhybkaGpsStore.longitudeAt(idx);
         double dist = haversineM(userLat, userLon, lat, lon);
-        return new GpsMatch(ids[0], ids[1], vyhybkaGpsStore.tuduAt(idx),
+        return new GpsMatch(ids[0], ids[1], Tudu.baseCode(vyhybkaGpsStore.tuduAt(idx)),
                 vyhybkaGpsStore.vyhybkaAt(idx), lat, lon, dist,
                 vyhybkaGpsStore.polohaAt(idx));
     }

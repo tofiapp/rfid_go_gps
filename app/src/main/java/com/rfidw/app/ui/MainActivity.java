@@ -137,6 +137,7 @@ public class MainActivity extends AppCompatActivity {
     private static final long GPS_LOOKUP_MIN_INTERVAL_MS = 1000;
     private static final long GPS_LOOKUP_TIMEOUT_MS = 10_000;
     private static final int GPS_NEARBY_TUDU_LIMIT = 10;
+    private volatile boolean gpsFullIndexStarted;
     private static final String PREF_GPS_TEST_MODE = "gpsTestMode";
     private static final String PREF_TUDU_MODE_GPS = "tuduModeGps";
     private static final String PREF_TEST_LAT = "testLat";
@@ -592,7 +593,7 @@ public class MainActivity extends AppCompatActivity {
         String preselect = currentTudu != null ? currentTudu.code
                 : (epc.tudu != null ? epc.tudu : "");
         for (int i = 0; i < matches.size(); i++) {
-            if (matches.get(i).tudu.equals(preselect)) {
+            if (Tudu.sameBase(matches.get(i).tudu, preselect)) {
                 listView.setItemChecked(i, true);
                 break;
             }
@@ -614,7 +615,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String formatNearbyTuduLabel(DzsDatabase.GpsMatch match) {
-        return match.tudu + " · " + formatDistanceM(match.distanceM);
+        return Tudu.baseCode(match.tudu) + " · " + formatDistanceM(match.distanceM);
     }
 
     private void showFullTuduPicker() {
@@ -722,7 +723,7 @@ public class MainActivity extends AppCompatActivity {
             expandCard1Body();
             return;
         }
-        final String tuduCode = currentTudu.code;
+        final String tuduCode = Tudu.baseCode(currentTudu.code);
         final long loadId = dbLoadGeneration;
         if (dzsDatabase == null) {
             if (currentTudu.vyhybky.isEmpty()) {
@@ -974,23 +975,27 @@ public class MainActivity extends AppCompatActivity {
         if (tuduCode == null || tuduCode.isEmpty() || loadedVyhybky == null || loadedVyhybky.isEmpty()) {
             return;
         }
+        String base = Tudu.baseCode(tuduCode);
         Tudu existing = null;
         for (Tudu t : tuduList) {
-            if (t.code.equals(tuduCode)) {
+            if (t.code.equals(base)) {
                 existing = t;
                 break;
             }
         }
         if (existing != null) {
-            existing.vyhybky.clear();
-            existing.vyhybky.addAll(loadedVyhybky);
+            for (Tudu.Vyhybka v : loadedVyhybky) {
+                Tudu.Vyhybka target = existing.findOrCreate(v.cislo, v.iob);
+                target.castMin = v.castMin;
+                target.castMax = v.castMax;
+            }
         } else {
-            Tudu loadedTudu = new Tudu(tuduCode);
+            Tudu loadedTudu = new Tudu(base);
             loadedTudu.vyhybky.addAll(loadedVyhybky);
             tuduList.add(loadedTudu);
             existing = loadedTudu;
         }
-        if (currentTudu != null && currentTudu.code.equals(tuduCode)) {
+        if (currentTudu != null && currentTudu.code.equals(base)) {
             currentTudu = existing;
         }
     }
@@ -1131,7 +1136,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateSummary1() {
-        tvSummaryTudu.setText(epc.tudu == null || epc.tudu.isEmpty() ? "—" : epc.tudu);
+        tvSummaryTudu.setText(epc.tudu == null || epc.tudu.isEmpty()
+                ? "—" : Tudu.baseCode(epc.tudu));
         if (epc.vyhybka > 0) {
             String vyhStr = vyhybkaDisplayLabel();
             SpannableString vyhSpan = new SpannableString(vyhStr);
@@ -1204,7 +1210,7 @@ public class MainActivity extends AppCompatActivity {
     private int castTotalForRow(CsvStore.Row row) {
         if (row == null) return 3;
         for (Tudu t : tuduList) {
-            if (!t.code.equals(row.tudu)) continue;
+            if (!Tudu.sameBase(t.code, row.tudu)) continue;
             for (Tudu.Vyhybka v : t.vyhybky) {
                 if (v.cislo == parseInt(row.vyhybka, -1)) {
                     return v.castMax - v.castMin + 1;
@@ -1489,6 +1495,7 @@ public class MainActivity extends AppCompatActivity {
     private void setupLocation() {
         locationCache = new LocationCache(this);
         locationCache.setListener(() -> {
+            scheduleNearbyAndBackgroundGpsIndex();
             scheduleGpsTuduLookup();
             if (!workflowRunning) {
                 setActionStatusReady();
@@ -1509,6 +1516,7 @@ public class MainActivity extends AppCompatActivity {
                 locationCache.refresh(this);
             }
             gpsLookupNoMatch = false;
+            scheduleNearbyAndBackgroundGpsIndex();
             scheduleGpsTuduLookup();
             if (!workflowRunning) {
                 setActionStatusReady();
@@ -1640,7 +1648,7 @@ public class MainActivity extends AppCompatActivity {
         setValue(0, epc.year);
         setValue(1, epc.f2Tudu14());
         setValue(2, tuduCharOr(4));
-        setValue(3, tuduCharOr(5));
+        setValue(3, "-");
         setValue(4, String.valueOf(epc.vyhybka));
         setValue(5, String.valueOf(epc.cast));
         setValue(6, String.valueOf(epc.idRfid));
@@ -2334,6 +2342,7 @@ public class MainActivity extends AppCompatActivity {
                 tuduListFullyLoaded = manualMode;
                 gpsLookupNoMatch = false;
                 forceNextGpsLookup = true;
+                gpsFullIndexStarted = false;
                 lastGpsLookupLat = null;
                 lastGpsLookupLon = null;
                 lastGpsLookupTimeMs = 0;
@@ -2389,7 +2398,7 @@ public class MainActivity extends AppCompatActivity {
         if (!gpsAutoSelection) {
             if (epc.tudu != null && !epc.tudu.isEmpty()) {
                 for (Tudu t : tuduList) {
-                    if (t.code.equals(epc.tudu)) {
+                    if (Tudu.sameBase(t.code, epc.tudu)) {
                         selectTuduPreservingEpc(t);
                         return;
                     }
@@ -2398,6 +2407,7 @@ public class MainActivity extends AppCompatActivity {
             ensureGpsForTuduLookup();
             return;
         }
+        scheduleNearbyAndBackgroundGpsIndex();
         ensureGpsForTuduLookup();
         if (dzsDatabase != null && dzsDatabase.countDistinctTudu() == 0) {
             toast("Databáze neobsahuje žádné TUDU – zkouším určit podle GPS…");
@@ -2499,22 +2509,23 @@ public class MainActivity extends AppCompatActivity {
 
     private void applyGpsMatch(DzsDatabase.GpsMatch match) {
         pendingAdvanceFromCsv = false;
-        boolean tuduChanged = epc.tudu == null || !match.tudu.equals(epc.tudu);
+        final String baseTudu = Tudu.baseCode(match.tudu);
+        boolean tuduChanged = epc.tudu == null || !baseTudu.equals(Tudu.baseCode(epc.tudu));
 
         Tudu tudu = null;
         for (Tudu t : tuduList) {
-            if (t.code.equals(match.tudu)) {
+            if (t.code.equals(baseTudu)) {
                 tudu = t;
                 break;
             }
         }
         if (tudu == null) {
-            tudu = new Tudu(match.tudu);
+            tudu = new Tudu(baseTudu);
             tudu.findOrCreate(match.vyhybka);
             tuduList.add(tudu);
         }
         currentTudu = tudu;
-        epc.tudu = match.tudu;
+        epc.tudu = baseTudu;
         Tudu.Vyhybka v = tudu.findOrCreate(match.vyhybka);
         if (gpsAutoSelection && isVyhybkaCompleteInCsv(tudu.code, v)) {
             Tudu.Vyhybka nearestIncomplete = nearestIncompleteVyhybkaByGps(tudu);
@@ -2533,6 +2544,56 @@ public class MainActivity extends AppCompatActivity {
         updateStep1();
         updateSummary1();
         updateMatchedPoloha();
+        loadVyhybkyForBaseTuduAsync(baseTudu);
+    }
+
+    private void loadVyhybkyForBaseTuduAsync(String baseTudu) {
+        if (dzsDatabase == null || baseTudu == null || baseTudu.isEmpty()) return;
+        final long loadId = dbLoadGeneration;
+        io.execute(() -> {
+            List<Tudu.Vyhybka> loadedVyhybky = Collections.emptyList();
+            try {
+                if (loadId == dbLoadGeneration && dzsDatabase != null) {
+                    List<Tudu> loaded = dzsDatabase.loadTuduForCodes(Collections.singleton(baseTudu));
+                    if (!loaded.isEmpty()) {
+                        loadedVyhybky = new ArrayList<>(loaded.get(0).vyhybky);
+                    }
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Načtení výhybek pro TUDU " + baseTudu + " selhalo", e);
+            }
+            final List<Tudu.Vyhybka> result = loadedVyhybky;
+            runOnUiThreadIfAlive(loadId, () -> {
+                if (!result.isEmpty()) {
+                    mergeLoadedTuduVyhybky(baseTudu, result);
+                    syncCurrentVyhybkaAfterReload();
+                }
+            });
+        });
+    }
+
+    private void scheduleNearbyAndBackgroundGpsIndex() {
+        if (dzsDatabase == null || locationCache == null) return;
+        LocationCache.Snapshot snap = locationCache.getSnapshot();
+        if (!snap.valid) return;
+        final long loadId = dbLoadGeneration;
+        final double lat = snap.latitude;
+        final double lon = snap.longitude;
+        gpsIo.execute(() -> {
+            DzsDatabase db = dzsDatabase;
+            if (db == null || loadId != dbLoadGeneration) return;
+            try {
+                if (!db.isGpsIndexFullyBuilt()) {
+                    db.ensureNearbyGpsIndex(lat, lon);
+                }
+                if (!gpsFullIndexStarted && !db.isGpsIndexFullyBuilt()) {
+                    gpsFullIndexStarted = true;
+                    db.startCompleteGpsIndexIfNeeded(null);
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Nearby/background GPS index selhal", e);
+            }
+        });
     }
 
     private void updateMatchedPoloha() {
@@ -2797,7 +2858,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void applyRowToEpc(CsvStore.Row row) {
         epc.year = row.rok;
-        epc.tudu = row.tudu;
+        epc.tudu = Tudu.baseCode(row.tudu);
         epc.vyhybka = parseInt(row.vyhybka, epc.vyhybka);
         epc.cast = parseInt(row.cast, epc.cast);
         epc.idRfid = parseLong(row.idRfid, epc.idRfid);
@@ -2805,7 +2866,7 @@ public class MainActivity extends AppCompatActivity {
         currentTudu = null;
         currentVyhybka = null;
         for (int i = 0; i < tuduList.size(); i++) {
-            if (!tuduList.get(i).code.equals(row.tudu)) continue;
+            if (!Tudu.sameBase(tuduList.get(i).code, row.tudu)) continue;
             currentTudu = tuduList.get(i);
             for (Tudu.Vyhybka v : currentTudu.vyhybky) {
                 if (v.cislo == epc.vyhybka) {
@@ -3055,7 +3116,7 @@ public class MainActivity extends AppCompatActivity {
             row.epc = d.epc;
             row.tid = tid == null ? "" : tid;
             row.rok = d.rok;
-            row.tudu = d.tudu;
+            row.tudu = Tudu.baseCode(d.tudu);
             row.vyhybka = csvVyhybkaLabel(d.vyhybka);
             row.cast = d.cast;
             row.poloha = polohaForCsvRow(parseInt(d.cast, 0));

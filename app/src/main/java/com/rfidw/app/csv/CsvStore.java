@@ -1,5 +1,7 @@
 package com.rfidw.app.csv;
 
+import com.rfidw.app.data.Tudu;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -213,7 +215,7 @@ public class CsvStore {
     }
 
     private static String vyhybkaKey(String tuduCode, int vyhybkaCislo) {
-        return tuduCode + "\0" + vyhybkaCislo;
+        return Tudu.baseCode(tuduCode) + "\0" + vyhybkaCislo;
     }
 
     private void addToCastIndex(Row row) {

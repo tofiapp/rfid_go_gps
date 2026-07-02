@@ -92,6 +92,32 @@ final class VyhybkaGpsStore {
                 new String[0], new String[0], new float[0], new float[0]);
     }
 
+    /** Sloučí dva úložiště; duplicitní RO_ID (pairKey+roId) se přeskočí. */
+    static VyhybkaGpsStore merge(VyhybkaGpsStore primary, VyhybkaGpsStore secondary) {
+        if (primary == null || primary.isEmpty()) {
+            return secondary != null ? secondary : empty();
+        }
+        if (secondary == null || secondary.isEmpty()) {
+            return primary;
+        }
+        Builder builder = builder();
+        java.util.HashSet<String> seen = new java.util.HashSet<>();
+        appendUnique(builder, seen, primary);
+        appendUnique(builder, seen, secondary);
+        return builder.build();
+    }
+
+    private static void appendUnique(Builder builder, java.util.HashSet<String> seen,
+                                     VyhybkaGpsStore store) {
+        for (int i = 0; i < store.size(); i++) {
+            String key = store.pairKeyAt(i) + "|" + store.roIdAt(i);
+            if (!seen.add(key)) continue;
+            builder.add(store.pairKeyAt(i), store.tuduAt(i), store.vyhybkaAt(i),
+                    store.roIdAt(i), store.polohaAt(i),
+                    store.latitudeAt(i), store.longitudeAt(i));
+        }
+    }
+
     int size() {
         return pairKeys.length;
     }

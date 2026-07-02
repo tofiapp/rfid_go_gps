@@ -6,11 +6,27 @@ import java.util.Locale;
 
 /** Jeden úsek TUDU se seznamem výhybek. */
 public class Tudu {
-    public final String code;                 // např. 1501J1
+    public final String code;                 // základní kód (5 znaků), např. 1501J
     public final List<Vyhybka> vyhybky = new ArrayList<>();
 
     public Tudu(String code) {
-        this.code = code;
+        this.code = baseCode(code);
+    }
+
+    /** Prvních 5 znaků TUDU – 6. znak (rozvinutí stanice) se ignoruje. */
+    public static String baseCode(String code) {
+        if (code == null) return "";
+        String t = code.trim();
+        if (t.isEmpty()) return "";
+        return t.length() <= 5 ? t : t.substring(0, 5);
+    }
+
+    public String baseCode() {
+        return code;
+    }
+
+    public static boolean sameBase(String a, String b) {
+        return baseCode(a).equalsIgnoreCase(baseCode(b));
     }
 
     public Vyhybka findOrCreate(int cislo) {
