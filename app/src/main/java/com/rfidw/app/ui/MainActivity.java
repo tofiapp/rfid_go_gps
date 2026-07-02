@@ -70,8 +70,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class MainActivity extends AppCompatActivity {
@@ -136,6 +138,7 @@ public class MainActivity extends AppCompatActivity {
     private static final double GPS_LOOKUP_MIN_MOVE_M = 5.0;
     private static final long GPS_LOOKUP_MIN_INTERVAL_MS = 1000;
     private static final long GPS_LOOKUP_TIMEOUT_MS = 10_000;
+    private static final long GPS_DB_LOAD_POLL_MS = 500;
     private static final int GPS_NEARBY_TUDU_LIMIT = 10;
     private static final String PREF_GPS_TEST_MODE = "gpsTestMode";
     private static final String PREF_TUDU_MODE_GPS = "tuduModeGps";
@@ -2376,9 +2379,25 @@ public class MainActivity extends AppCompatActivity {
                     updateCard1DbProgress(phase, percent);
                 });
             };
+            boolean manualMode = !prefs.getBoolean(PREF_TUDU_MODE_GPS, true);
             Double initLat = null;
             Double initLon = null;
-            if (locationCache != null) {
+            if (!manualMode) {
+                final CountDownLatch uiReady = new CountDownLatch(1);
+                runOnUiThreadIfAlive(loadId, () -> {
+                    ensureGpsForTuduLookup();
+                    updateCard1DbProgress(getString(R.string.gps_db_wait), 5, true);
+                    uiReady.countDown();
+                });
+                uiReady.await(3, TimeUnit.SECONDS);
+                LocationCache.Snapshot snap = waitForGpsFix(loadId);
+                if (loadId != dbLoadGeneration) return;
+                if (!snap.valid) return;
+                initLat = snap.latitude;
+                initLon = snap.longitude;
+                runOnUiThreadIfAlive(loadId, () ->
+                        updateCard1DbProgress(getString(R.string.gps_db_indexing), 15, true));
+            } else if (locationCache != null) {
                 LocationCache.Snapshot snap = locationCache.getSnapshot();
                 if (snap.valid) {
                     initLat = snap.latitude;
@@ -2391,7 +2410,6 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
             int tuduCount = opened.countDistinctTudu();
-            boolean manualMode = !prefs.getBoolean(PREF_TUDU_MODE_GPS, true);
             List<Tudu> loaded = new ArrayList<>();
             if (loadId != dbLoadGeneration) {
                 opened.close();
@@ -2423,6 +2441,9 @@ public class MainActivity extends AppCompatActivity {
                 scrollToCard1();
                 onDatabaseLoaded();
             });
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            Log.w(TAG, "Načtení databáze přerušeno", e);
         } catch (OutOfMemoryError e) {
             Log.e(TAG, "Načtení databáze – nedostatek paměti", e);
             runOnUiThreadIfAlive(loadId, () -> {
@@ -2440,6 +2461,17 @@ public class MainActivity extends AppCompatActivity {
                 if (showErrorToast) toast("Chyba načtení databáze");
             });
         }
+    }
+
+    private LocationCache.Snapshot waitForGpsFix(long loadId) throws InterruptedException {
+        while (loadId == dbLoadGeneration) {
+            if (locationCache != null) {
+                LocationCache.Snapshot snap = locationCache.getSnapshot();
+                if (snap.valid) return snap;
+            }
+            Thread.sleep(GPS_DB_LOAD_POLL_MS);
+        }
+        return LocationCache.Snapshot.empty();
     }
 
     private void runOnUiThreadIfAlive(long loadId, Runnable action) {
@@ -2468,14 +2500,6 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         ensureGpsForTuduLookup();
-        if (dzsDatabase != null && locationCache != null && locationCache.getSnapshot().valid) {
-            LocationCache.Snapshot snap = locationCache.getSnapshot();
-            io.execute(() -> {
-                if (dzsDatabase != null) {
-                    dzsDatabase.ensureProximityLoaded(snap.latitude, snap.longitude);
-                }
-            });
-        }
         if (dzsDatabase != null && dzsDatabase.countDistinctTudu() == 0) {
             toast("Databáze neobsahuje žádné TUDU – zkouším určit podle GPS…");
         } else if (!step1Done && locationCache != null && !locationCache.hasFix()) {
