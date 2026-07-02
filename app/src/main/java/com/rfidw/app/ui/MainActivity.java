@@ -522,7 +522,13 @@ public class MainActivity extends AppCompatActivity {
         if (percent < 0) {
             cardDbIndex.setVisibility(View.VISIBLE);
             if (tvDbIndexProgress != null) {
-                tvDbIndexProgress.setText(getString(R.string.db_index_failed));
+                String text;
+                if (percent == -2 && phase != null && !phase.isEmpty()) {
+                    text = phase;
+                } else {
+                    text = getString(R.string.db_index_failed);
+                }
+                tvDbIndexProgress.setText(text);
             }
             if (dbIndexProgressBar != null) {
                 dbIndexProgressBar.setVisibility(View.GONE);

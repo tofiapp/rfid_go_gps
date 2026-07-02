@@ -2,7 +2,9 @@ package com.rfidw.app.data;
 
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteException;
 import android.database.sqlite.SQLiteStatement;
+import android.util.Log;
 
 import java.io.Closeable;
 import java.io.File;
@@ -32,6 +34,11 @@ import java.util.function.IntConsumer;
  * dostupné kdekoli bez opakovaného SQL při pohybu.
  */
 public class DzsDatabase implements Closeable {
+
+    private static final String TAG = "DzsDatabase";
+    /** Opakování při SQLITE_BUSY / database is locked během pozadí indexace. */
+    private static final int DB_LOCK_RETRY_COUNT = 6;
+    private static final long DB_LOCK_RETRY_MS = 250;
 
     public static final String TABLE_GPS_KM = "DZS_SUPERTRA_GPS_KM";
     public static final String TABLE_RO_TPI = "DZS_SUPER_RO_TPI";
@@ -293,8 +300,8 @@ public class DzsDatabase implements Closeable {
                                    Double initialLatitude, Double initialLongitude) throws Exception {
         File sourceFile = new File(path);
         File dbFile = resolveDatabaseFile(sourceFile, cacheDir, listener);
-        SQLiteDatabase db = SQLiteDatabase.openDatabase(
-                dbFile.getAbsolutePath(), null, SQLiteDatabase.OPEN_READONLY);
+        boolean writableCopy = cacheDir != null && !cacheDir.equals(sourceFile.getParentFile());
+        SQLiteDatabase db = openSqliteDatabase(dbFile, writableCopy);
         try {
             applyReadPragmas(db);
             report(listener, "Kontrola schématu", 5);
@@ -440,8 +447,22 @@ public class DzsDatabase implements Closeable {
         }
     }
 
+    private static SQLiteDatabase openSqliteDatabase(File dbFile, boolean preferWritable) {
+        if (preferWritable) {
+            try {
+                return SQLiteDatabase.openDatabase(
+                        dbFile.getAbsolutePath(), null, SQLiteDatabase.OPEN_READWRITE);
+            } catch (SQLiteException e) {
+                Log.w(TAG, "Kopie DB jen pro čtení – indexy GPS se vytvoří až při dalším otevření", e);
+            }
+        }
+        return SQLiteDatabase.openDatabase(
+                dbFile.getAbsolutePath(), null, SQLiteDatabase.OPEN_READONLY);
+    }
+
     private static void applyReadPragmas(SQLiteDatabase db) {
         try {
+            db.execSQL("PRAGMA journal_mode = WAL");
             db.execSQL("PRAGMA cache_size = -64000");
             db.execSQL("PRAGMA temp_store = MEMORY");
             db.execSQL("PRAGMA mmap_size = 268435456");
@@ -512,31 +533,25 @@ public class DzsDatabase implements Closeable {
 
             reportIndexProgress("Indexuji výhybky (RO)", 10);
             waitForForegroundIdle();
-            RoIndexBuildResult built;
-            synchronized (dbQueryLock) {
-                waitForForegroundIdle();
-                if (!backgroundIndexRunning) return;
-                built = buildRoIndex(db, roColumns);
-            }
+            RoIndexBuildResult built = runDbWithLockRetry(() -> buildRoIndex(db, roColumns));
+            if (built == null) return;
             if (built.byRoKey.isEmpty()) {
-                reportIndexProgress("Varování: prázdný RO index", -1);
+                reportIndexProgress("Varování: prázdný RO index", -2);
                 return;
             }
             reportIndexProgress("Indexuji výhybky (RO)", 40);
 
             reportIndexProgress("Indexuji GPS souřadnice výhybek", 45);
             waitForForegroundIdle();
-            VyhybkaGpsStore gpsStore;
-            synchronized (dbQueryLock) {
-                waitForForegroundIdle();
-                if (!backgroundIndexRunning) return;
+            VyhybkaGpsStore gpsStore = runDbWithLockRetry(() -> {
                 foregroundDbOps++;
                 try {
-                    gpsStore = buildVyhybkaGpsStore(built.byRoKey, indexGpsProgressListener());
+                    return buildVyhybkaGpsStore(built.byRoKey, indexGpsProgressListener());
                 } finally {
                     foregroundDbOps--;
                 }
-            }
+            });
+            if (gpsStore == null) return;
             reportIndexProgress("Indexuji GPS souřadnice výhybek", 85);
 
             if (indexCacheDir != null && storageCacheDir != null) {
@@ -557,7 +572,8 @@ public class DzsDatabase implements Closeable {
             reportIndexProgress("Indexace dokončena", 100);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            Log.w(TAG, "Plná indexace databáze selhala", e);
             reportIndexProgress("Indexace selhala", -1);
         } finally {
             backgroundIndexRunning = false;
@@ -657,6 +673,48 @@ public class DzsDatabase implements Closeable {
         while (backgroundIndexRunning && foregroundDbOps > 0) {
             Thread.sleep(50);
         }
+    }
+
+    @FunctionalInterface
+    private interface DbWork<T> {
+        T run() throws Exception;
+    }
+
+  /**
+     * Spustí DB operaci pod {@link #dbQueryLock} s opakováním při SQLITE_BUSY.
+     * Vrátí {@code null}, pokud byla indexace mezitím zrušena ({@link #close()}).
+     */
+    private <T> T runDbWithLockRetry(DbWork<T> work) throws Exception {
+        Exception last = null;
+        for (int attempt = 0; attempt < DB_LOCK_RETRY_COUNT; attempt++) {
+            try {
+                synchronized (dbQueryLock) {
+                    waitForForegroundIdle();
+                    if (!backgroundIndexRunning) return null;
+                    return work.run();
+                }
+            } catch (InterruptedException e) {
+                throw e;
+            } catch (SQLiteException e) {
+                last = e;
+                if (!isTransientDbLock(e) || attempt + 1 >= DB_LOCK_RETRY_COUNT) {
+                    throw e;
+                }
+                Log.w(TAG, "SQLite zaneprázdněna při indexaci, opakování " + (attempt + 2)
+                        + "/" + DB_LOCK_RETRY_COUNT, e);
+                Thread.sleep(DB_LOCK_RETRY_MS * (attempt + 1L));
+            }
+        }
+        if (last != null) throw last;
+        return null;
+    }
+
+    private static boolean isTransientDbLock(Exception e) {
+        if (e == null) return false;
+        String msg = e.getMessage();
+        if (msg == null) return false;
+        String lower = msg.toLowerCase(Locale.ROOT);
+        return lower.contains("locked") || lower.contains("busy");
     }
 
     private DzsIndexCache.LoadedIndex tryLoadProximityFromDisk(double latitude, double longitude) {
@@ -1238,17 +1296,25 @@ public class DzsDatabase implements Closeable {
         if (!populateRoGpsLookupTempTable(roByRoKey)) {
             return VyhybkaGpsStore.empty();
         }
-        String roIdExpr = "TRIM(CAST(" + gpsColumns.roId + " AS TEXT))";
-        String sql = "SELECT ro.tudu, ro.vyhybka, gps." + gpsColumns.latitude + ", gps."
-                + gpsColumns.longitude + ", ro.super_z_id, ro.super_d_id, ro.ro_id"
+        String roIdExpr = "TRIM(CAST(g." + gpsColumns.roId + " AS TEXT))";
+        String groupedGps = "(SELECT g." + gpsColumns.superZId + " AS super_z_id, g."
+                + gpsColumns.superDId + " AS super_d_id, " + roIdExpr + " AS ro_id, MIN(g."
+                + gpsColumns.latitude + ") AS lat, MIN(g." + gpsColumns.longitude + ") AS lon"
+                + " FROM " + TABLE_GPS_KM + " g"
+                + " INNER JOIN " + TEMP_RO_GPS_LOOKUP + " lk"
+                + " ON g." + gpsColumns.superZId + " = lk.super_z_id"
+                + " AND g." + gpsColumns.superDId + " = lk.super_d_id"
+                + " AND " + roIdExpr + " = lk.ro_id"
+                + " GROUP BY g." + gpsColumns.superZId + ", g." + gpsColumns.superDId + ", "
+                + roIdExpr + ") gps";
+        String sql = "SELECT ro.tudu, ro.vyhybka, gps.lat, gps.lon, ro.super_z_id, ro.super_d_id, ro.ro_id"
                 + " FROM " + TEMP_RO_GPS_LOOKUP + " ro"
-                + " INNER JOIN " + TABLE_GPS_KM + " gps"
-                + " ON gps." + gpsColumns.superZId + " = ro.super_z_id"
-                + " AND gps." + gpsColumns.superDId + " = ro.super_d_id"
-                + " AND " + roIdExpr + " = ro.ro_id";
+                + " INNER JOIN " + groupedGps + " gps"
+                + " ON gps.super_z_id = ro.super_z_id"
+                + " AND gps.super_d_id = ro.super_d_id"
+                + " AND gps.ro_id = ro.ro_id";
 
         VyhybkaGpsStore.Builder builder = VyhybkaGpsStore.builder();
-        HashSet<String> seen = new HashSet<>();
         int matched = 0;
         try (Cursor c = db.rawQuery(sql, null)) {
             while (c.moveToNext()) {
@@ -1261,13 +1327,13 @@ public class DzsDatabase implements Closeable {
                 String roId = readId(c, 6);
                 if (tudu == null || vyhybka == null || lat == null || lon == null) continue;
                 if (superZId == null || superDId == null || roId == null) continue;
-                if (!seen.add(roKey(superZId, superDId, roId))) continue;
                 RoIndexEntry ro = roByRoKey.get(roKey(superZId, superDId, roId));
                 String poloha = ro != null ? ro.poloha : "";
                 builder.add(pairKey(superZId, superDId), tudu, vyhybka, roId, poloha, lat, lon);
                 matched++;
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            Log.w(TAG, "Hromadné párování GPS výhybek selhalo, použije se záložní postup", e);
             return VyhybkaGpsStore.empty();
         }
         if (matched == 0) {
