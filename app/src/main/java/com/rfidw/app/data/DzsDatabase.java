@@ -366,6 +366,11 @@ public class DzsDatabase implements Closeable {
         return proximityLoaded && !vyhybkaGpsStore.isEmpty();
     }
 
+    /** Proběhla indexace okolí GPS (i když v bbox nebyla žádná výhybka). */
+    public boolean isProximityIndexed() {
+        return proximityLoaded;
+    }
+
     private static File resolveDatabaseFile(File source, File cacheDir,
                                                     OpenProgressListener listener) throws Exception {
         if (!source.isFile()) {
