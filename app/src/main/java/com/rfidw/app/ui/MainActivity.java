@@ -797,15 +797,21 @@ public class MainActivity extends AppCompatActivity {
             expandCard1Body();
             return;
         }
-        final String tuduCode = currentTudu.code;
+        final String uduCode = currentUduCode();
+        if (uduCode.isEmpty()) {
+            toast(getString(R.string.db_select_required));
+            expandCard1Body();
+            return;
+        }
         final long loadId = dbLoadGeneration;
         if (dzsDatabase == null) {
-            if (currentTudu.vyhybky.isEmpty()) {
+            List<VyhybkaPickerItem> items = collectVyhybkaItemsForUdu(uduCode);
+            if (items.isEmpty()) {
                 toast(getString(R.string.db_select_required));
                 expandCard1Body();
                 return;
             }
-            showVyhybkaPickerDialog(tuduCode, currentTudu.vyhybky, null);
+            showVyhybkaPickerDialog(items, null);
             return;
         }
 
@@ -816,46 +822,48 @@ public class MainActivity extends AppCompatActivity {
         final DzsDatabase db = dzsDatabase;
 
         io.execute(() -> {
-            List<Tudu.Vyhybka> loadedVyhybky = Collections.emptyList();
-            Map<Integer, Double> distances = null;
+            List<VyhybkaPickerItem> loadedItems = Collections.emptyList();
+            List<Tudu> loadedTudus = Collections.emptyList();
+            Map<String, Double> distances = null;
             try {
                 if (loadId == dbLoadGeneration && db != null) {
-                    List<Tudu> loaded = db.loadTuduForCodes(Collections.singleton(tuduCode));
-                    if (!loaded.isEmpty()) {
-                        loadedVyhybky = new ArrayList<>(loaded.get(0).vyhybky);
-                    }
-                    if (withDistances && !loadedVyhybky.isEmpty()) {
-                        distances = db.findVyhybkaDistancesForTudu(tuduCode, lat, lon);
+                    loadedTudus = db.loadTuduForUdu(uduCode);
+                    loadedItems = buildVyhybkaPickerItems(loadedTudus);
+                    if (withDistances && !loadedItems.isEmpty()) {
+                        distances = db.findVyhybkaDistancesForUdu(uduCode, lat, lon);
                     }
                 }
             } catch (Exception e) {
                 Log.w(TAG, "Načtení výhybek pro picker selhalo", e);
             }
-            final List<Tudu.Vyhybka> vyhybkySnapshot = sortVyhybkyForPicker(loadedVyhybky, distances);
-            final Map<Integer, Double> distancesSnapshot = distances;
+            final List<VyhybkaPickerItem> itemsSnapshot =
+                    sortVyhybkaItemsForPicker(loadedItems, distances);
+            final List<Tudu> tudusSnapshot = loadedTudus;
+            final Map<String, Double> distancesSnapshot = distances;
             runOnUiThreadIfAlive(loadId, () -> {
-                if (!vyhybkySnapshot.isEmpty()) {
-                    mergeLoadedTuduVyhybky(tuduCode, vyhybkySnapshot);
+                for (Tudu t : tudusSnapshot) {
+                    mergeTuduIntoList(t);
+                }
+                if (!tudusSnapshot.isEmpty()) {
                     syncCurrentVyhybkaAfterReload();
                 }
-                List<Tudu.Vyhybka> pickerVyhybky = !vyhybkySnapshot.isEmpty()
-                        ? vyhybkySnapshot
-                        : (currentTudu != null
-                                ? new ArrayList<>(currentTudu.vyhybky) : Collections.emptyList());
-                if (pickerVyhybky.isEmpty()) {
+                List<VyhybkaPickerItem> pickerItems = !itemsSnapshot.isEmpty()
+                        ? itemsSnapshot
+                        : collectVyhybkaItemsForUdu(uduCode);
+                if (pickerItems.isEmpty()) {
                     toast(getString(R.string.db_select_required));
                     expandCard1Body();
                     return;
                 }
-                showVyhybkaPickerDialog(tuduCode, pickerVyhybky, distancesSnapshot);
+                showVyhybkaPickerDialog(pickerItems, distancesSnapshot);
             });
         });
     }
 
-    private void showVyhybkaPickerDialog(String tuduCode, List<Tudu.Vyhybka> vyhybkySource,
-                                         Map<Integer, Double> distancesM) {
-        final List<Tudu.Vyhybka> allVyhybky = new ArrayList<>(vyhybkySource);
-        final List<Tudu.Vyhybka> filteredVyhybky = new ArrayList<>(allVyhybky);
+    private void showVyhybkaPickerDialog(List<VyhybkaPickerItem> itemsSource,
+                                         Map<String, Double> distancesM) {
+        final List<VyhybkaPickerItem> allItems = new ArrayList<>(itemsSource);
+        final List<VyhybkaPickerItem> filteredItems = new ArrayList<>(allItems);
 
         View dialogView = getLayoutInflater().inflate(R.layout.dialog_tudu_picker, null);
         EditText etSearch = dialogView.findViewById(R.id.etTuduSearch);
@@ -863,11 +871,12 @@ public class MainActivity extends AppCompatActivity {
         ListView listView = dialogView.findViewById(R.id.lvTudu);
         listView.setChoiceMode(ListView.CHOICE_MODE_SINGLE);
 
-        ArrayAdapter<Tudu.Vyhybka> adapter = new ArrayAdapter<Tudu.Vyhybka>(this,
-                android.R.layout.simple_list_item_single_choice, filteredVyhybky) {
+        ArrayAdapter<VyhybkaPickerItem> adapter = new ArrayAdapter<VyhybkaPickerItem>(this,
+                android.R.layout.simple_list_item_single_choice, filteredItems) {
             @Override
             public boolean isEnabled(int position) {
-                return !isVyhybkaCompleteInCsv(tuduCode, filteredVyhybky.get(position));
+                VyhybkaPickerItem item = filteredItems.get(position);
+                return !isVyhybkaCompleteInCsv(item.tuduCode, item.vyhybka);
             }
 
             @Override
@@ -875,10 +884,11 @@ public class MainActivity extends AppCompatActivity {
                     android.view.ViewGroup parent) {
                 android.view.View view = super.getView(position, convertView, parent);
                 TextView tv = (TextView) view;
-                Tudu.Vyhybka v = filteredVyhybky.get(position);
-                boolean done = isVyhybkaCompleteInCsv(tuduCode, v);
-                Double dist = distancesM != null ? distancesM.get(v.cislo) : null;
-                tv.setText(formatVyhybkaPickerLabel(tuduCode, v, dist));
+                VyhybkaPickerItem item = filteredItems.get(position);
+                boolean done = isVyhybkaCompleteInCsv(item.tuduCode, item.vyhybka);
+                Double dist = distancesM != null
+                        ? distancesM.get(vyhybkaPickerKey(item.tuduCode, item.vyhybka)) : null;
+                tv.setText(formatVyhybkaPickerLabel(item.tuduCode, item.vyhybka, dist));
                 if (done) {
                     tv.setTextColor(ContextCompat.getColor(MainActivity.this, R.color.text_muted));
                     tv.setAlpha(0.45f);
@@ -892,7 +902,7 @@ public class MainActivity extends AppCompatActivity {
         listView.setAdapter(adapter);
 
         Runnable refreshChecked = () -> {
-            int checked = findVyhybkaPickerCheckedIndex(filteredVyhybky);
+            int checked = findVyhybkaPickerCheckedIndex(filteredItems);
             if (checked >= 0) {
                 listView.setItemChecked(checked, true);
             }
@@ -906,27 +916,33 @@ public class MainActivity extends AppCompatActivity {
                 .create();
 
         listView.setOnItemClickListener((parent, v, position, id) -> {
-            if (isVyhybkaCompleteInCsv(tuduCode, filteredVyhybky.get(position))) {
+            VyhybkaPickerItem item = filteredItems.get(position);
+            if (isVyhybkaCompleteInCsv(item.tuduCode, item.vyhybka)) {
                 toast("výhybka je již zapsaná v CSV");
                 return;
             }
             if (gpsAutoSelection) {
                 gpsVyhybkaLocked = true;
             }
-            selectVyhybka(filteredVyhybky.get(position), true);
+            Tudu owner = findTuduByCode(item.tuduCode);
+            if (owner != null) {
+                currentTudu = owner;
+                epc.tudu = owner.code;
+            }
+            selectVyhybka(item.vyhybka, true);
             dialog.dismiss();
         });
 
         etSearch.addTextChangedListener(new SimpleWatcher(() -> {
             String q = etSearch.getText().toString().trim();
-            filteredVyhybky.clear();
+            filteredItems.clear();
             if (q.isEmpty()) {
-                filteredVyhybky.addAll(allVyhybky);
+                filteredItems.addAll(allItems);
             } else {
-                for (Tudu.Vyhybka vyhybka : allVyhybky) {
-                    if (vyhybka.displayLabel().contains(q)
-                            || String.valueOf(vyhybka.cislo).contains(q)) {
-                        filteredVyhybky.add(vyhybka);
+                for (VyhybkaPickerItem item : allItems) {
+                    if (item.vyhybka.displayLabel().contains(q)
+                            || String.valueOf(item.vyhybka.cislo).contains(q)) {
+                        filteredItems.add(item);
                     }
                 }
             }
@@ -986,22 +1002,75 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private List<Tudu.Vyhybka> sortVyhybkyForPicker(List<Tudu.Vyhybka> source,
-                                                      Map<Integer, Double> distancesM) {
+    private List<VyhybkaPickerItem> sortVyhybkaItemsForPicker(List<VyhybkaPickerItem> source,
+                                                              Map<String, Double> distancesM) {
         if (distancesM == null || distancesM.isEmpty()) {
             return source;
         }
-        List<Tudu.Vyhybka> sorted = new ArrayList<>(source);
+        List<VyhybkaPickerItem> sorted = new ArrayList<>(source);
         sorted.sort((a, b) -> {
-            Double da = distancesM.get(a.cislo);
-            Double db = distancesM.get(b.cislo);
-            if (da == null && db == null) return Integer.compare(a.cislo, b.cislo);
+            Double da = distancesM.get(vyhybkaPickerKey(a.tuduCode, a.vyhybka));
+            Double db = distancesM.get(vyhybkaPickerKey(b.tuduCode, b.vyhybka));
+            if (da == null && db == null) {
+                int tuduCmp = a.tuduCode.compareTo(b.tuduCode);
+                return tuduCmp != 0 ? tuduCmp : Integer.compare(a.vyhybka.cislo, b.vyhybka.cislo);
+            }
             if (da == null) return 1;
             if (db == null) return -1;
             int cmp = Double.compare(da, db);
-            return cmp != 0 ? cmp : Integer.compare(a.cislo, b.cislo);
+            if (cmp != 0) return cmp;
+            int tuduCmp = a.tuduCode.compareTo(b.tuduCode);
+            return tuduCmp != 0 ? tuduCmp : Integer.compare(a.vyhybka.cislo, b.vyhybka.cislo);
         });
         return sorted;
+    }
+
+    private static final class VyhybkaPickerItem {
+        final String tuduCode;
+        final Tudu.Vyhybka vyhybka;
+
+        VyhybkaPickerItem(String tuduCode, Tudu.Vyhybka vyhybka) {
+            this.tuduCode = tuduCode;
+            this.vyhybka = vyhybka;
+        }
+
+        @Override
+        public String toString() {
+            return vyhybka.displayLabel();
+        }
+    }
+
+    private List<VyhybkaPickerItem> buildVyhybkaPickerItems(List<Tudu> tudus) {
+        List<VyhybkaPickerItem> items = new ArrayList<>();
+        for (Tudu t : tudus) {
+            for (Tudu.Vyhybka v : t.vyhybky) {
+                items.add(new VyhybkaPickerItem(t.code, v));
+            }
+        }
+        return items;
+    }
+
+    private List<VyhybkaPickerItem> collectVyhybkaItemsForUdu(String uduCode) {
+        List<VyhybkaPickerItem> items = new ArrayList<>();
+        for (Tudu t : tuduList) {
+            if (!t.uduCode().equals(uduCode)) continue;
+            for (Tudu.Vyhybka v : t.vyhybky) {
+                items.add(new VyhybkaPickerItem(t.code, v));
+            }
+        }
+        return items;
+    }
+
+    private Tudu findTuduByCode(String tuduCode) {
+        if (tuduCode == null || tuduCode.isEmpty()) return null;
+        for (Tudu t : tuduList) {
+            if (t.code.equals(tuduCode)) return t;
+        }
+        return null;
+    }
+
+    private static String vyhybkaPickerKey(String tuduCode, Tudu.Vyhybka v) {
+        return tuduCode + "\0" + v.cislo + "\0" + v.iob;
     }
 
     private String formatDistanceM(double distanceM) {
@@ -1090,16 +1159,23 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private int findVyhybkaPickerCheckedIndex(List<Tudu.Vyhybka> vyhybky) {
+    private int findVyhybkaPickerCheckedIndex(List<VyhybkaPickerItem> items) {
+        String tuduCode = currentTudu != null ? currentTudu.code : epc.tudu;
         int cislo = currentVyhybka != null ? currentVyhybka.cislo : epc.vyhybka;
         String iob = currentVyhybka != null ? currentVyhybka.iob : "";
         if (cislo > 0) {
-            for (int i = 0; i < vyhybky.size(); i++) {
-                Tudu.Vyhybka v = vyhybky.get(i);
-                if (v.cislo == cislo && (iob.isEmpty() || v.iob.equals(iob))) return i;
+            for (int i = 0; i < items.size(); i++) {
+                VyhybkaPickerItem item = items.get(i);
+                if (!item.tuduCode.equals(tuduCode)) continue;
+                if (item.vyhybka.cislo == cislo
+                        && (iob.isEmpty() || item.vyhybka.iob.equals(iob))) return i;
             }
-            for (int i = 0; i < vyhybky.size(); i++) {
-                if (vyhybky.get(i).cislo == cislo) return i;
+            for (int i = 0; i < items.size(); i++) {
+                VyhybkaPickerItem item = items.get(i);
+                if (item.tuduCode.equals(tuduCode) && item.vyhybka.cislo == cislo) return i;
+            }
+            for (int i = 0; i < items.size(); i++) {
+                if (items.get(i).vyhybka.cislo == cislo) return i;
             }
         }
         return 0;
@@ -1862,6 +1938,7 @@ public class MainActivity extends AppCompatActivity {
     private void setupCastBranchSelection() {
         castBranchGroup = findViewById(R.id.castBranchGroup);
         if (castBranchGroup == null) return;
+        castBranchGroup.setSelectionRequired(true);
         castBranchGroup.check(R.id.btnCastHlavni);
         castBranchGroup.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
             if (!isChecked) return;
@@ -1874,8 +1951,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void ensureVyhybkaRoBranches(String tuduCode, Tudu.Vyhybka v) {
-        if (tuduCode == null || tuduCode.isEmpty() || v == null || !v.getRoBranches().isEmpty()
-                || dzsDatabase == null) {
+        if (tuduCode == null || tuduCode.isEmpty() || v == null || dzsDatabase == null) {
             return;
         }
         List<Tudu.Vyhybka.RoBranch> loaded = dzsDatabase.findRoBranchesForVyhybka(
