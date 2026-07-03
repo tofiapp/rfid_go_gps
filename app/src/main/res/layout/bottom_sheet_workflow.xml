@@ -123,6 +123,67 @@
 
                 <LinearLayout
                     android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="8dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/epc_template_mode_label"
+                        android:textColor="@color/text"
+                        android:textSize="13sp"
+                        android:textStyle="bold"/>
+
+                    <com.google.android.material.button.MaterialButtonToggleGroup
+                        android:id="@+id/templateModeGroup"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:singleSelection="true"
+                        app:selectionRequired="true">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnTemplateOff"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:minWidth="56dp"
+                            android:minHeight="36dp"
+                            android:text="@string/epc_template_off"
+                            android:textSize="12sp"/>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnTemplateOn"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:minWidth="56dp"
+                            android:minHeight="36dp"
+                            android:text="@string/epc_template_on"
+                            android:textSize="12sp"/>
+                    </com.google.android.material.button.MaterialButtonToggleGroup>
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tvTemplateModeHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="10dp"
+                    android:text="@string/epc_tid_mode_hint"
+                    android:textColor="@color/text_muted"
+                    android:textSize="12sp"/>
+
+                <LinearLayout
+                    android:id="@+id/templateRowsBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content">
                     <TextView android:layout_width="0dp" android:layout_height="wrap_content"
                         android:layout_weight="0.6" android:text="#" android:textStyle="bold"
@@ -146,6 +207,8 @@
                 <include layout="@layout/row_template" android:id="@+id/row5"/>
                 <include layout="@layout/row_template" android:id="@+id/row6"/>
                 <include layout="@layout/row_template" android:id="@+id/row7"/>
+
+                </LinearLayout>
 
                 <View android:layout_width="match_parent" android:layout_height="1dp"
                     android:background="#E2E6EB" android:layout_marginTop="12dp"

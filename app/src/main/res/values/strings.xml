@@ -83,4 +83,10 @@
     <string name="tudu_loading_list">Načítám seznam UDU…</string>
     <string name="db_loaded_gps">%1$s  •  UDU: %2$d (GPS režim)</string>
     <string name="db_loaded_manual">%1$s  •  UDU: %2$d</string>
+    <string name="epc_template_mode_label">Šablona EPC</string>
+    <string name="epc_template_off">OFF</string>
+    <string name="epc_template_on">ON</string>
+    <string name="epc_tid_mode_hint">OFF (výchozí): nové EPC = TID načteného tagu. ON: EPC ze šablony níže.</string>
+    <string name="epc_template_mode_hint">ON: EPC se sestaví ze šablony (rok, UDU, výhybka, čip, ID_RFID).</string>
+    <string name="epc_tid_mode_valid">✓ Režim TID → EPC (nové EPC = TID tagu při zápisu)</string>
 </resources>

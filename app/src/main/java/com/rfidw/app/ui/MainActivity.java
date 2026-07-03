@@ -150,6 +150,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREFS_NAME = "rfidgogps";
     private static final String PREF_GPS_TEST_MODE = "gpsTestMode";
     private static final String PREF_TUDU_MODE_GPS = "tuduModeGps";
+    private static final String PREF_EPC_TEMPLATE_MODE = "epcTemplateMode";
     private static final String PREF_TEST_LAT = "testLat";
     private static final String PREF_TEST_LON = "testLon";
     private static final String PREF_DB_SOURCE_PATH = "dbSourcePath";
@@ -193,8 +194,12 @@ public class MainActivity extends AppCompatActivity {
     private MaterialButtonToggleGroup powerPresetGroup;
     private MaterialButtonToggleGroup tuduModeGroup;
     private MaterialButtonToggleGroup castBranchGroup;
+    private MaterialButtonToggleGroup templateModeGroup;
     private MaterialButton btnGpsReloadLocation;
     private TextView tvTuduModeHint;
+    private TextView tvTemplateModeHint;
+    private View templateRowsBox;
+    private boolean epcTemplateMode;
     private boolean tuduListFullyLoaded;
     private boolean castBranchHlavni;
     private int lastCastBranchDefault = -1;
@@ -221,6 +226,7 @@ public class MainActivity extends AppCompatActivity {
         setupCollapsibles();
         collapseWorkflowCards();
         setupTemplateRows();
+        setupTemplateMode();
         setupCsv();
         setupListeners();
         setupCastBranchSelection();
@@ -297,6 +303,9 @@ public class MainActivity extends AppCompatActivity {
         tuduModeGroup = findViewById(R.id.tuduModeGroup);
         btnGpsReloadLocation = findViewById(R.id.btnGpsReloadLocation);
         tvTuduModeHint = findViewById(R.id.tvTuduModeHint);
+        templateModeGroup = findViewById(R.id.templateModeGroup);
+        tvTemplateModeHint = findViewById(R.id.tvTemplateModeHint);
+        templateRowsBox = findViewById(R.id.templateRowsBox);
 
         rows[0] = findViewById(R.id.row1);
         rows[1] = findViewById(R.id.row2);
@@ -1986,6 +1995,15 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void refreshHexAndPreview() {
+        if (!epcTemplateMode) {
+            for (int i = 0; i < 7; i++) {
+                ((TextView) rows[i].findViewById(R.id.tvHex)).setText("—");
+            }
+            tvEpcPreview.setText("----–----–----–----–----–----");
+            tvEpcValid.setText(getString(R.string.epc_tid_mode_valid));
+            tvEpcValid.setTextColor(0xFF2E7D32);
+            return;
+        }
         String[] hex = {
                 epc.f1Year(), epc.f2Tudu14(), epc.f3Tudu5(), epc.f4Tudu6(),
                 epc.f5Vyhybka(), epc.f6Cast(), epc.f7IdRfid()
@@ -2001,6 +2019,36 @@ public class MainActivity extends AppCompatActivity {
             tvEpcValid.setText("✗ EPC není validní – zkontrolujte hodnoty");
             tvEpcValid.setTextColor(0xFFC62828);
         }
+    }
+
+    private void setupTemplateMode() {
+        epcTemplateMode = prefs.getBoolean(PREF_EPC_TEMPLATE_MODE, false);
+        if (templateModeGroup == null) return;
+        templateModeGroup.check(epcTemplateMode ? R.id.btnTemplateOn : R.id.btnTemplateOff);
+        updateTemplateModeUi();
+        templateModeGroup.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
+            if (!isChecked) return;
+            onTemplateModeChanged(checkedId == R.id.btnTemplateOn);
+        });
+    }
+
+    private void updateTemplateModeUi() {
+        if (tvTemplateModeHint != null) {
+            tvTemplateModeHint.setText(epcTemplateMode
+                    ? getString(R.string.epc_template_mode_hint)
+                    : getString(R.string.epc_tid_mode_hint));
+        }
+        if (templateRowsBox != null) {
+            templateRowsBox.setVisibility(epcTemplateMode ? View.VISIBLE : View.GONE);
+        }
+        refreshHexAndPreview();
+    }
+
+    private void onTemplateModeChanged(boolean templateOn) {
+        if (epcTemplateMode == templateOn) return;
+        epcTemplateMode = templateOn;
+        prefs.edit().putBoolean(PREF_EPC_TEMPLATE_MODE, templateOn).apply();
+        updateTemplateModeUi();
     }
 
     // ---------- CSV ----------
@@ -3416,7 +3464,7 @@ public class MainActivity extends AppCompatActivity {
             if (chainWorkflow) onWorkflowFailed(getString(R.string.power_preset_required));
             return;
         }
-        if (!epc.isValid()) {
+        if (epcTemplateMode && !epc.isValid()) {
             toast("EPC není validní");
             if (chainWorkflow) onWorkflowFailed("EPC není validní");
             return;
@@ -3430,14 +3478,22 @@ public class MainActivity extends AppCompatActivity {
             setActionStatus("zapisuji EPC…", COLOR_STATUS_BUSY);
         }
         final String pwd = etAccessPwd.getText().toString().trim();
-        final String newEpc = epc.buildEpc();
         tvWriteResult.setText("Zapisuji…");
         tvWriteResult.setTextColor(0xFF5F6A76);
 
-        io.execute(() -> {
-            UhfManager.WriteResult r = uhf.writeEpc(pwd, newEpc);
-            ui.post(() -> onWriteDone(r, newEpc));
-        });
+        if (epcTemplateMode) {
+            final String newEpc = epc.buildEpc();
+            io.execute(() -> {
+                UhfManager.WriteResult r = uhf.writeEpc(pwd, newEpc);
+                ui.post(() -> onWriteDone(r, newEpc));
+            });
+        } else {
+            io.execute(() -> {
+                UhfManager.WriteResult r = uhf.writeEpcFromTid(pwd);
+                String written = r.writtenEpc != null ? r.writtenEpc : "";
+                ui.post(() -> onWriteDone(r, written));
+            });
+        }
     }
 
     private void onWriteDone(UhfManager.WriteResult r, String writtenEpc) {
@@ -3981,7 +4037,7 @@ public class MainActivity extends AppCompatActivity {
     private void runTriggerAction() {
         if (workflowRunning || scanDoneAwaitingConfirm || deleteConfirmDialog.getVisibility() == View.VISIBLE) return;
         if (!requirePowerPreset()) return;
-        if (!epc.isValid()) {
+        if (epcTemplateMode && !epc.isValid()) {
             toast("EPC není validní");
             return;
         }
