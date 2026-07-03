@@ -2012,7 +2012,6 @@ public class MainActivity extends AppCompatActivity {
         csvAdapter = new CsvAdapter();
         RecyclerView rv = findViewById(R.id.rvCsv);
         rv.setLayoutManager(new LinearLayoutManager(this));
-        rv.setHasFixedSize(true);
         rv.setItemAnimator(null);
         rv.setAdapter(csvAdapter);
 
