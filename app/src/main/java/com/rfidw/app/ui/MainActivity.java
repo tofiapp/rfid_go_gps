@@ -514,6 +514,15 @@ public class MainActivity extends AppCompatActivity {
         db.setIndexProgressListener((phase, percent) -> runOnUiThread(() -> {
             if (dzsDatabase != db) return;
             updateWorkflowDbIndexProgress(phase, percent);
+            if (gpsAutoSelection && percent == 100) {
+                updateNearbyTuduCountInSourceLabel();
+                ensureGpsForTuduLookup();
+                if (!db.hasProximityData()) {
+                    toast("V okolí GPS nebyla nalezena výhybka – zkuste ruční výběr TUDU");
+                }
+            } else if (gpsAutoSelection && percent == -2 && !db.hasProximityData()) {
+                toast("V okolí GPS nebyla nalezena výhybka – zkuste ruční výběr TUDU");
+            }
         }));
     }
 
@@ -2886,6 +2895,9 @@ public class MainActivity extends AppCompatActivity {
             }
             ensureGpsForTuduLookup();
             if (dzsDatabase != null && dzsDatabase.isProximityIndexed() && !dzsDatabase.hasProximityData()) {
+                if (dzsDatabase.isBackgroundIndexRunning()) {
+                    return;
+                }
                 toast("V okolí GPS nebyla nalezena výhybka – zkuste ruční výběr TUDU");
             } else if (!step1Done && locationCache != null && !locationCache.hasFix()) {
                 if (gpsTestMode) {
