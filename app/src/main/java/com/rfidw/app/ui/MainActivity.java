@@ -53,6 +53,7 @@ import com.google.android.material.button.MaterialButtonToggleGroup;
 
 import com.rfidw.app.R;
 import com.rfidw.app.csv.CsvRecordBuilder;
+import com.rfidw.app.kmext.KmExtLogic;
 import com.rfidw.app.csv.CsvStore;
 import com.rfidw.app.data.DzsDatabase;
 import com.rfidw.app.data.Tudu;
@@ -3591,6 +3592,10 @@ public class MainActivity extends AppCompatActivity {
                     && currentVyhybka.getRoBranches().size() >= 2) {
                 CsvStore.Row row = buildCsvRow(epc24, tid, null);
                 row.roId = joinRoIds(currentVyhybka.getRoBranches());
+                // logika KM_EXT
+                KmExtLogic.attachToRow(dzsDatabase, row,
+                        locationCache != null ? locationCache.getSnapshot()
+                                : LocationCache.Snapshot.empty());
                 csvStore.upsert(row);
             } else {
                 Tudu.Vyhybka.RoBranch branch = resolveBranchForCast(cast);
@@ -3609,6 +3614,10 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
                 CsvStore.Row row = buildCsvRow(epc24, tid, branch);
+                // logika KM_EXT
+                KmExtLogic.attachToRow(dzsDatabase, row,
+                        locationCache != null ? locationCache.getSnapshot()
+                                : LocationCache.Snapshot.empty());
                 csvStore.upsert(row);
             }
             persistCsvAsync();
@@ -3645,6 +3654,7 @@ public class MainActivity extends AppCompatActivity {
                 epc.cast,
                 branch != null ? branch.poloha : "",
                 branch != null ? branch.roId : "",
+                "",
                 latitude,
                 longitude,
                 accuracyM,

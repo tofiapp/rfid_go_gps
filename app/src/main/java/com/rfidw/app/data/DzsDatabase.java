@@ -1,5 +1,7 @@
 package com.rfidw.app.data;
 
+import com.rfidw.app.kmext.KmExtLogic;
+
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteException;
@@ -1915,4 +1917,125 @@ public class DzsDatabase implements Closeable {
         }
         return null;
     }
+
+    // ========== logika KM_EXT (začátek) – odstranit spolu s com.rfidw.app.kmext.KmExtLogic ==========
+
+    private volatile String kmExtColumnName;
+    private volatile boolean kmExtColumnResolved;
+
+    /**
+     * Nejbližší KM_EXT k aktuální GPS pro dané RO_ID (dotaz jen při zápisu CSV, ne při indexaci).
+     */
+    public KmExtLogic.LookupResult findNearestKmExtAtGps(String roId, double latitude,
+                                                         double longitude) {
+        if (roId == null || roId.trim().isEmpty() || db == null) {
+            return KmExtLogic.LookupResult.empty();
+        }
+        String kmExtCol = resolveKmExtColumnName();
+        if (kmExtCol == null) {
+            return KmExtLogic.LookupResult.empty();
+        }
+
+        ensureGpsRoLookupIndex();
+        String trimmedRoId = roId.trim();
+        List<String[]> pairIds = findPairIdsForRoId(trimmedRoId);
+        if (pairIds.isEmpty()) {
+            pairIds = Collections.singletonList(new String[]{null, null});
+        }
+
+        String bestKmExt = "";
+        double bestDist = Double.MAX_VALUE;
+        synchronized (dbQueryLock) {
+            for (String[] pair : pairIds) {
+                String sql;
+                String[] args;
+                if (pair[0] != null && pair[1] != null) {
+                    sql = "SELECT " + kmExtCol + ", " + gpsColumns.latitude + ", "
+                            + gpsColumns.longitude + " FROM " + TABLE_GPS_KM
+                            + " WHERE " + gpsColumns.superZId + " = ? AND "
+                            + gpsColumns.superDId + " = ? AND TRIM(CAST("
+                            + gpsColumns.roId + " AS TEXT)) = ?";
+                    args = new String[]{pair[0], pair[1], trimmedRoId};
+                } else {
+                    sql = "SELECT " + kmExtCol + ", " + gpsColumns.latitude + ", "
+                            + gpsColumns.longitude + " FROM " + TABLE_GPS_KM
+                            + " WHERE TRIM(CAST(" + gpsColumns.roId + " AS TEXT)) = ?";
+                    args = new String[]{trimmedRoId};
+                }
+                try (Cursor c = db.rawQuery(sql, args)) {
+                    while (c.moveToNext()) {
+                        String kmExt = readKmExtValue(c, 0);
+                        Double lat = readDouble(c, 1);
+                        Double lon = readDouble(c, 2);
+                        if (kmExt == null || lat == null || lon == null) continue;
+                        double dist = haversineM(latitude, longitude, lat, lon);
+                        if (dist < bestDist) {
+                            bestDist = dist;
+                            bestKmExt = kmExt;
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "logika KM_EXT: dotaz selhal pro RO_ID " + trimmedRoId, e);
+                }
+            }
+        }
+        if (bestKmExt.isEmpty()) {
+            return KmExtLogic.LookupResult.empty();
+        }
+        return new KmExtLogic.LookupResult(bestKmExt, bestDist);
+    }
+
+    private String resolveKmExtColumnName() {
+        if (kmExtColumnResolved) {
+            return kmExtColumnName == null || kmExtColumnName.isEmpty() ? null : kmExtColumnName;
+        }
+        synchronized (this) {
+            if (kmExtColumnResolved) {
+                return kmExtColumnName == null || kmExtColumnName.isEmpty() ? null : kmExtColumnName;
+            }
+            try {
+                kmExtColumnName = findOptionalColumn(tableColumns(db, TABLE_GPS_KM), "KM_EXT");
+            } catch (Exception e) {
+                Log.w(TAG, "logika KM_EXT: sloupec KM_EXT nenalezen", e);
+                kmExtColumnName = "";
+            }
+            kmExtColumnResolved = true;
+        }
+        return kmExtColumnName == null || kmExtColumnName.isEmpty() ? null : kmExtColumnName;
+    }
+
+    private List<String[]> findPairIdsForRoId(String roId) {
+        List<String[]> pairs = new ArrayList<>();
+        for (String key : roByRoKey.keySet()) {
+            String[] ids = splitRoKey(key);
+            if (roId.equals(ids[2])) {
+                pairs.add(new String[]{ids[0], ids[1]});
+            }
+        }
+        return pairs;
+    }
+
+    private static String readKmExtValue(Cursor c, int col) {
+        if (c.isNull(col)) return null;
+        try {
+            String raw = c.getString(col);
+            if (raw != null) {
+                raw = raw.trim();
+                if (!raw.isEmpty()) return raw;
+            }
+        } catch (Exception ignored) {
+        }
+        try {
+            double value = c.getDouble(col);
+            if (Double.isNaN(value) || Double.isInfinite(value)) return null;
+            if (Math.rint(value) == value) {
+                return String.valueOf((long) value);
+            }
+            return String.format(Locale.ROOT, "%.3f", value);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    // ========== logika KM_EXT (konec) ==========
 }
