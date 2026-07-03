@@ -28,7 +28,7 @@ public final class KmExtLogic {
             this.distanceM = distanceM;
         }
 
-        static LookupResult empty() {
+        public static LookupResult empty() {
             return new LookupResult("", Double.MAX_VALUE);
         }
 
