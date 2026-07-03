@@ -44,8 +44,7 @@ public class CsvAdapter extends RecyclerView.Adapter<CsvAdapter.VH> {
         h.cPoloha.setText(r.poloha);
         h.cRoId1.setText(r.roId1);
         h.cRoId2.setText(r.roId2);
-        h.cKmExt1.setText(r.kmExt1);
-        h.cKmExt2.setText(r.kmExt2);
+        h.cKmExt.setText(r.kmExt);
         h.cLat.setText(r.latitude);
         h.cLon.setText(r.longitude);
         h.cAcc.setText(r.accuracyM);
@@ -58,7 +57,7 @@ public class CsvAdapter extends RecyclerView.Adapter<CsvAdapter.VH> {
 
     static class VH extends RecyclerView.ViewHolder {
         TextView cId, cEpc, cTid, cTudu, cVyh, cCast, cPoloha;
-        TextView cRoId1, cRoId2, cKmExt1, cKmExt2, cLat, cLon, cAcc, cGpsTime;
+        TextView cRoId1, cRoId2, cKmExt, cLat, cLon, cAcc, cGpsTime;
         VH(@NonNull View v) {
             super(v);
             cId = v.findViewById(R.id.cId);
@@ -70,8 +69,7 @@ public class CsvAdapter extends RecyclerView.Adapter<CsvAdapter.VH> {
             cPoloha = v.findViewById(R.id.cPoloha);
             cRoId1 = v.findViewById(R.id.cRoId1);
             cRoId2 = v.findViewById(R.id.cRoId2);
-            cKmExt1 = v.findViewById(R.id.cKmExt1);
-            cKmExt2 = v.findViewById(R.id.cKmExt2);
+            cKmExt = v.findViewById(R.id.cKmExt);
             cLat = v.findViewById(R.id.cLat);
             cLon = v.findViewById(R.id.cLon);
             cAcc = v.findViewById(R.id.cAcc);

@@ -21,7 +21,7 @@ import java.util.Set;
  *
  * Sloupce:
  *   ID_RFID ; EPC ; TID ; TUDU ; vyhybka ; cip ; POLOHA ; RO_ID_1 ; RO_ID_2 ;
- *   KM_EXT_1 ; KM_EXT_2 ; LAT ; LON ; accuracy_m ; gps_time
+ *   KM_EXT ; LAT ; LON ; accuracy_m ; gps_time
  *
  * Klíčem je ID_RFID – při zápisu stejného ID_RFID se daný řádek přepíše.
  */
@@ -29,7 +29,7 @@ public class CsvStore {
 
     public static final String[] HEADER = {
             "ID_RFID", "EPC", "TID", "TUDU", "vyhybka", "cip", "POLOHA",
-            "RO_ID_1", "RO_ID_2", "KM_EXT_1", "KM_EXT_2",
+            "RO_ID_1", "RO_ID_2", "KM_EXT",
             "LAT", "LON", "accuracy_m", "gps_time"
     };
     private static final String SEP = ";";
@@ -44,8 +44,7 @@ public class CsvStore {
         public String poloha;
         public String roId1;
         public String roId2;
-        public String kmExt1;
-        public String kmExt2;
+        public String kmExt;
         public String latitude;
         public String longitude;
         public String accuracyM;
@@ -54,7 +53,7 @@ public class CsvStore {
         public String[] toArray() {
             return new String[]{
                     idRfid, epc, tid, tudu, vyhybka, cast, poloha,
-                    roId1, roId2, kmExt1, kmExt2,
+                    roId1, roId2, kmExt,
                     latitude, longitude, accuracyM, gpsTime
             };
         }
@@ -200,8 +199,7 @@ public class CsvStore {
                 r.poloha = "";
                 r.roId1 = "";
                 r.roId2 = "";
-                r.kmExt1 = "";
-                r.kmExt2 = "";
+                r.kmExt = "";
                 r.latitude = get(c, 6);
                 r.longitude = get(c, 7);
                 r.accuracyM = get(c, 8);
@@ -214,8 +212,7 @@ public class CsvStore {
                 r.poloha = get(c, 6);
                 r.roId1 = "";
                 r.roId2 = "";
-                r.kmExt1 = "";
-                r.kmExt2 = "";
+                r.kmExt = "";
                 r.latitude = get(c, 7);
                 r.longitude = get(c, 8);
                 r.accuracyM = get(c, 9);
@@ -233,6 +230,19 @@ public class CsvStore {
                 r.accuracyM = get(c, 11);
                 r.gpsTime = get(c, 12);
                 break;
+            case CURRENT_KM_EXT_SPLIT:
+                r.tudu = get(c, 3);
+                r.vyhybka = get(c, 4);
+                r.cast = get(c, 5);
+                r.poloha = get(c, 6);
+                r.roId1 = get(c, 7);
+                r.roId2 = get(c, 8);
+                migrateSplitKmExt(r, get(c, 9), get(c, 10));
+                r.latitude = get(c, 11);
+                r.longitude = get(c, 12);
+                r.accuracyM = get(c, 13);
+                r.gpsTime = get(c, 14);
+                break;
             case CURRENT:
             default:
                 r.tudu = get(c, 3);
@@ -241,12 +251,11 @@ public class CsvStore {
                 r.poloha = get(c, 6);
                 r.roId1 = get(c, 7);
                 r.roId2 = get(c, 8);
-                r.kmExt1 = get(c, 9);
-                r.kmExt2 = get(c, 10);
-                r.latitude = get(c, 11);
-                r.longitude = get(c, 12);
-                r.accuracyM = get(c, 13);
-                r.gpsTime = get(c, 14);
+                r.kmExt = get(c, 9);
+                r.latitude = get(c, 10);
+                r.longitude = get(c, 11);
+                r.accuracyM = get(c, 12);
+                r.gpsTime = get(c, 13);
                 break;
         }
         return r;
@@ -264,17 +273,21 @@ public class CsvStore {
     }
 
     private static void migrateLegacyKmExt(Row r, String kmExtField) {
-        if (kmExtField == null || kmExtField.trim().isEmpty()) {
-            r.kmExt1 = "";
-            r.kmExt2 = "";
+        r.kmExt = kmExtField != null ? kmExtField.trim() : "";
+    }
+
+    private static void migrateSplitKmExt(Row r, String kmExt1, String kmExt2) {
+        String first = kmExt1 != null ? kmExt1.trim() : "";
+        String second = kmExt2 != null ? kmExt2.trim() : "";
+        if (first.isEmpty()) {
+            r.kmExt = second;
             return;
         }
-        String trimmed = kmExtField.trim();
-        String[] parts = trimmed.contains(",")
-                ? trimmed.split("\\s*,\\s*")
-                : new String[]{trimmed};
-        r.kmExt1 = parts.length > 0 ? parts[0].trim() : "";
-        r.kmExt2 = parts.length > 1 ? parts[1].trim() : "";
+        if (second.isEmpty()) {
+            r.kmExt = first;
+            return;
+        }
+        r.kmExt = first + ", " + second;
     }
 
     private static CsvFormat detectFormat(String[] header) {
@@ -282,6 +295,7 @@ public class CsvStore {
         boolean hasPoloha = false;
         boolean hasRoId1 = false;
         boolean hasRoId = false;
+        boolean hasKmExt1 = false;
         boolean hasKmExt = false;
         for (String col : header) {
             String name = col.trim();
@@ -289,8 +303,10 @@ public class CsvStore {
             if ("POLOHA".equalsIgnoreCase(name)) hasPoloha = true;
             if ("RO_ID_1".equalsIgnoreCase(name)) hasRoId1 = true;
             if ("RO_ID".equalsIgnoreCase(name)) hasRoId = true;
+            if ("KM_EXT_1".equalsIgnoreCase(name)) hasKmExt1 = true;
             if ("KM_EXT".equalsIgnoreCase(name)) hasKmExt = true;
         }
+        if (hasRoId1 && hasKmExt1) return CsvFormat.CURRENT_KM_EXT_SPLIT;
         if (hasRoId1) return CsvFormat.CURRENT;
         if (hasRok) return CsvFormat.LEGACY_WITH_ROK;
         if (hasPoloha && hasRoId) return CsvFormat.LEGACY_SINGLE_RO;
@@ -300,6 +316,7 @@ public class CsvStore {
 
     private enum CsvFormat {
         CURRENT,
+        CURRENT_KM_EXT_SPLIT,
         LEGACY_WITH_ROK,
         LEGACY_SINGLE_RO,
         LEGACY_NO_RO_KM,

@@ -19,8 +19,7 @@ public final class CsvRecordBuilder {
             String poloha,
             String roId1,
             String roId2,
-            String kmExt1,
-            String kmExt2,
+            String kmExt,
             String latitude,
             String longitude,
             String accuracyM,
@@ -35,8 +34,7 @@ public final class CsvRecordBuilder {
         row.poloha = poloha != null ? poloha : "";
         row.roId1 = roId1 != null ? roId1 : "";
         row.roId2 = roId2 != null ? roId2 : "";
-        row.kmExt1 = kmExt1 != null ? kmExt1 : "";
-        row.kmExt2 = kmExt2 != null ? kmExt2 : "";
+        row.kmExt = kmExt != null ? kmExt : "";
         row.latitude = latitude != null ? latitude : "";
         row.longitude = longitude != null ? longitude : "";
         row.accuracyM = accuracyM != null ? accuracyM : "";
