@@ -86,6 +86,8 @@ public class UhfManager {
         public boolean success;
         public String oldEpc;     // EPC před přepisem (pokud byl tag přečten)
         public String tid;        // TID přečteného tagu
+        /** EPC skutečně zapsané na tag (u režimu TID→EPC shodné s TID). */
+        public String writtenEpc;
         public String message;
         public boolean usedPresetPassword;
         /** Preset heslo, které zápis uspělo; null pokud stačilo uživatelské heslo. */
@@ -125,6 +127,7 @@ public class UhfManager {
             r.success = attempt.success;
             r.usedPresetPassword = attempt.usedPresetPassword;
             r.presetPasswordUsed = attempt.presetPasswordUsed;
+            r.writtenEpc = attempt.success ? newEpc : null;
             r.message = attempt.success
                     ? (attempt.usedPresetPassword ? "EPC zapsáno (preset heslo)." : "EPC zapsáno.")
                     : "Zápis EPC se nezdařil (tag mimo dosah / špatné heslo).";
@@ -132,6 +135,60 @@ public class UhfManager {
         } catch (Exception e) {
             r.success = false;
             r.message = "Chyba zápisu: " + e.getMessage();
+            return r;
+        }
+    }
+
+    /**
+     * Přečte tag v dosahu, použije jeho TID jako nové EPC a zapíše ho.
+     * Výchozí režim zápisu – jedním krokem načtení i přepis.
+     */
+    public synchronized WriteResult writeEpcFromTid(String accessPwd) {
+        WriteResult r = new WriteResult();
+        if (!ready || reader == null) {
+            r.message = "Čtečka není připravena.";
+            return r;
+        }
+        accessPwd = normalizePwd(accessPwd);
+
+        try {
+            UHFTAGInfo info = reader.inventorySingleTag();
+            if (info == null) {
+                r.message = "Tag nenalezen v dosahu.";
+                return r;
+            }
+            r.oldEpc = info.getEPC();
+            r.tid = info.getTid();
+            if (r.tid == null || r.tid.isEmpty()) {
+                r.tid = readTidWithPresetFallback(accessPwd);
+            }
+            if (r.tid == null || r.tid.isEmpty()) {
+                r.message = "TID tagu se nepodařilo přečíst.";
+                return r;
+            }
+
+            String newEpc = normalizeTidToEpc(r.tid);
+            if (newEpc == null) {
+                r.message = "TID nelze použít jako EPC (neplatný hex).";
+                return r;
+            }
+            r.tid = newEpc;
+
+            PwdWriteAttempt attempt = writeDataWithPresetFallback(
+                    accessPwd, BANK_EPC, EPC_PTR, EPC_LEN, newEpc);
+            r.success = attempt.success;
+            r.usedPresetPassword = attempt.usedPresetPassword;
+            r.presetPasswordUsed = attempt.presetPasswordUsed;
+            r.writtenEpc = attempt.success ? newEpc : null;
+            r.message = attempt.success
+                    ? (attempt.usedPresetPassword
+                            ? "EPC = TID zapsáno (preset heslo)."
+                            : "EPC = TID zapsáno.")
+                    : "Zápis EPC (TID) se nezdařil (tag mimo dosah / špatné heslo).";
+            return r;
+        } catch (Exception e) {
+            r.success = false;
+            r.message = "Chyba zápisu TID→EPC: " + e.getMessage();
             return r;
         }
     }
@@ -286,5 +343,22 @@ public class UhfManager {
 
     private static boolean isValidHexPwd(String pwd) {
         return pwd != null && pwd.matches("[0-9A-Fa-f]{8}");
+    }
+
+    /** Normalizuje TID na 24 hex znaků pro zápis do EPC banky. */
+    private static String normalizeTidToEpc(String tid) {
+        if (tid == null) return null;
+        StringBuilder hex = new StringBuilder();
+        for (int i = 0; i < tid.length(); i++) {
+            char c = Character.toUpperCase(tid.charAt(i));
+            boolean isHex = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F');
+            if (!isHex) continue;
+            hex.append(c);
+        }
+        if (hex.length() == 0) return null;
+        String s = hex.toString();
+        if (s.length() > 24) s = s.substring(0, 24);
+        while (s.length() < 24) s = s + "0";
+        return s;
     }
 }
