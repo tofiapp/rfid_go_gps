@@ -19,7 +19,6 @@ public final class CsvRecordBuilder {
             int cast,
             String poloha,
             String roId,
-            String kmExt,
             String latitude,
             String longitude,
             String accuracyM,
@@ -34,8 +33,6 @@ public final class CsvRecordBuilder {
         row.cast = String.valueOf(cast);
         row.poloha = poloha != null ? poloha : "";
         row.roId = roId != null ? roId : "";
-        // logika KM_EXT
-        row.kmExt = kmExt != null ? kmExt : "";
         row.latitude = latitude != null ? latitude : "";
         row.longitude = longitude != null ? longitude : "";
         row.accuracyM = accuracyM != null ? accuracyM : "";

@@ -53,7 +53,6 @@ import com.google.android.material.button.MaterialButtonToggleGroup;
 
 import com.rfidw.app.R;
 import com.rfidw.app.csv.CsvRecordBuilder;
-import com.rfidw.app.kmext.KmExtLogic;
 import com.rfidw.app.csv.CsvStore;
 import com.rfidw.app.data.DzsDatabase;
 import com.rfidw.app.data.Tudu;
@@ -3588,11 +3587,11 @@ public class MainActivity extends AppCompatActivity {
             ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
             lastChip1WriteCount = 1;
 
-            final CsvStore.Row row;
             if (cast == 1 && currentVyhybka != null
                     && currentVyhybka.getRoBranches().size() >= 2) {
-                row = buildCsvRow(epc24, tid, null);
+                CsvStore.Row row = buildCsvRow(epc24, tid, null);
                 row.roId = joinRoIds(currentVyhybka.getRoBranches());
+                csvStore.upsert(row);
             } else {
                 Tudu.Vyhybka.RoBranch branch = resolveBranchForCast(cast);
                 if (cast >= 2 && isDualRoVyhybka(currentVyhybka) && !isCastBranchSelected()) {
@@ -3609,21 +3608,11 @@ public class MainActivity extends AppCompatActivity {
                     toast(getString(R.string.cast_branch_select));
                     return;
                 }
-                row = buildCsvRow(epc24, tid, branch);
+                CsvStore.Row row = buildCsvRow(epc24, tid, branch);
+                csvStore.upsert(row);
             }
-            final LocationCache.Snapshot gps = locationCache != null
-                    ? locationCache.getSnapshot() : LocationCache.Snapshot.empty();
-            io.execute(() -> {
-                try {
-                    // logika KM_EXT – na pozadí, aby neblokovala zápis tagu
-                    KmExtLogic.attachToRow(dzsDatabase, row, gps);
-                    csvStore.upsert(row);
-                    persistCsvAsync();
-                    ui.post(this::refreshCsvTable);
-                } catch (Exception e) {
-                    ui.post(() -> toast("CSV: " + e.getMessage()));
-                }
-            });
+            persistCsvAsync();
+            refreshCsvTable();
         } catch (Exception e) {
             toast("CSV: " + e.getMessage());
         }
@@ -3656,7 +3645,6 @@ public class MainActivity extends AppCompatActivity {
                 epc.cast,
                 branch != null ? branch.poloha : "",
                 branch != null ? branch.roId : "",
-                "",
                 latitude,
                 longitude,
                 accuracyM,
