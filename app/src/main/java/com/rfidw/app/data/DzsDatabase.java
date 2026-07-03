@@ -1943,6 +1943,18 @@ public class DzsDatabase implements Closeable {
             pairIds = Collections.singletonList(new String[]{null, null});
         }
 
+        double minLat = latitude - PROXIMITY_BBOX_DEG;
+        double maxLat = latitude + PROXIMITY_BBOX_DEG;
+        double minLon = longitude - PROXIMITY_BBOX_DEG;
+        double maxLon = longitude + PROXIMITY_BBOX_DEG;
+        String latCol = gpsColumns.latitude;
+        String lonCol = gpsColumns.longitude;
+        String bboxClause = " AND " + latCol + " BETWEEN ? AND ? AND " + lonCol + " BETWEEN ? AND ?";
+        String[] bboxArgs = {
+                String.valueOf(minLat), String.valueOf(maxLat),
+                String.valueOf(minLon), String.valueOf(maxLon)
+        };
+
         String bestKmExt = "";
         double bestDist = Double.MAX_VALUE;
         synchronized (dbQueryLock) {
@@ -1950,17 +1962,20 @@ public class DzsDatabase implements Closeable {
                 String sql;
                 String[] args;
                 if (pair[0] != null && pair[1] != null) {
-                    sql = "SELECT " + kmExtCol + ", " + gpsColumns.latitude + ", "
-                            + gpsColumns.longitude + " FROM " + TABLE_GPS_KM
+                    sql = "SELECT " + kmExtCol + ", " + latCol + ", " + lonCol
+                            + " FROM " + TABLE_GPS_KM
                             + " WHERE " + gpsColumns.superZId + " = ? AND "
                             + gpsColumns.superDId + " = ? AND TRIM(CAST("
-                            + gpsColumns.roId + " AS TEXT)) = ?";
-                    args = new String[]{pair[0], pair[1], trimmedRoId};
+                            + gpsColumns.roId + " AS TEXT)) = ?" + bboxClause;
+                    args = new String[]{pair[0], pair[1], trimmedRoId,
+                            bboxArgs[0], bboxArgs[1], bboxArgs[2], bboxArgs[3]};
                 } else {
-                    sql = "SELECT " + kmExtCol + ", " + gpsColumns.latitude + ", "
-                            + gpsColumns.longitude + " FROM " + TABLE_GPS_KM
-                            + " WHERE TRIM(CAST(" + gpsColumns.roId + " AS TEXT)) = ?";
-                    args = new String[]{trimmedRoId};
+                    sql = "SELECT " + kmExtCol + ", " + latCol + ", " + lonCol
+                            + " FROM " + TABLE_GPS_KM
+                            + " WHERE TRIM(CAST(" + gpsColumns.roId + " AS TEXT)) = ?"
+                            + bboxClause;
+                    args = new String[]{trimmedRoId,
+                            bboxArgs[0], bboxArgs[1], bboxArgs[2], bboxArgs[3]};
                 }
                 try (Cursor c = db.rawQuery(sql, args)) {
                     while (c.moveToNext()) {
