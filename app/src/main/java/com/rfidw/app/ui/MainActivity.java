@@ -196,7 +196,7 @@ public class MainActivity extends AppCompatActivity {
     private MaterialButton btnGpsReloadLocation;
     private TextView tvTuduModeHint;
     private boolean tuduListFullyLoaded;
-    private boolean castBranchHlavni = true;
+    private boolean castBranchHlavni;
     private int lastCastBranchDefault = -1;
     private int lastChip1WriteCount = 1;
     private Boolean powerPresetInKoleji;
@@ -1496,9 +1496,10 @@ public class MainActivity extends AppCompatActivity {
             tvCastHintPart.setVisibility(View.GONE);
             castBranchGroup.setVisibility(View.VISIBLE);
             if (epc.cast != lastCastBranchDefault) {
+                int previousCast = lastCastBranchDefault;
                 lastCastBranchDefault = epc.cast;
-                updateDefaultCastBranch(epc.cast);
-            } else {
+                updateDefaultCastBranch(epc.cast, previousCast);
+            } else if (isCastBranchSelected()) {
                 int checkedId = castBranchHlavni
                         ? R.id.btnCastHlavni : R.id.btnCastVedlejsi;
                 if (castBranchGroup.getCheckedButtonId() != checkedId) {
@@ -2097,8 +2098,7 @@ public class MainActivity extends AppCompatActivity {
     private void setupCastBranchSelection() {
         castBranchGroup = findViewById(R.id.castBranchGroup);
         if (castBranchGroup == null) return;
-        castBranchGroup.setSelectionRequired(true);
-        castBranchGroup.check(R.id.btnCastHlavni);
+        castBranchGroup.setSelectionRequired(false);
         castBranchGroup.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
             if (!isChecked) return;
             castBranchHlavni = checkedId == R.id.btnCastHlavni;
@@ -2106,11 +2106,23 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void resetCastBranchSelection() {
-        castBranchHlavni = true;
+        castBranchHlavni = false;
         lastCastBranchDefault = -1;
+        clearCastBranchSelection();
+    }
+
+    private void clearCastBranchSelection() {
         if (castBranchGroup != null) {
-            castBranchGroup.check(R.id.btnCastHlavni);
+            castBranchGroup.clearChecked();
         }
+    }
+
+    private boolean requiresCastBranchSelection() {
+        return epc.cast >= 2 && currentVyhybka != null && isDualRoVyhybka(currentVyhybka);
+    }
+
+    private boolean isCastBranchSelected() {
+        return castBranchGroup != null && castBranchGroup.getCheckedButtonId() != View.NO_ID;
     }
 
     private boolean isDualRoVyhybka(Tudu.Vyhybka v) {
@@ -2128,21 +2140,25 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void updateDefaultCastBranch(int cast) {
+    private void updateDefaultCastBranch(int cast, int previousCast) {
         if (castBranchGroup == null || currentVyhybka == null || !isDualRoVyhybka(currentVyhybka)) {
             return;
         }
         if (cast == 2) {
-            // Z čipu 3 zpět na 2 – obnovit volbu zrcadlenou z čipu 3
-            if (lastCastBranchDefault == 3) {
+            if (previousCast == 3) {
+                // Z čipu 3 zpět na 2 – obnovit volbu zrcadlenou z čipu 3
                 castBranchHlavni = !castBranchHlavni;
+                castBranchGroup.check(castBranchHlavni ? R.id.btnCastHlavni : R.id.btnCastVedlejsi);
+            } else {
+                clearCastBranchSelection();
             }
-        } else if (cast == 3) {
+        } else if (cast == 3 && previousCast == 2 && isCastBranchSelected()) {
             // Čip 3 = opačná větev než u čipu 2 (hlavní ↔ vedlejší)
             castBranchHlavni = !castBranchHlavni;
+            castBranchGroup.check(castBranchHlavni ? R.id.btnCastHlavni : R.id.btnCastVedlejsi);
+        } else if (cast == 3) {
+            clearCastBranchSelection();
         }
-        int checkedId = castBranchHlavni ? R.id.btnCastHlavni : R.id.btnCastVedlejsi;
-        castBranchGroup.check(checkedId);
     }
 
     private Tudu.Vyhybka.RoBranch resolveBranchForCast(int cast) {
@@ -2153,6 +2169,7 @@ public class MainActivity extends AppCompatActivity {
         if (cast == 1 || !isDualRoVyhybka(currentVyhybka)) {
             return branches.get(0);
         }
+        if (!isCastBranchSelected()) return null;
         Tudu.Vyhybka.RoBranch chosen = castBranchHlavni
                 ? currentVyhybka.findHlavniBranch()
                 : currentVyhybka.findVedlejsiBranch();
@@ -3326,6 +3343,10 @@ public class MainActivity extends AppCompatActivity {
                     } else if (row.poloha != null && !row.poloha.isEmpty()) {
                         castBranchHlavni = Tudu.Vyhybka.RoBranch.isHlavniPoloha(row.poloha);
                     }
+                    if (castBranchGroup != null) {
+                        castBranchGroup.check(castBranchHlavni
+                                ? R.id.btnCastHlavni : R.id.btnCastVedlejsi);
+                    }
                 }
             }
         }
@@ -3574,6 +3595,10 @@ public class MainActivity extends AppCompatActivity {
                 csvStore.upsert(row);
             } else {
                 Tudu.Vyhybka.RoBranch branch = resolveBranchForCast(cast);
+                if (cast >= 2 && isDualRoVyhybka(currentVyhybka) && !isCastBranchSelected()) {
+                    toast(getString(R.string.cast_branch_select));
+                    return;
+                }
                 if (branch == null) {
                     toast(getString(R.string.cast_branch_select));
                     return;
@@ -3878,7 +3903,7 @@ public class MainActivity extends AppCompatActivity {
         StringBuilder sb = new StringBuilder();
         for (Tudu.Vyhybka.RoBranch branch : branches) {
             if (branch.roId == null || branch.roId.isEmpty()) continue;
-            if (sb.length() > 0) sb.append(' ');
+            if (sb.length() > 0) sb.append(", ");
             sb.append(branch.roId.trim());
         }
         return sb.toString();
@@ -3938,6 +3963,10 @@ public class MainActivity extends AppCompatActivity {
         if (!requirePowerPreset()) return;
         if (!epc.isValid()) {
             toast("EPC není validní");
+            return;
+        }
+        if (requiresCastBranchSelection() && !isCastBranchSelected()) {
+            toast(getString(R.string.cast_branch_select));
             return;
         }
         if (!uhf.isReady()) {
