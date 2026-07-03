@@ -1,5 +1,7 @@
 package com.rfidw.app.data;
 
+import com.rfidw.app.kmext.KmExtResolver;
+
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteException;
@@ -102,9 +104,16 @@ public class DzsDatabase implements Closeable {
         final Integer castMin;
         final Integer castMax;
         final String poloha;
+        final String kmExtChip1;
+        final String kmExtOther;
 
         RoIndexEntry(String tudu, int vyhybka, String iob, String roId, Integer castMin,
                      Integer castMax, String poloha) {
+            this(tudu, vyhybka, iob, roId, castMin, castMax, poloha, "", "");
+        }
+
+        RoIndexEntry(String tudu, int vyhybka, String iob, String roId, Integer castMin,
+                     Integer castMax, String poloha, String kmExtChip1, String kmExtOther) {
             this.tudu = tudu;
             this.vyhybka = vyhybka;
             this.iob = iob != null ? iob : "";
@@ -112,6 +121,8 @@ public class DzsDatabase implements Closeable {
             this.castMin = castMin;
             this.castMax = castMax;
             this.poloha = poloha != null ? poloha : "";
+            this.kmExtChip1 = kmExtChip1 != null ? kmExtChip1 : "";
+            this.kmExtOther = kmExtOther != null ? kmExtOther : "";
         }
     }
 
@@ -745,7 +756,7 @@ public class DzsDatabase implements Closeable {
                 Integer castMin = ro.castMin >= 0 ? ro.castMin : null;
                 Integer castMax = ro.castMax >= 0 ? ro.castMax : null;
                 RoIndexEntry entry = new RoIndexEntry(ro.tudu, ro.vyhybka, ro.iob, ro.roId,
-                        castMin, castMax, ro.poloha);
+                        castMin, castMax, ro.poloha, ro.kmExtChip1, ro.kmExtOther);
                 mergeRoEntry(ids[0], ids[1], entry);
                 newlyAdded.add(entryRoKey);
                 added++;
@@ -829,7 +840,7 @@ public class DzsDatabase implements Closeable {
                 Integer castMin = ro.castMin >= 0 ? ro.castMin : null;
                 Integer castMax = ro.castMax >= 0 ? ro.castMax : null;
                 entries.add(new RoIndexEntry(ro.tudu, ro.vyhybka, ro.iob, ro.roId, castMin, castMax,
-                        ro.poloha));
+                        ro.poloha, ro.kmExtChip1, ro.kmExtOther));
             }
             map.put(e.getKey(), entries);
         }
@@ -881,7 +892,7 @@ public class DzsDatabase implements Closeable {
                 int castMin = ro.castMin != null ? ro.castMin : DzsIndexCache.CAST_UNSPECIFIED;
                 int castMax = ro.castMax != null ? ro.castMax : DzsIndexCache.CAST_UNSPECIFIED;
                 entries.add(new DzsIndexCache.RoEntry(ro.tudu, ro.vyhybka, ro.iob, ro.roId, castMin,
-                        castMax, ro.poloha));
+                        castMax, ro.poloha, ro.kmExtChip1, ro.kmExtOther));
             }
             map.put(e.getKey(), entries);
         }
@@ -980,7 +991,7 @@ public class DzsDatabase implements Closeable {
                 Tudu.Vyhybka v = tudu.findOrCreate(ro.vyhybka, ro.iob);
                 if (ro.castMin != null) v.castMin = ro.castMin;
                 if (ro.castMax != null) v.castMax = ro.castMax;
-                v.addRoBranch(ro.roId, ro.poloha);
+                v.addRoBranch(ro.roId, ro.poloha, ro.kmExtChip1, ro.kmExtOther);
             }
         }
         List<Tudu> out = new ArrayList<>(map.values());
@@ -998,6 +1009,7 @@ public class DzsDatabase implements Closeable {
         if (roColumns.poloha != null) sql.append(", ").append(roColumns.poloha);
         if (roColumns.iob != null) sql.append(", ").append(roColumns.iob);
         sql.append(", ").append(roColumns.roId);
+        roColumns.appendKmExtColumns(sql, null);
         sql.append(" FROM ").append(TABLE_RO_TPI)
                 .append(" WHERE ").append(roColumns.tudu).append(" IS NOT NULL AND ")
                 .append(roColumns.tudu).append(" <> ''")
@@ -1049,11 +1061,13 @@ public class DzsDatabase implements Closeable {
         String poloha = roColumns.poloha != null ? readTrimmedText(c, col++) : null;
         String iob = roColumns.iob != null ? readIobLetter(c, col++) : null;
         String roId = readId(c, col++);
+        KmExtResolver.Values kmExt = readKmExtValues(c, col);
+        if (roColumns.hasKmExtColumns()) col += 3;
         Tudu.Vyhybka v = tudu.findOrCreate(cislo, iob);
         CastRange cast = resolveCastRange(cmin, cmax, poloha);
         if (cast.castMin != null) v.castMin = cast.castMin;
         if (cast.castMax != null) v.castMax = cast.castMax;
-        v.addRoBranch(roId, poloha);
+        v.addRoBranch(roId, poloha, kmExt.chip1, kmExt.other);
     }
 
     /** Vrátí RO větve výhybky z indexu nebo SQL dotazu. */
@@ -1067,7 +1081,7 @@ public class DzsDatabase implements Closeable {
             for (RoIndexEntry ro : entries) {
                 if (!tuduCode.equals(ro.tudu) || ro.vyhybka != cislo) continue;
                 if (!normIob.isEmpty() && !normIob.equals(ro.iob)) continue;
-                found.add(new Tudu.Vyhybka.RoBranch(ro.roId, ro.poloha));
+                found.add(new Tudu.Vyhybka.RoBranch(ro.roId, ro.poloha, ro.kmExtChip1, ro.kmExtOther));
             }
         }
         if (!found.isEmpty()) return dedupeBranches(found);
@@ -1077,6 +1091,7 @@ public class DzsDatabase implements Closeable {
                 .append(roColumns.roId).append(", ");
         if (roColumns.poloha != null) sql.append(roColumns.poloha);
         else sql.append("''");
+        roColumns.appendKmExtColumns(sql, null);
         sql.append(" FROM ").append(TABLE_RO_TPI)
                 .append(" WHERE ").append(roColumns.tudu).append(" = ?")
                 .append(" AND ").append(vyhybkaExpr).append(" = ?");
@@ -1091,8 +1106,18 @@ public class DzsDatabase implements Closeable {
         try (Cursor c = db.rawQuery(sql.toString(), args.toArray(new String[0]))) {
             while (c.moveToNext()) {
                 String roId = readId(c, 0);
-                String poloha = roColumns.poloha != null ? readTrimmedText(c, 1) : "";
-                if (roId != null) found.add(new Tudu.Vyhybka.RoBranch(roId, poloha));
+                int col = 1;
+                String poloha;
+                if (roColumns.poloha != null) {
+                    poloha = readTrimmedText(c, col++);
+                } else {
+                    col++;
+                    poloha = "";
+                }
+                KmExtResolver.Values kmExt = readKmExtValues(c, col);
+                if (roId != null) {
+                    found.add(new Tudu.Vyhybka.RoBranch(roId, poloha, kmExt.chip1, kmExt.other));
+                }
             }
         } catch (Exception ignored) {
         }
@@ -1481,6 +1506,7 @@ public class DzsDatabase implements Closeable {
         if (roColumns.castMax != null) sql.append(", ro.").append(roColumns.castMax);
         if (roColumns.poloha != null) sql.append(", ro.").append(roColumns.poloha);
         if (roColumns.iob != null) sql.append(", ro.").append(roColumns.iob);
+        roColumns.appendKmExtColumns(sql, "ro");
         sql.append(", g.lat, g.lon");
         sql.append(" FROM ").append(groupedGps);
         sql.append(" INNER JOIN ").append(TABLE_RO_TPI).append(" ro ON g.super_z_id = ro.")
@@ -1519,13 +1545,15 @@ public class DzsDatabase implements Closeable {
                 Integer castMax = roColumns.castMax != null ? readInt(c, col++) : null;
                 String poloha = roColumns.poloha != null ? readTrimmedText(c, col++) : null;
                 String iob = roColumns.iob != null ? readIobLetter(c, col++) : null;
+                KmExtResolver.Values kmExt = readKmExtValues(c, col);
+                if (roColumns.hasKmExtColumns()) col += 3;
                 Double lat = readDouble(c, col++);
                 Double lon = readDouble(c, col++);
                 if (lat == null || lon == null) continue;
 
                 CastRange cast = resolveCastRange(castMin, castMax, poloha);
                 RoIndexEntry entry = new RoIndexEntry(tudu, vyhybka, iob, roId, cast.castMin,
-                        cast.castMax, poloha);
+                        cast.castMax, poloha, kmExt.chip1, kmExt.other);
                 String entryRoKey = roKey(superZId, superDId, roId);
                 if (!seenRoKeys.add(entryRoKey)) continue;
                 localRoByPair.computeIfAbsent(pairKey(superZId, superDId), k -> new ArrayList<>())
@@ -1559,6 +1587,7 @@ public class DzsDatabase implements Closeable {
         if (roColumns.castMax != null) sql.append(", ").append(roColumns.castMax);
         if (roColumns.poloha != null) sql.append(", ").append(roColumns.poloha);
         if (roColumns.iob != null) sql.append(", ").append(roColumns.iob);
+        roColumns.appendKmExtColumns(sql, null);
         sql.append(" FROM ").append(TABLE_RO_TPI)
                 .append(" WHERE ").append(roColumns.tudu).append(" IS NOT NULL AND ")
                 .append(roColumns.tudu).append(" <> ''")
@@ -1583,9 +1612,11 @@ public class DzsDatabase implements Closeable {
                 Integer castMax = roColumns.castMax != null ? readInt(c, col++) : null;
                 String poloha = roColumns.poloha != null ? readTrimmedText(c, col++) : null;
                 String iob = roColumns.iob != null ? readIobLetter(c, col++) : null;
+                KmExtResolver.Values kmExt = readKmExtValues(roColumns, c, col);
+                if (roColumns.hasKmExtColumns()) col += 3;
                 CastRange cast = resolveCastRange(castMin, castMax, poloha);
                 RoIndexEntry entry = new RoIndexEntry(tudu, vyhybka, iob, roId, cast.castMin,
-                        cast.castMax, poloha);
+                        cast.castMax, poloha, kmExt.chip1, kmExt.other);
                 String key = pairKey(superZId, superDId);
                 byPairKey.computeIfAbsent(key, k -> new ArrayList<>()).add(entry);
                 byRoKey.put(roKey(superZId, superDId, roId), entry);
@@ -1761,6 +1792,18 @@ public class DzsDatabase implements Closeable {
         }
     }
 
+    private static KmExtResolver.Values readKmExtValues(RoColumns roColumns, Cursor c, int col) {
+        if (!roColumns.hasKmExtColumns()) {
+            return KmExtResolver.Values.empty();
+        }
+        return KmExtResolver.fromOdDoKmRef(
+                readDouble(c, col), readDouble(c, col + 1), readDouble(c, col + 2));
+    }
+
+    private KmExtResolver.Values readKmExtValues(Cursor c, int col) {
+        return readKmExtValues(roColumns, c, col);
+    }
+
     private static double haversineM(double lat1, double lon1, double lat2, double lon2) {
         double r = 6_371_000.0;
         double dLat = Math.toRadians(lat2 - lat1);
@@ -1812,10 +1855,13 @@ public class DzsDatabase implements Closeable {
         final String poloha;
         final String iob;
         final String roId;
+        final String od;
+        final String doKm;
+        final String kmRef;
 
         RoColumns(String superZId, String superDId, String tudu, String vyhybka,
                   String vyhybkaFallback, String castMin, String castMax, String poloha,
-                  String iob, String roId) {
+                  String iob, String roId, String od, String doKm, String kmRef) {
             this.superZId = superZId;
             this.superDId = superDId;
             this.tudu = tudu;
@@ -1826,6 +1872,22 @@ public class DzsDatabase implements Closeable {
             this.poloha = poloha;
             this.iob = iob;
             this.roId = roId;
+            this.od = od;
+            this.doKm = doKm;
+            this.kmRef = kmRef;
+        }
+
+        boolean hasKmExtColumns() {
+            return od != null && doKm != null && kmRef != null;
+        }
+
+        void appendKmExtColumns(StringBuilder sql, String tableAlias) {
+            if (!hasKmExtColumns()) return;
+            String prefix = tableAlias == null || tableAlias.isEmpty()
+                    ? "" : tableAlias + ".";
+            sql.append(", ").append(prefix).append(od)
+                    .append(", ").append(prefix).append(doKm)
+                    .append(", ").append(prefix).append(kmRef);
         }
 
         void appendPolohaFilter(StringBuilder sql, String tableAlias) {
@@ -1877,7 +1939,10 @@ public class DzsDatabase implements Closeable {
                     findOptionalColumn(cols, "CAST_MAX", "CASTMAX"),
                     findOptionalColumn(cols, "POLOHA"),
                     findOptionalColumn(cols, "IOB"),
-                    requireColumn(cols, "RO_ID")
+                    requireColumn(cols, "RO_ID"),
+                    findOptionalColumn(cols, "OD"),
+                    findOptionalColumn(cols, "DO"),
+                    findOptionalColumn(cols, "KM_REF", "KMREF")
             );
         }
     }

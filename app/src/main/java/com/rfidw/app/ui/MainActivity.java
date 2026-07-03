@@ -726,7 +726,7 @@ public class MainActivity extends AppCompatActivity {
                     if (v.castMin > 0) target.castMin = v.castMin;
                     if (v.castMax > 0) target.castMax = v.castMax;
                     for (Tudu.Vyhybka.RoBranch branch : v.getRoBranches()) {
-                        target.addRoBranch(branch.roId, branch.poloha);
+                        target.addRoBranch(branch.roId, branch.poloha, branch.kmExtChip1, branch.kmExtOther);
                     }
                 }
                 return;
@@ -2135,7 +2135,7 @@ public class MainActivity extends AppCompatActivity {
         List<Tudu.Vyhybka.RoBranch> loaded = dzsDatabase.findRoBranchesForVyhybka(
                 tuduCode, v.cislo, v.iob);
         for (Tudu.Vyhybka.RoBranch branch : loaded) {
-            v.addRoBranch(branch.roId, branch.poloha);
+            v.addRoBranch(branch.roId, branch.poloha, branch.kmExtChip1, branch.kmExtOther);
         }
     }
 
@@ -3645,10 +3645,31 @@ public class MainActivity extends AppCompatActivity {
                 epc.cast,
                 branch != null ? branch.poloha : "",
                 branch != null ? branch.roId : "",
+                resolveKmExtForCast(epc.cast, branch),
                 latitude,
                 longitude,
                 accuracyM,
                 gpsTime);
+    }
+
+    /** KM_EXT z OD/DO/KM_REF: čip 1 = KM_REF, čipy 2–3 = druhá hodnota podle RO_ID. */
+    private String resolveKmExtForCast(int cast, Tudu.Vyhybka.RoBranch branch) {
+        if (cast == 1 && currentVyhybka != null
+                && currentVyhybka.getRoBranches().size() >= 2) {
+            return joinKmExtChip1(currentVyhybka.getRoBranches());
+        }
+        if (branch == null) return "";
+        return cast == 1 ? branch.kmExtChip1 : branch.kmExtOther;
+    }
+
+    private static String joinKmExtChip1(List<Tudu.Vyhybka.RoBranch> branches) {
+        StringBuilder sb = new StringBuilder();
+        for (Tudu.Vyhybka.RoBranch branch : branches) {
+            if (branch.kmExtChip1.isEmpty()) continue;
+            if (sb.length() > 0) sb.append(", ");
+            sb.append(branch.kmExtChip1.trim());
+        }
+        return sb.toString();
     }
 
     /** Po dokončení zápisu tagu (EPC samostatně, nebo celý řetězec EPC→heslo→lock). */
