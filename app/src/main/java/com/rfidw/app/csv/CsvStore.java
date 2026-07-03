@@ -20,7 +20,7 @@ import java.util.Set;
  * Výstupní tabulka .CSV.
  *
  * Sloupce:
- *   ID_RFID ; EPC ; TID ; rok ; TUDU ; vyhybka ; cip ; POLOHA ; RO_ID ;
+ *   ID_RFID ; EPC ; TID ; rok ; TUDU ; vyhybka ; cip ; POLOHA ; RO_ID ; KM_EXT ;
  *   LAT ; LON ; accuracy_m ; gps_time
  *
  * Klíčem je ID_RFID – při zápisu stejného ID_RFID se daný řádek přepíše.
@@ -28,7 +28,7 @@ import java.util.Set;
 public class CsvStore {
 
     public static final String[] HEADER = {
-            "ID_RFID", "EPC", "TID", "rok", "TUDU", "vyhybka", "cip", "POLOHA", "RO_ID",
+            "ID_RFID", "EPC", "TID", "rok", "TUDU", "vyhybka", "cip", "POLOHA", "RO_ID", "KM_EXT",
             "LAT", "LON", "accuracy_m", "gps_time"
     };
     private static final String SEP = ";";
@@ -43,6 +43,8 @@ public class CsvStore {
         public String cast;
         public String poloha;
         public String roId;
+        /** logika KM_EXT – nejbližší km bod k GPS při zápisu (viz {@code KmExtLogic}). */
+        public String kmExt;
         public String latitude;
         public String longitude;
         public String accuracyM;
@@ -50,7 +52,7 @@ public class CsvStore {
 
         public String[] toArray() {
             return new String[]{
-                    idRfid, epc, tid, rok, tudu, vyhybka, cast, poloha, roId,
+                    idRfid, epc, tid, rok, tudu, vyhybka, cast, poloha, roId, kmExt,
                     latitude, longitude, accuracyM, gpsTime
             };
         }
@@ -150,6 +152,7 @@ public class CsvStore {
             boolean first = true;
             boolean hasPolohaColumn = false;
             boolean hasRoIdColumn = false;
+            boolean hasKmExtColumn = false;
             while ((line = br.readLine()) != null) {
                 if (line.trim().isEmpty()) continue;
                 String[] c = line.split(SEP, -1);
@@ -160,6 +163,8 @@ public class CsvStore {
                             String name = col.trim();
                             if ("POLOHA".equalsIgnoreCase(name)) hasPolohaColumn = true;
                             if ("RO_ID".equalsIgnoreCase(name)) hasRoIdColumn = true;
+                            // logika KM_EXT
+                            if ("KM_EXT".equalsIgnoreCase(name)) hasKmExtColumn = true;
                         }
                         continue;
                     }
@@ -172,9 +177,18 @@ public class CsvStore {
                 r.tudu = get(c, 4);
                 r.vyhybka = get(c, 5);
                 r.cast = get(c, 6);
-                if (hasPolohaColumn && hasRoIdColumn) {
+                if (hasPolohaColumn && hasRoIdColumn && hasKmExtColumn) {
                     r.poloha = get(c, 7);
                     r.roId = get(c, 8);
+                    r.kmExt = get(c, 9);
+                    r.latitude = get(c, 10);
+                    r.longitude = get(c, 11);
+                    r.accuracyM = get(c, 12);
+                    r.gpsTime = get(c, 13);
+                } else if (hasPolohaColumn && hasRoIdColumn) {
+                    r.poloha = get(c, 7);
+                    r.roId = get(c, 8);
+                    r.kmExt = "";
                     r.latitude = get(c, 9);
                     r.longitude = get(c, 10);
                     r.accuracyM = get(c, 11);
@@ -182,6 +196,7 @@ public class CsvStore {
                 } else if (hasPolohaColumn) {
                     r.poloha = get(c, 7);
                     r.roId = "";
+                    r.kmExt = "";
                     r.latitude = get(c, 8);
                     r.longitude = get(c, 9);
                     r.accuracyM = get(c, 10);
@@ -189,6 +204,7 @@ public class CsvStore {
                 } else {
                     r.poloha = "";
                     r.roId = "";
+                    r.kmExt = "";
                     r.latitude = get(c, 7);
                     r.longitude = get(c, 8);
                     r.accuracyM = get(c, 9);
