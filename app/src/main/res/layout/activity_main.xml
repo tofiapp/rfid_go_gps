@@ -343,7 +343,7 @@
                         android:layout_marginTop="6dp"
                         android:visibility="gone"
                         app:singleSelection="true"
-                        app:selectionRequired="true">
+                        app:selectionRequired="false">
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btnCastHlavni"

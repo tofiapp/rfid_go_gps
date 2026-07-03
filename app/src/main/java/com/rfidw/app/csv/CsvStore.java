@@ -253,12 +253,15 @@ public class CsvStore {
         }
     }
 
-    /** Jedno RO_ID nebo více hodnot oddělených mezerou (čip 1 u dvojvětvé výhybky). */
+    /** Jedno RO_ID nebo více hodnot oddělených „, “ (čip 1 u dvojvětvé výhybky). */
     public static List<String> parseRoIds(String roIdField) {
         if (roIdField == null || roIdField.trim().isEmpty()) {
             return Collections.singletonList("");
         }
-        String[] parts = roIdField.trim().split("\\s+");
+        String trimmed = roIdField.trim();
+        String[] parts = trimmed.contains(",")
+                ? trimmed.split("\\s*,\\s*")
+                : trimmed.split("\\s+");
         List<String> result = new ArrayList<>();
         for (String part : parts) {
             if (!part.isEmpty()) result.add(part);
