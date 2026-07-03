@@ -74,10 +74,20 @@ public class Tudu {
         public static final class RoBranch {
             public final String roId;
             public final String poloha;
+            /** KM_REF (shoduje se s OD nebo DO) – hodnota pro čip 1. */
+            public final String kmExtChip1;
+            /** Druhá z hodnot OD/DO – hodnota pro čipy 2 a 3. */
+            public final String kmExtOther;
 
             public RoBranch(String roId, String poloha) {
+                this(roId, poloha, "", "");
+            }
+
+            public RoBranch(String roId, String poloha, String kmExtChip1, String kmExtOther) {
                 this.roId = roId != null ? roId : "";
                 this.poloha = poloha != null ? poloha : "";
+                this.kmExtChip1 = kmExtChip1 != null ? kmExtChip1 : "";
+                this.kmExtOther = kmExtOther != null ? kmExtOther : "";
             }
 
             /** POLOHA JAx / JCx – hlavní větev. */
@@ -108,12 +118,16 @@ public class Tudu {
         }
 
         public void addRoBranch(String roId, String poloha) {
+            addRoBranch(roId, poloha, "", "");
+        }
+
+        public void addRoBranch(String roId, String poloha, String kmExtChip1, String kmExtOther) {
             if (roId == null || roId.trim().isEmpty()) return;
             String id = roId.trim();
             for (RoBranch existing : roBranches) {
                 if (existing.roId.equals(id)) return;
             }
-            roBranches.add(new RoBranch(id, poloha));
+            roBranches.add(new RoBranch(id, poloha, kmExtChip1, kmExtOther));
         }
 
         public RoBranch findHlavniBranch() {

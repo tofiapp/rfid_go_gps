@@ -21,6 +21,7 @@ import java.util.zip.GZIPOutputStream;
  * Disková cache paměťových indexů DZS databáze.
  * Platnost indexu je vázaná na velikost a SHA-256 obsahu databáze.
  *
+ * Verze 20 přidává KM_EXT odvozené z OD/DO/KM_REF v RO indexu.
  * Verze 18 přidává POLOHA k RO indexu a k předpočítaným GPS souřadnicím výhybek.
  * Verze 17 přidává volitelné IOB písmeno k číslu výhybky (COBJEKT).
  * Verze 16 ukládá RO index (RO_ID) včetně rozsahu částí odvozeného z POLOHA
@@ -29,9 +30,9 @@ import java.util.zip.GZIPOutputStream;
 final class DzsIndexCache {
 
     private static final int MAGIC = 0x445A5349; // "DZSI"
-    private static final int VERSION = 18;
+    private static final int VERSION = 20;
     /** Cache indexu okolí GPS (bbox ±0,04° ~4 km). */
-    private static final int PROXIMITY_VERSION = 19;
+    private static final int PROXIMITY_VERSION = 20;
     private static final int VERSION_LEGACY_V16 = 16;
     private static final int VERSION_LEGACY_V14 = 14;
     private static final int VERSION_LEGACY_V13 = 13;
@@ -47,9 +48,16 @@ final class DzsIndexCache {
         final int castMin;
         final int castMax;
         final String poloha;
+        final String kmExtChip1;
+        final String kmExtOther;
 
         RoEntry(String tudu, int vyhybka, String iob, String roId, int castMin, int castMax,
                 String poloha) {
+            this(tudu, vyhybka, iob, roId, castMin, castMax, poloha, "", "");
+        }
+
+        RoEntry(String tudu, int vyhybka, String iob, String roId, int castMin, int castMax,
+                String poloha, String kmExtChip1, String kmExtOther) {
             this.tudu = tudu;
             this.vyhybka = vyhybka;
             this.iob = iob != null ? iob : "";
@@ -57,6 +65,8 @@ final class DzsIndexCache {
             this.castMin = castMin;
             this.castMax = castMax;
             this.poloha = poloha != null ? poloha : "";
+            this.kmExtChip1 = kmExtChip1 != null ? kmExtChip1 : "";
+            this.kmExtOther = kmExtOther != null ? kmExtOther : "";
         }
     }
 
@@ -189,6 +199,8 @@ final class DzsIndexCache {
                     out.writeInt(ro.castMin);
                     out.writeInt(ro.castMax);
                     out.writeUTF(ro.poloha);
+                    out.writeUTF(ro.kmExtChip1);
+                    out.writeUTF(ro.kmExtOther);
                 }
             }
             writeVyhybkaGpsStore(out, vyhybkaGpsStore, true);
@@ -250,6 +262,8 @@ final class DzsIndexCache {
                     out.writeInt(ro.castMin);
                     out.writeInt(ro.castMax);
                     out.writeUTF(ro.poloha);
+                    out.writeUTF(ro.kmExtChip1);
+                    out.writeUTF(ro.kmExtOther);
                     written++;
                     if (progress != null && (written % 10_000 == 0 || written == roCount)) {
                         progress.onWritten(written, roCount);
@@ -294,9 +308,12 @@ final class DzsIndexCache {
                 int castMin = in.readInt();
                 int castMax = in.readInt();
                 String poloha = in.readUTF();
+                String kmExtChip1 = in.readUTF();
+                String kmExtOther = in.readUTF();
                 if (roId == null || roId.isEmpty()) continue;
                 hasRoId = true;
-                RoEntry entry = new RoEntry(tudu, vyhybka, iob, roId, castMin, castMax, poloha);
+                RoEntry entry = new RoEntry(tudu, vyhybka, iob, roId, castMin, castMax, poloha,
+                        kmExtChip1, kmExtOther);
                 ro.computeIfAbsent(pairKey, k -> new ArrayList<>()).add(entry);
             }
             if (!hasRoId) return null;
@@ -382,9 +399,12 @@ final class DzsIndexCache {
                 int castMin = in.readInt();
                 int castMax = in.readInt();
                 String poloha = in.readUTF();
+                String kmExtChip1 = in.readUTF();
+                String kmExtOther = in.readUTF();
                 if (roId == null || roId.isEmpty()) continue;
                 hasRoId = true;
-                RoEntry entry = new RoEntry(tudu, vyhybka, iob, roId, castMin, castMax, poloha);
+                RoEntry entry = new RoEntry(tudu, vyhybka, iob, roId, castMin, castMax, poloha,
+                        kmExtChip1, kmExtOther);
                 ro.computeIfAbsent(pairKey, k -> new ArrayList<>()).add(entry);
             }
             if (!hasRoId) return null;

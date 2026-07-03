@@ -14,6 +14,7 @@
     <TextView android:layout_width="50dp" android:layout_height="wrap_content" android:text="cip" android:textStyle="bold" android:textSize="12sp" android:paddingStart="6dp" android:paddingEnd="6dp"/>
     <TextView android:layout_width="60dp" android:layout_height="wrap_content" android:text="POLOHA" android:textStyle="bold" android:textSize="12sp" android:paddingStart="6dp" android:paddingEnd="6dp"/>
     <TextView android:layout_width="70dp" android:layout_height="wrap_content" android:text="RO_ID" android:textStyle="bold" android:textSize="12sp" android:paddingStart="6dp" android:paddingEnd="6dp"/>
+    <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="KM_EXT" android:textStyle="bold" android:textSize="12sp" android:paddingStart="6dp" android:paddingEnd="6dp"/>
     <TextView android:layout_width="100dp" android:layout_height="wrap_content" android:text="LAT" android:textStyle="bold" android:textSize="12sp" android:paddingStart="6dp" android:paddingEnd="6dp"/>
     <TextView android:layout_width="100dp" android:layout_height="wrap_content" android:text="LON" android:textStyle="bold" android:textSize="12sp" android:paddingStart="6dp" android:paddingEnd="6dp"/>
     <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="accuracy_m" android:textStyle="bold" android:textSize="12sp" android:paddingStart="6dp" android:paddingEnd="6dp"/>
