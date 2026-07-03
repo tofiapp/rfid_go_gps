@@ -2217,10 +2217,20 @@ public class MainActivity extends AppCompatActivity {
             return branches.get(0);
         }
         if (!isCastBranchSelected()) return null;
-        Tudu.Vyhybka.RoBranch chosen = castBranchHlavni
-                ? currentVyhybka.findHlavniBranch()
-                : currentVyhybka.findVedlejsiBranch();
-        return chosen != null ? chosen : branches.get(0);
+        if (castBranchHlavni) {
+            Tudu.Vyhybka.RoBranch hlavni = currentVyhybka.findHlavniBranch();
+            if (hlavni != null) return hlavni;
+            for (Tudu.Vyhybka.RoBranch b : branches) {
+                if (!b.isVedlejsi()) return b;
+            }
+        } else {
+            Tudu.Vyhybka.RoBranch vedlejsi = currentVyhybka.findVedlejsiBranch();
+            if (vedlejsi != null) return vedlejsi;
+            for (Tudu.Vyhybka.RoBranch b : branches) {
+                if (b.isVedlejsi()) return b;
+            }
+        }
+        return branches.get(0);
     }
 
     private boolean hasCastWrittenOnAnyBranch(String tuduCode, Tudu.Vyhybka v, int cast) {
@@ -3715,7 +3725,7 @@ public class MainActivity extends AppCompatActivity {
      * RO_ID_1 / RO_ID_2:
      * čip 1 u dvojvětvé výhybky vyplní oba sloupce (hlavní JAx/JCx, vedlejší JBx/JDx),
      * čipy 2–3 jen sloupec odpovídající zvolené větvi.
-     * KM_EXT: čip 1 = KM_REF, čipy 2–3 = druhá hodnota z OD/DO.
+     * KM_EXT: čip 1 = KM_REF (jednou, shodné pro obě větve), čipy 2–3 = druhá hodnota z OD/DO.
      */
     private RoKmColumns resolveRoKmColumns(int cast, Tudu.Vyhybka.RoBranch branch) {
         if (currentVyhybka == null) {
@@ -3743,20 +3753,19 @@ public class MainActivity extends AppCompatActivity {
     /** KM_EXT z OD/DO/KM_REF: čip 1 = KM_REF, čipy 2–3 = druhá hodnota podle RO_ID. */
     private String resolveKmExtForCast(int cast, Tudu.Vyhybka.RoBranch branch) {
         if (cast == 1 && currentVyhybka != null && isDualRoVyhybka(currentVyhybka)) {
-            return joinKmExtChip1(currentVyhybka.getRoBranches());
+            return sharedKmExtChip1(currentVyhybka.getRoBranches());
         }
         if (branch == null) return "";
-        return cast == 1 ? branch.kmExtChip1 : branch.kmExtOther;
+        if (cast == 1) return branch.kmExtChip1;
+        return branch.kmExtOther.isEmpty() ? branch.kmExtChip1 : branch.kmExtOther;
     }
 
-    private static String joinKmExtChip1(List<Tudu.Vyhybka.RoBranch> branches) {
-        StringBuilder sb = new StringBuilder();
+    /** U čipu 1 je KM_REF pro obě větve stejný – stačí jedna hodnota. */
+    private static String sharedKmExtChip1(List<Tudu.Vyhybka.RoBranch> branches) {
         for (Tudu.Vyhybka.RoBranch b : branches) {
-            if (b.kmExtChip1.isEmpty()) continue;
-            if (sb.length() > 0) sb.append(", ");
-            sb.append(b.kmExtChip1.trim());
+            if (!b.kmExtChip1.isEmpty()) return b.kmExtChip1.trim();
         }
-        return sb.toString();
+        return "";
     }
 
     /** Po dokončení zápisu tagu (EPC samostatně, nebo celý řetězec EPC→heslo→lock). */
