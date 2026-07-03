@@ -3346,7 +3346,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void applyRowToEpc(CsvStore.Row row) {
-        epc.year = row.rok;
         epc.tudu = row.tudu;
         epc.vyhybka = parseInt(row.vyhybka, epc.vyhybka);
         epc.cast = parseInt(row.cast, epc.cast);
@@ -3366,34 +3365,31 @@ public class MainActivity extends AppCompatActivity {
             break;
         }
         if (currentTudu != null && currentVyhybka != null) {
-            if (!row.roId.isEmpty()) {
-                List<String> roIds = CsvStore.parseRoIds(row.roId);
-                if (roIds.size() == 1 && !roIds.get(0).isEmpty()) {
-                    currentVyhybka.addRoBranch(roIds.get(0),
+            List<String> roIds = CsvStore.rowRoIds(row);
+            boolean hasRoIds = !(roIds.size() == 1 && roIds.get(0).isEmpty());
+            if (hasRoIds) {
+                if (!row.roId1.isEmpty()) {
+                    currentVyhybka.addRoBranch(row.roId1,
                             row.poloha != null ? row.poloha : "");
-                } else {
-                    for (String roId : roIds) {
-                        if (!roId.isEmpty()) {
-                            currentVyhybka.addRoBranch(roId, "");
-                        }
-                    }
+                }
+                if (!row.roId2.isEmpty()) {
+                    currentVyhybka.addRoBranch(row.roId2, "");
                 }
             } else {
                 ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
             }
             if (epc.cast >= 2 && isDualRoVyhybka(currentVyhybka)) {
-                if (!row.roId.isEmpty()) {
-                    List<String> roIds = CsvStore.parseRoIds(row.roId);
-                    if (roIds.size() == 1 && !roIds.get(0).isEmpty()) {
-                        Tudu.Vyhybka.RoBranch hlavni = currentVyhybka.findHlavniBranch();
-                        castBranchHlavni = hlavni != null && hlavni.roId.equals(roIds.get(0));
-                    } else if (row.poloha != null && !row.poloha.isEmpty()) {
-                        castBranchHlavni = Tudu.Vyhybka.RoBranch.isHlavniPoloha(row.poloha);
-                    }
-                    if (castBranchGroup != null) {
-                        castBranchGroup.check(castBranchHlavni
-                                ? R.id.btnCastHlavni : R.id.btnCastVedlejsi);
-                    }
+                if (!row.roId1.isEmpty() && row.roId2.isEmpty()) {
+                    Tudu.Vyhybka.RoBranch hlavni = currentVyhybka.findHlavniBranch();
+                    castBranchHlavni = hlavni != null && hlavni.roId.equals(row.roId1);
+                } else if (row.roId1.isEmpty() && !row.roId2.isEmpty()) {
+                    castBranchHlavni = false;
+                } else if (row.poloha != null && !row.poloha.isEmpty()) {
+                    castBranchHlavni = Tudu.Vyhybka.RoBranch.isHlavniPoloha(row.poloha);
+                }
+                if (castBranchGroup != null) {
+                    castBranchGroup.check(castBranchHlavni
+                            ? R.id.btnCastHlavni : R.id.btnCastVedlejsi);
                 }
             }
         }
@@ -3643,30 +3639,24 @@ public class MainActivity extends AppCompatActivity {
             ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
             lastChip1WriteCount = 1;
 
-            if (cast == 1 && currentVyhybka != null
-                    && currentVyhybka.getRoBranches().size() >= 2) {
-                CsvStore.Row row = buildCsvRow(epc24, tid, null);
-                row.roId = joinRoIds(currentVyhybka.getRoBranches());
-                csvStore.upsert(row);
-            } else {
-                Tudu.Vyhybka.RoBranch branch = resolveBranchForCast(cast);
-                if (cast >= 2 && isDualRoVyhybka(currentVyhybka) && !isCastBranchSelected()) {
-                    toast(getString(R.string.cast_branch_select));
-                    return;
-                }
-                if (branch == null) {
-                    toast(getString(R.string.cast_branch_select));
-                    return;
-                }
-                if (cast >= 2 && isDualRoVyhybka(currentVyhybka)
-                        && ((castBranchHlavni && currentVyhybka.findHlavniBranch() == null)
-                        || (!castBranchHlavni && currentVyhybka.findVedlejsiBranch() == null))) {
-                    toast(getString(R.string.cast_branch_select));
-                    return;
-                }
-                CsvStore.Row row = buildCsvRow(epc24, tid, branch);
-                csvStore.upsert(row);
+            Tudu.Vyhybka.RoBranch branch = cast == 1 && isDualRoVyhybka(currentVyhybka)
+                    ? null : resolveBranchForCast(cast);
+            if (cast >= 2 && isDualRoVyhybka(currentVyhybka) && !isCastBranchSelected()) {
+                toast(getString(R.string.cast_branch_select));
+                return;
             }
+            if (cast >= 2 && branch == null) {
+                toast(getString(R.string.cast_branch_select));
+                return;
+            }
+            if (cast >= 2 && isDualRoVyhybka(currentVyhybka)
+                    && ((castBranchHlavni && currentVyhybka.findHlavniBranch() == null)
+                    || (!castBranchHlavni && currentVyhybka.findVedlejsiBranch() == null))) {
+                toast(getString(R.string.cast_branch_select));
+                return;
+            }
+            CsvStore.Row row = buildCsvRow(epc24, tid, branch);
+            csvStore.upsert(row);
             persistCsvAsync();
             refreshCsvTable();
         } catch (Exception e) {
@@ -3691,41 +3681,69 @@ public class MainActivity extends AppCompatActivity {
             gpsUnavailableToastShown = true;
             toast(getString(R.string.gps_unavailable_toast));
         }
+        RoKmColumns roKm = resolveRoKmColumns(epc.cast, branch);
         return CsvRecordBuilder.build(
                 epc.idRfid,
                 epc24,
                 tid,
-                epc.year,
                 epc.tudu,
                 csvVyhybkaLabel(String.valueOf(epc.vyhybka)),
                 epc.cast,
                 branch != null ? branch.poloha : "",
-                branch != null ? branch.roId : "",
-                resolveKmExtForCast(epc.cast, branch),
+                roKm.roId1,
+                roKm.roId2,
+                roKm.kmExt1,
+                roKm.kmExt2,
                 latitude,
                 longitude,
                 accuracyM,
                 gpsTime);
     }
 
-    /** KM_EXT z OD/DO/KM_REF: čip 1 = KM_REF, čipy 2–3 = druhá hodnota podle RO_ID. */
-    private String resolveKmExtForCast(int cast, Tudu.Vyhybka.RoBranch branch) {
-        if (cast == 1 && currentVyhybka != null
-                && currentVyhybka.getRoBranches().size() >= 2) {
-            return joinKmExtChip1(currentVyhybka.getRoBranches());
+    private static final class RoKmColumns {
+        final String roId1;
+        final String roId2;
+        final String kmExt1;
+        final String kmExt2;
+
+        RoKmColumns(String roId1, String roId2, String kmExt1, String kmExt2) {
+            this.roId1 = roId1 != null ? roId1 : "";
+            this.roId2 = roId2 != null ? roId2 : "";
+            this.kmExt1 = kmExt1 != null ? kmExt1 : "";
+            this.kmExt2 = kmExt2 != null ? kmExt2 : "";
         }
-        if (branch == null) return "";
-        return cast == 1 ? branch.kmExtChip1 : branch.kmExtOther;
     }
 
-    private static String joinKmExtChip1(List<Tudu.Vyhybka.RoBranch> branches) {
-        StringBuilder sb = new StringBuilder();
-        for (Tudu.Vyhybka.RoBranch branch : branches) {
-            if (branch.kmExtChip1.isEmpty()) continue;
-            if (sb.length() > 0) sb.append(", ");
-            sb.append(branch.kmExtChip1.trim());
+    /**
+     * RO_ID_1 / RO_ID_2 a KM_EXT_1 / KM_EXT_2:
+     * čip 1 u dvojvětvé výhybky vyplní oba sloupce (hlavní JAx/JCx, vedlejší JBx/JDx),
+     * čipy 2–3 jen sloupec odpovídající zvolené větvi.
+     * KM_EXT: čip 1 = KM_REF, čipy 2–3 = druhá hodnota z OD/DO.
+     */
+    private RoKmColumns resolveRoKmColumns(int cast, Tudu.Vyhybka.RoBranch branch) {
+        if (currentVyhybka == null) {
+            return new RoKmColumns("", "", "", "");
         }
-        return sb.toString();
+        Tudu.Vyhybka.RoBranch hlavni = currentVyhybka.findHlavniBranch();
+        Tudu.Vyhybka.RoBranch vedlejsi = currentVyhybka.findVedlejsiBranch();
+        if (cast == 1 && isDualRoVyhybka(currentVyhybka)) {
+            return new RoKmColumns(
+                    hlavni != null ? hlavni.roId : "",
+                    vedlejsi != null ? vedlejsi.roId : "",
+                    hlavni != null ? hlavni.kmExtChip1 : "",
+                    vedlejsi != null ? vedlejsi.kmExtChip1 : "");
+        }
+        if (branch == null) {
+            return new RoKmColumns("", "", "", "");
+        }
+        String kmExt = cast == 1 ? branch.kmExtChip1 : branch.kmExtOther;
+        if (branch.isHlavni()) {
+            return new RoKmColumns(branch.roId, "", kmExt, "");
+        }
+        if (branch.isVedlejsi()) {
+            return new RoKmColumns("", branch.roId, "", kmExt);
+        }
+        return new RoKmColumns(branch.roId, "", kmExt, "");
     }
 
     /** Po dokončení zápisu tagu (EPC samostatně, nebo celý řetězec EPC→heslo→lock). */
@@ -3973,16 +3991,6 @@ public class MainActivity extends AppCompatActivity {
             if (!written.contains(c)) return c;
         }
         return v.castMin;
-    }
-
-    private static String joinRoIds(List<Tudu.Vyhybka.RoBranch> branches) {
-        StringBuilder sb = new StringBuilder();
-        for (Tudu.Vyhybka.RoBranch branch : branches) {
-            if (branch.roId == null || branch.roId.isEmpty()) continue;
-            if (sb.length() > 0) sb.append(", ");
-            sb.append(branch.roId.trim());
-        }
-        return sb.toString();
     }
 
     private Set<Integer> getWrittenCastsForVyhybka(String tuduCode, Tudu.Vyhybka v) {

@@ -20,15 +20,16 @@ import java.util.Set;
  * Výstupní tabulka .CSV.
  *
  * Sloupce:
- *   ID_RFID ; EPC ; TID ; rok ; TUDU ; vyhybka ; cip ; POLOHA ; RO_ID ; KM_EXT ;
- *   LAT ; LON ; accuracy_m ; gps_time
+ *   ID_RFID ; EPC ; TID ; TUDU ; vyhybka ; cip ; POLOHA ; RO_ID_1 ; RO_ID_2 ;
+ *   KM_EXT_1 ; KM_EXT_2 ; LAT ; LON ; accuracy_m ; gps_time
  *
  * Klíčem je ID_RFID – při zápisu stejného ID_RFID se daný řádek přepíše.
  */
 public class CsvStore {
 
     public static final String[] HEADER = {
-            "ID_RFID", "EPC", "TID", "rok", "TUDU", "vyhybka", "cip", "POLOHA", "RO_ID", "KM_EXT",
+            "ID_RFID", "EPC", "TID", "TUDU", "vyhybka", "cip", "POLOHA",
+            "RO_ID_1", "RO_ID_2", "KM_EXT_1", "KM_EXT_2",
             "LAT", "LON", "accuracy_m", "gps_time"
     };
     private static final String SEP = ";";
@@ -37,13 +38,14 @@ public class CsvStore {
         public String idRfid;
         public String epc;
         public String tid;
-        public String rok;
         public String tudu;
         public String vyhybka;
         public String cast;
         public String poloha;
-        public String roId;
-        public String kmExt;
+        public String roId1;
+        public String roId2;
+        public String kmExt1;
+        public String kmExt2;
         public String latitude;
         public String longitude;
         public String accuracyM;
@@ -51,7 +53,8 @@ public class CsvStore {
 
         public String[] toArray() {
             return new String[]{
-                    idRfid, epc, tid, rok, tudu, vyhybka, cast, poloha, roId, kmExt,
+                    idRfid, epc, tid, tudu, vyhybka, cast, poloha,
+                    roId1, roId2, kmExt1, kmExt2,
                     latitude, longitude, accuracyM, gpsTime
             };
         }
@@ -149,65 +152,18 @@ public class CsvStore {
         try (BufferedReader br = new BufferedReader(new FileReader(file))) {
             String line;
             boolean first = true;
-            boolean hasPolohaColumn = false;
-            boolean hasRoIdColumn = false;
-            boolean hasKmExtColumn = false;
+            CsvFormat format = CsvFormat.CURRENT;
             while ((line = br.readLine()) != null) {
                 if (line.trim().isEmpty()) continue;
                 String[] c = line.split(SEP, -1);
                 if (first) {
                     first = false;
                     if (c.length > 0 && c[0].trim().equalsIgnoreCase("ID_RFID")) {
-                        for (String col : c) {
-                            String name = col.trim();
-                            if ("POLOHA".equalsIgnoreCase(name)) hasPolohaColumn = true;
-                            if ("RO_ID".equalsIgnoreCase(name)) hasRoIdColumn = true;
-                            if ("KM_EXT".equalsIgnoreCase(name)) hasKmExtColumn = true;
-                        }
+                        format = detectFormat(c);
                         continue;
                     }
                 }
-                Row r = new Row();
-                r.idRfid = get(c, 0);
-                r.epc = get(c, 1);
-                r.tid = get(c, 2);
-                r.rok = get(c, 3);
-                r.tudu = get(c, 4);
-                r.vyhybka = get(c, 5);
-                r.cast = get(c, 6);
-                if (hasPolohaColumn && hasRoIdColumn && hasKmExtColumn) {
-                    r.poloha = get(c, 7);
-                    r.roId = get(c, 8);
-                    r.kmExt = get(c, 9);
-                    r.latitude = get(c, 10);
-                    r.longitude = get(c, 11);
-                    r.accuracyM = get(c, 12);
-                    r.gpsTime = get(c, 13);
-                } else if (hasPolohaColumn && hasRoIdColumn) {
-                    r.poloha = get(c, 7);
-                    r.roId = get(c, 8);
-                    r.kmExt = "";
-                    r.latitude = get(c, 9);
-                    r.longitude = get(c, 10);
-                    r.accuracyM = get(c, 11);
-                    r.gpsTime = get(c, 12);
-                } else if (hasPolohaColumn) {
-                    r.poloha = get(c, 7);
-                    r.roId = "";
-                    r.kmExt = "";
-                    r.latitude = get(c, 8);
-                    r.longitude = get(c, 9);
-                    r.accuracyM = get(c, 10);
-                    r.gpsTime = get(c, 11);
-                } else {
-                    r.poloha = "";
-                    r.roId = "";
-                    r.kmExt = "";
-                    r.latitude = get(c, 7);
-                    r.longitude = get(c, 8);
-                    r.accuracyM = get(c, 9);
-                    r.gpsTime = get(c, 10);
-                }
+                Row r = parseDataRow(c, format);
                 if (r.idRfid != null && !r.idRfid.isEmpty()) {
                     rows.put(r.idRfid, r);
                     addToCastIndex(r);
@@ -217,6 +173,137 @@ public class CsvStore {
             rows.clear();
             castsByVyhybkaRo.clear();
         }
+    }
+
+    private static Row parseDataRow(String[] c, CsvFormat format) {
+        Row r = new Row();
+        r.idRfid = get(c, 0);
+        r.epc = get(c, 1);
+        r.tid = get(c, 2);
+        switch (format) {
+            case LEGACY_WITH_ROK:
+                r.tudu = get(c, 4);
+                r.vyhybka = get(c, 5);
+                r.cast = get(c, 6);
+                r.poloha = get(c, 7);
+                migrateLegacyRoId(r, get(c, 8));
+                migrateLegacyKmExt(r, get(c, 9));
+                r.latitude = get(c, 10);
+                r.longitude = get(c, 11);
+                r.accuracyM = get(c, 12);
+                r.gpsTime = get(c, 13);
+                break;
+            case LEGACY_NO_POLOHA:
+                r.tudu = get(c, 3);
+                r.vyhybka = get(c, 4);
+                r.cast = get(c, 5);
+                r.poloha = "";
+                r.roId1 = "";
+                r.roId2 = "";
+                r.kmExt1 = "";
+                r.kmExt2 = "";
+                r.latitude = get(c, 6);
+                r.longitude = get(c, 7);
+                r.accuracyM = get(c, 8);
+                r.gpsTime = get(c, 9);
+                break;
+            case LEGACY_NO_RO_KM:
+                r.tudu = get(c, 3);
+                r.vyhybka = get(c, 4);
+                r.cast = get(c, 5);
+                r.poloha = get(c, 6);
+                r.roId1 = "";
+                r.roId2 = "";
+                r.kmExt1 = "";
+                r.kmExt2 = "";
+                r.latitude = get(c, 7);
+                r.longitude = get(c, 8);
+                r.accuracyM = get(c, 9);
+                r.gpsTime = get(c, 10);
+                break;
+            case LEGACY_SINGLE_RO:
+                r.tudu = get(c, 3);
+                r.vyhybka = get(c, 4);
+                r.cast = get(c, 5);
+                r.poloha = get(c, 6);
+                migrateLegacyRoId(r, get(c, 7));
+                migrateLegacyKmExt(r, get(c, 8));
+                r.latitude = get(c, 9);
+                r.longitude = get(c, 10);
+                r.accuracyM = get(c, 11);
+                r.gpsTime = get(c, 12);
+                break;
+            case CURRENT:
+            default:
+                r.tudu = get(c, 3);
+                r.vyhybka = get(c, 4);
+                r.cast = get(c, 5);
+                r.poloha = get(c, 6);
+                r.roId1 = get(c, 7);
+                r.roId2 = get(c, 8);
+                r.kmExt1 = get(c, 9);
+                r.kmExt2 = get(c, 10);
+                r.latitude = get(c, 11);
+                r.longitude = get(c, 12);
+                r.accuracyM = get(c, 13);
+                r.gpsTime = get(c, 14);
+                break;
+        }
+        return r;
+    }
+
+    private static void migrateLegacyRoId(Row r, String roIdField) {
+        List<String> roIds = parseRoIds(roIdField);
+        if (roIds.isEmpty() || (roIds.size() == 1 && roIds.get(0).isEmpty())) {
+            r.roId1 = "";
+            r.roId2 = "";
+            return;
+        }
+        r.roId1 = roIds.get(0);
+        r.roId2 = roIds.size() > 1 ? roIds.get(1) : "";
+    }
+
+    private static void migrateLegacyKmExt(Row r, String kmExtField) {
+        if (kmExtField == null || kmExtField.trim().isEmpty()) {
+            r.kmExt1 = "";
+            r.kmExt2 = "";
+            return;
+        }
+        String trimmed = kmExtField.trim();
+        String[] parts = trimmed.contains(",")
+                ? trimmed.split("\\s*,\\s*")
+                : new String[]{trimmed};
+        r.kmExt1 = parts.length > 0 ? parts[0].trim() : "";
+        r.kmExt2 = parts.length > 1 ? parts[1].trim() : "";
+    }
+
+    private static CsvFormat detectFormat(String[] header) {
+        boolean hasRok = false;
+        boolean hasPoloha = false;
+        boolean hasRoId1 = false;
+        boolean hasRoId = false;
+        boolean hasKmExt = false;
+        for (String col : header) {
+            String name = col.trim();
+            if ("rok".equalsIgnoreCase(name)) hasRok = true;
+            if ("POLOHA".equalsIgnoreCase(name)) hasPoloha = true;
+            if ("RO_ID_1".equalsIgnoreCase(name)) hasRoId1 = true;
+            if ("RO_ID".equalsIgnoreCase(name)) hasRoId = true;
+            if ("KM_EXT".equalsIgnoreCase(name)) hasKmExt = true;
+        }
+        if (hasRoId1) return CsvFormat.CURRENT;
+        if (hasRok) return CsvFormat.LEGACY_WITH_ROK;
+        if (hasPoloha && hasRoId) return CsvFormat.LEGACY_SINGLE_RO;
+        if (hasPoloha) return CsvFormat.LEGACY_NO_RO_KM;
+        return CsvFormat.LEGACY_NO_POLOHA;
+    }
+
+    private enum CsvFormat {
+        CURRENT,
+        LEGACY_WITH_ROK,
+        LEGACY_SINGLE_RO,
+        LEGACY_NO_RO_KM,
+        LEGACY_NO_POLOHA
     }
 
     private void save() {
@@ -246,7 +333,7 @@ public class CsvStore {
         int cast = parseInt(row.cast, -1);
         int vyhybka = parseInt(row.vyhybka, -1);
         if (row.tudu == null || row.tudu.isEmpty() || vyhybka < 0 || cast < 0) return;
-        for (String roId : parseRoIds(row.roId)) {
+        for (String roId : rowRoIds(row)) {
             castsByVyhybkaRo
                     .computeIfAbsent(vyhybkaRoKey(row.tudu, vyhybka, roId), k -> new HashSet<>())
                     .add(cast);
@@ -257,7 +344,7 @@ public class CsvStore {
         int cast = parseInt(row.cast, -1);
         int vyhybka = parseInt(row.vyhybka, -1);
         if (row.tudu == null || row.tudu.isEmpty() || vyhybka < 0 || cast < 0) return;
-        for (String roId : parseRoIds(row.roId)) {
+        for (String roId : rowRoIds(row)) {
             Set<Integer> casts = castsByVyhybkaRo.get(vyhybkaRoKey(row.tudu, vyhybka, roId));
             if (casts == null) continue;
             casts.remove(cast);
@@ -267,7 +354,16 @@ public class CsvStore {
         }
     }
 
-    /** Jedno RO_ID nebo více hodnot oddělených „, “ (čip 1 u dvojvětvé výhybky). */
+    /** Všechna neprázdná RO_ID z řádku (RO_ID_1, RO_ID_2). */
+    public static List<String> rowRoIds(Row row) {
+        if (row == null) return Collections.singletonList("");
+        List<String> result = new ArrayList<>(2);
+        if (row.roId1 != null && !row.roId1.trim().isEmpty()) result.add(row.roId1.trim());
+        if (row.roId2 != null && !row.roId2.trim().isEmpty()) result.add(row.roId2.trim());
+        return result.isEmpty() ? Collections.singletonList("") : result;
+    }
+
+    /** Jedno RO_ID nebo více hodnot oddělených „, “ (zpětná kompatibilita starého CSV). */
     public static List<String> parseRoIds(String roIdField) {
         if (roIdField == null || roIdField.trim().isEmpty()) {
             return Collections.singletonList("");
