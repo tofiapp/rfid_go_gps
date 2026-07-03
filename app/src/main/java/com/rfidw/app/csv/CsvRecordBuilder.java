@@ -13,13 +13,14 @@ public final class CsvRecordBuilder {
             long idRfid,
             String epc24,
             String tid,
-            String rok,
             String tudu,
             String vyhybkaLabel,
             int cast,
             String poloha,
-            String roId,
-            String kmExt,
+            String roId1,
+            String roId2,
+            String kmExt1,
+            String kmExt2,
             String latitude,
             String longitude,
             String accuracyM,
@@ -28,13 +29,14 @@ public final class CsvRecordBuilder {
         row.idRfid = String.valueOf(idRfid);
         row.epc = epc24 != null ? epc24 : "";
         row.tid = tid != null ? tid : "";
-        row.rok = rok != null ? rok : "";
         row.tudu = tudu != null ? tudu : "";
         row.vyhybka = vyhybkaLabel != null ? vyhybkaLabel : "";
         row.cast = String.valueOf(cast);
         row.poloha = poloha != null ? poloha : "";
-        row.roId = roId != null ? roId : "";
-        row.kmExt = kmExt != null ? kmExt : "";
+        row.roId1 = roId1 != null ? roId1 : "";
+        row.roId2 = roId2 != null ? roId2 : "";
+        row.kmExt1 = kmExt1 != null ? kmExt1 : "";
+        row.kmExt2 = kmExt2 != null ? kmExt2 : "";
         row.latitude = latitude != null ? latitude : "";
         row.longitude = longitude != null ? longitude : "";
         row.accuracyM = accuracyM != null ? accuracyM : "";

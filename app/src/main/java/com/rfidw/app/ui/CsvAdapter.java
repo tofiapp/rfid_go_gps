@@ -38,13 +38,14 @@ public class CsvAdapter extends RecyclerView.Adapter<CsvAdapter.VH> {
         h.cId.setText(r.idRfid);
         h.cEpc.setText(r.epc);
         h.cTid.setText(r.tid);
-        h.cRok.setText(r.rok);
         h.cTudu.setText(r.tudu);
         h.cVyh.setText(r.vyhybka);
         h.cCast.setText(r.cast);
         h.cPoloha.setText(r.poloha);
-        h.cRoId.setText(r.roId);
-        h.cKmExt.setText(r.kmExt);
+        h.cRoId1.setText(r.roId1);
+        h.cRoId2.setText(r.roId2);
+        h.cKmExt1.setText(r.kmExt1);
+        h.cKmExt2.setText(r.kmExt2);
         h.cLat.setText(r.latitude);
         h.cLon.setText(r.longitude);
         h.cAcc.setText(r.accuracyM);
@@ -56,19 +57,21 @@ public class CsvAdapter extends RecyclerView.Adapter<CsvAdapter.VH> {
     public int getItemCount() { return data.size(); }
 
     static class VH extends RecyclerView.ViewHolder {
-        TextView cId, cEpc, cTid, cRok, cTudu, cVyh, cCast, cPoloha, cRoId, cKmExt, cLat, cLon, cAcc, cGpsTime;
+        TextView cId, cEpc, cTid, cTudu, cVyh, cCast, cPoloha;
+        TextView cRoId1, cRoId2, cKmExt1, cKmExt2, cLat, cLon, cAcc, cGpsTime;
         VH(@NonNull View v) {
             super(v);
             cId = v.findViewById(R.id.cId);
             cEpc = v.findViewById(R.id.cEpc);
             cTid = v.findViewById(R.id.cTid);
-            cRok = v.findViewById(R.id.cRok);
             cTudu = v.findViewById(R.id.cTudu);
             cVyh = v.findViewById(R.id.cVyh);
             cCast = v.findViewById(R.id.cCast);
             cPoloha = v.findViewById(R.id.cPoloha);
-            cRoId = v.findViewById(R.id.cRoId);
-            cKmExt = v.findViewById(R.id.cKmExt);
+            cRoId1 = v.findViewById(R.id.cRoId1);
+            cRoId2 = v.findViewById(R.id.cRoId2);
+            cKmExt1 = v.findViewById(R.id.cKmExt1);
+            cKmExt2 = v.findViewById(R.id.cKmExt2);
             cLat = v.findViewById(R.id.cLat);
             cLon = v.findViewById(R.id.cLon);
             cAcc = v.findViewById(R.id.cAcc);
