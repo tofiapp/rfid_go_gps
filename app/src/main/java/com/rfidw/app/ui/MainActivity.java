@@ -760,7 +760,7 @@ public class MainActivity extends AppCompatActivity {
         if (checked >= 0) listView.setItemChecked(checked, true);
 
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Vyberte TUDU")
+                .setTitle("Vyberte UDU")
                 .setView(dialogView)
                 .setNegativeButton("Zrušit", null)
                 .create();
@@ -1819,7 +1819,7 @@ public class MainActivity extends AppCompatActivity {
         CharSequence current = tvSourceFile.getText();
         if (current == null) return;
         String text = current.toString();
-        int sep = text.indexOf("  •  TUDU:");
+        int sep = text.indexOf("  •  UDU:");
         if (sep < 0) return;
         String displayName = text.substring(0, sep);
         int nearby = dzsDatabase.countDistinctTuduNearby();
@@ -2231,7 +2231,7 @@ public class MainActivity extends AppCompatActivity {
         CharSequence current = tvSourceFile.getText();
         if (current == null) return;
         String text = current.toString();
-        int sep = text.indexOf("  •  TUDU:");
+        int sep = text.indexOf("  •  UDU:");
         if (sep < 0) return;
         String displayName = text.substring(0, sep);
         int count = tuduListFullyLoaded ? countDistinctUduInList() : dzsDatabase.countDistinctTudu();
@@ -2886,7 +2886,7 @@ public class MainActivity extends AppCompatActivity {
             }
             ensureGpsForTuduLookup();
             if (dzsDatabase != null && dzsDatabase.isProximityIndexed() && !dzsDatabase.hasProximityData()) {
-                toast("V okolí GPS nebyla nalezena výhybka – zkuste ruční výběr TUDU");
+                toast("V okolí GPS nebyla nalezena výhybka – zkuste ruční výběr UDU");
             } else if (!step1Done && locationCache != null && !locationCache.hasFix()) {
                 if (gpsTestMode) {
                     if (!locationCache.hasTestOverride()) {
@@ -3688,7 +3688,7 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
             if (next == null) {
-                toast("Poslední výhybka v TUDU – cyklus dokončen.");
+                toast("Poslední výhybka v UDU – cyklus dokončen.");
                 return;
             }
         }
@@ -3705,7 +3705,7 @@ public class MainActivity extends AppCompatActivity {
                 return;
             }
         }
-        toast("Poslední výhybka v TUDU – cyklus dokončen.");
+        toast("Poslední výhybka v UDU – cyklus dokončen.");
     }
 
     /** V GPS režimu vrátí nejbližší nedokončenou výhybku v rámci TUDU (podle vzdálenosti). */
