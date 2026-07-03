@@ -65,15 +65,15 @@ jobs:
           echo "name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
           echo "Building version $VERSION_NAME"
 
-      - name: Sestavení debug APK
-        run: ./gradlew assembleDebug --stacktrace
+      - name: Sestavení release APK
+        run: ./gradlew assembleRelease --stacktrace
 
       - name: Nahrání APK jako artefakt
         uses: actions/upload-artifact@v4
         with:
           name: rfid-go-gps-${{ steps.version.outputs.name }}
           path: |
-            app/build/outputs/apk/debug/rfid_go_gps_${{ steps.version.outputs.name }}.apk
+            app/build/outputs/apk/release/rfid_go_gps_${{ steps.version.outputs.name }}.apk
           if-no-files-found: error
 
       - name: Commit a push verze
@@ -95,5 +95,5 @@ jobs:
           name: RFID Go GPS ${{ steps.bump.outputs.version_name }}
           body: Automaticky sestaveno po mergi do main.
           files: |
-            app/build/outputs/apk/debug/rfid_go_gps_${{ steps.bump.outputs.version_name }}.apk
+            app/build/outputs/apk/release/rfid_go_gps_${{ steps.bump.outputs.version_name }}.apk
           make_latest: true

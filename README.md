@@ -136,10 +136,12 @@ Jednotlivé akce (jen EPC, jen heslo, jen zamčení) lze spustit i ručně tlač
 Projekt je standardní Android (Gradle). Otevřete v **Android Studiu** nebo přes Cursor a:
 
 ```bash
-./gradlew assembleDebug
+./gradlew assembleRelease
 ```
 
-APK: `app/build/outputs/apk/debug/rfid_go_gps.apk`
+APK: `app/build/outputs/apk/release/rfid_go_gps_<verze>.apk`
+
+Pro lokální vývoj lze použít i `./gradlew assembleDebug` – oba buildy používají stejný podpis z `keystore.properties`, takže nové APK lze nainstalovat přes starší verzi bez odinstalace.
 
 - `compileSdk 34`, `minSdk 21`, `targetSdk 34`, Java 17, Material 3
 - Android Gradle Plugin **8.5.2**, Gradle **8.7**
@@ -149,12 +151,18 @@ APK: `app/build/outputs/apk/debug/rfid_go_gps.apk`
 
 > Pozn.: Při prvním otevření Android Studio vygeneruje `local.properties` s cestou k SDK.
 
+### Aktualizace na zařízení
+
+Všechna APK (CI i lokální build) jsou podepsána stejným klíčem v `app/keystore/rfid_go_gps_upload.jks` (viz `keystore.properties`). Stačí nainstalovat novější verzi přes stávající – Android ji aktualizuje bez ztráty dat aplikace.
+
+> **Jednorázově:** Pokud máte na čtečce starší APK podepsané jiným (debug) klíčem, je nutné ho jednou odinstalovat a nainstalovat nové release APK. Od té chvíle už aktualizace fungují normálně.
+
 ### CI (GitHub Actions)
 
 Po mergi PR do `main` workflow [`.github/workflows/android.yml`](.github/workflows/android.yml):
 
 1. zvýší verzi v `version.properties`,
-2. sestaví debug APK (`rfid_go_gps_<verze>.apk`),
+2. sestaví release APK (`rfid_go_gps_<verze>.apk`),
 3. nahraje artefakt v Actions,
 4. vytvoří **GitHub Release** s APK ke stažení (záložka *Releases*).
 
