@@ -3588,15 +3588,11 @@ public class MainActivity extends AppCompatActivity {
             ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
             lastChip1WriteCount = 1;
 
+            final CsvStore.Row row;
             if (cast == 1 && currentVyhybka != null
                     && currentVyhybka.getRoBranches().size() >= 2) {
-                CsvStore.Row row = buildCsvRow(epc24, tid, null);
+                row = buildCsvRow(epc24, tid, null);
                 row.roId = joinRoIds(currentVyhybka.getRoBranches());
-                // logika KM_EXT
-                KmExtLogic.attachToRow(dzsDatabase, row,
-                        locationCache != null ? locationCache.getSnapshot()
-                                : LocationCache.Snapshot.empty());
-                csvStore.upsert(row);
             } else {
                 Tudu.Vyhybka.RoBranch branch = resolveBranchForCast(cast);
                 if (cast >= 2 && isDualRoVyhybka(currentVyhybka) && !isCastBranchSelected()) {
@@ -3613,15 +3609,21 @@ public class MainActivity extends AppCompatActivity {
                     toast(getString(R.string.cast_branch_select));
                     return;
                 }
-                CsvStore.Row row = buildCsvRow(epc24, tid, branch);
-                // logika KM_EXT
-                KmExtLogic.attachToRow(dzsDatabase, row,
-                        locationCache != null ? locationCache.getSnapshot()
-                                : LocationCache.Snapshot.empty());
-                csvStore.upsert(row);
+                row = buildCsvRow(epc24, tid, branch);
             }
-            persistCsvAsync();
-            refreshCsvTable();
+            final LocationCache.Snapshot gps = locationCache != null
+                    ? locationCache.getSnapshot() : LocationCache.Snapshot.empty();
+            io.execute(() -> {
+                try {
+                    // logika KM_EXT – na pozadí, aby neblokovala zápis tagu
+                    KmExtLogic.attachToRow(dzsDatabase, row, gps);
+                    csvStore.upsert(row);
+                    persistCsvAsync();
+                    ui.post(this::refreshCsvTable);
+                } catch (Exception e) {
+                    ui.post(() -> toast("CSV: " + e.getMessage()));
+                }
+            });
         } catch (Exception e) {
             toast("CSV: " + e.getMessage());
         }
