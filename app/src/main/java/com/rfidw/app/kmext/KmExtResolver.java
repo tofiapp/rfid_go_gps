@@ -37,7 +37,9 @@ public final class KmExtResolver {
         } else if (nearlyEqual(kmRef, doVal)) {
             other = formatKm(od);
         } else {
-            other = "";
+            // KM_REF nemusí sedět na konec větve (např. střed OD/DO pro GPS) – vezmeme vzdálenější konec
+            other = Math.abs(kmRef - od) >= Math.abs(kmRef - doVal)
+                    ? formatKm(od) : formatKm(doVal);
         }
         return new Values(chip1, other);
     }

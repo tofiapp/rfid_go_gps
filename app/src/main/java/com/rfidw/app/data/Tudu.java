@@ -124,10 +124,23 @@ public class Tudu {
         public void addRoBranch(String roId, String poloha, String kmExtChip1, String kmExtOther) {
             if (roId == null || roId.trim().isEmpty()) return;
             String id = roId.trim();
-            for (RoBranch existing : roBranches) {
-                if (existing.roId.equals(id)) return;
+            String pol = poloha != null ? poloha : "";
+            String km1 = kmExtChip1 != null ? kmExtChip1 : "";
+            String km2 = kmExtOther != null ? kmExtOther : "";
+            for (int i = 0; i < roBranches.size(); i++) {
+                RoBranch existing = roBranches.get(i);
+                if (!existing.roId.equals(id)) continue;
+                String mergedPoloha = existing.poloha.isEmpty() ? pol : existing.poloha;
+                String mergedKm1 = existing.kmExtChip1.isEmpty() ? km1 : existing.kmExtChip1;
+                String mergedKm2 = existing.kmExtOther.isEmpty() ? km2 : existing.kmExtOther;
+                if (!mergedPoloha.equals(existing.poloha)
+                        || !mergedKm1.equals(existing.kmExtChip1)
+                        || !mergedKm2.equals(existing.kmExtOther)) {
+                    roBranches.set(i, new RoBranch(id, mergedPoloha, mergedKm1, mergedKm2));
+                }
+                return;
             }
-            roBranches.add(new RoBranch(id, poloha, kmExtChip1, kmExtOther));
+            roBranches.add(new RoBranch(id, pol, km1, km2));
         }
 
         public RoBranch findHlavniBranch() {
