@@ -109,6 +109,9 @@ public class MainActivity extends AppCompatActivity {
     private static final int WORKFLOW_DONE_DELAY_MS = 1500;
     private static final int POWER_PRESET_KOLEJI_DBM = 16;
     private static final int POWER_PRESET_RUCE_DBM = 1;
+    private static final long DEFAULT_ID_RFID = 400;
+    /** Výchozí NEW PWD v kartě 4 – změňte zde při budoucí úpravě hesla. */
+    private static final String NEW_PWD_PRESET = "11112222";
 
     private final UhfManager uhf = new UhfManager();
     private final EpcModel epc = new EpcModel();
@@ -236,10 +239,15 @@ public class MainActivity extends AppCompatActivity {
         tryAutoLoadDefaultDatabase();
 
         etPower.setText("");
+        etPwdNew.setText(NEW_PWD_PRESET);
 
         epc.idRfid = prefs.getLong("idRfid", -1);
         if (epc.idRfid < 0) {
-            epc.idRfid = getSharedPreferences("rfidgo", MODE_PRIVATE).getLong("idRfid", 1);
+            epc.idRfid = getSharedPreferences("rfidgo", MODE_PRIVATE).getLong("idRfid", DEFAULT_ID_RFID);
+        }
+        if (epc.idRfid < DEFAULT_ID_RFID) {
+            epc.idRfid = DEFAULT_ID_RFID;
+            prefs.edit().putLong("idRfid", epc.idRfid).apply();
         }
         refreshTemplate();
         updateSummary1();
@@ -2082,7 +2090,7 @@ public class MainActivity extends AppCompatActivity {
         if (last == null) return;
 
         applyRowToEpc(last);
-        epc.idRfid = csvStore.getMaxIdRfid() + 1;
+        epc.idRfid = Math.max(DEFAULT_ID_RFID, csvStore.getMaxIdRfid() + 1);
         prefs.edit().putLong("idRfid", epc.idRfid).apply();
         syncCurrentVyhybka();
         if (currentVyhybka != null) {
@@ -2170,6 +2178,12 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean isCastBranchSelected() {
         return castBranchGroup != null && castBranchGroup.getCheckedButtonId() != View.NO_ID;
+    }
+
+    private boolean requireCastBranchSelection() {
+        if (!requiresCastBranchSelection() || isCastBranchSelected()) return true;
+        setActionStatus(getString(R.string.cast_branch_select_status), COLOR_STATUS_WARNING);
+        return false;
     }
 
     private boolean isDualRoVyhybka(Tudu.Vyhybka v) {
@@ -3470,6 +3484,10 @@ public class MainActivity extends AppCompatActivity {
             if (chainWorkflow) onWorkflowFailed(getString(R.string.power_preset_required));
             return;
         }
+        if (!requireCastBranchSelection()) {
+            if (chainWorkflow) onWorkflowFailed(getString(R.string.cast_branch_select_status));
+            return;
+        }
         if (epcTemplateMode && !epc.isValid()) {
             toast("EPC není validní");
             if (chainWorkflow) onWorkflowFailed("EPC není validní");
@@ -3652,17 +3670,17 @@ public class MainActivity extends AppCompatActivity {
             Tudu.Vyhybka.RoBranch branch = cast == 1 && isDualRoVyhybka(currentVyhybka)
                     ? null : resolveBranchForCast(cast);
             if (cast >= 2 && isDualRoVyhybka(currentVyhybka) && !isCastBranchSelected()) {
-                toast(getString(R.string.cast_branch_select));
+                setActionStatus(getString(R.string.cast_branch_select_status), COLOR_STATUS_WARNING);
                 return;
             }
             if (cast >= 2 && branch == null) {
-                toast(getString(R.string.cast_branch_select));
+                setActionStatus(getString(R.string.cast_branch_select_status), COLOR_STATUS_WARNING);
                 return;
             }
             if (cast >= 2 && isDualRoVyhybka(currentVyhybka)
                     && ((castBranchHlavni && currentVyhybka.findHlavniBranch() == null)
                     || (!castBranchHlavni && currentVyhybka.findVedlejsiBranch() == null))) {
-                toast(getString(R.string.cast_branch_select));
+                setActionStatus(getString(R.string.cast_branch_select_status), COLOR_STATUS_WARNING);
                 return;
             }
             CsvStore.Row row = buildCsvRow(epc24, tid, branch);
@@ -4071,10 +4089,7 @@ public class MainActivity extends AppCompatActivity {
             toast("EPC není validní");
             return;
         }
-        if (requiresCastBranchSelection() && !isCastBranchSelected()) {
-            toast(getString(R.string.cast_branch_select));
-            return;
-        }
+        if (!requireCastBranchSelection()) return;
         if (!uhf.isReady()) {
             toast("Čtečka není připravena");
             return;
