@@ -602,6 +602,17 @@ public class MainActivity extends AppCompatActivity {
         mainScroll.post(() -> mainScroll.smoothScrollTo(0, card1.getTop()));
     }
 
+    private void scrollToCastHint() {
+        if (mainScroll == null || castHintBox == null) return;
+        if (castHintBox.getVisibility() != View.VISIBLE) return;
+        mainScroll.post(() -> mainScroll.smoothScrollTo(0, castHintBox.getTop()));
+    }
+
+    private void promptCastBranchSelection() {
+        scrollToCastHint();
+        toast(getString(R.string.cast_branch_select));
+    }
+
     private void showTuduPicker() {
         if (dzsDatabase == null) {
             toast(getString(R.string.db_select_required));
@@ -1365,10 +1376,6 @@ public class MainActivity extends AppCompatActivity {
         if (!shouldShowWorkflowStepIndicators() || workflowRunning || scanDoneAwaitingConfirm) {
             return null;
         }
-        if (requiresCastBranchSelection() && !isCastBranchSelected()) {
-            return new AlternatingStatus(
-                    getString(R.string.cast_branch_select_status), COLOR_STATUS_WARNING);
-        }
         return getWorkflowStepFailStatus();
     }
 
@@ -1380,8 +1387,7 @@ public class MainActivity extends AppCompatActivity {
                     return new AlternatingStatus(
                             getString(R.string.epc_retry_status), COLOR_STATUS_ERROR);
                 case WF_STEP_CSV:
-                    return new AlternatingStatus(
-                            getString(R.string.cast_branch_select_status), COLOR_STATUS_WARNING);
+                    return new AlternatingStatus("chyba CSV", COLOR_STATUS_ERROR);
                 case WF_STEP_PWD:
                     return new AlternatingStatus("chyba hesla", COLOR_STATUS_ERROR);
                 case WF_STEP_LOCK:
@@ -2394,7 +2400,7 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean requireCastBranchSelection() {
         if (!requiresCastBranchSelection() || isCastBranchSelected()) return true;
-        startStatusAlternation(true);
+        promptCastBranchSelection();
         return false;
     }
 
