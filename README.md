@@ -1,156 +1,51 @@
 # RFID Go GPS
 
-Android aplikace (verze **3.97**) pro čtečku **Chainway C5** (vestavěný UHF UART modul, RSCJA/Chainway SDK).
-
-Slouží k **terénnímu načítání UHF tagů** na železničních výhybkách: určení polohy a kontextu z **GPS** a **SQLite databáze DZS**, zápis tagu (EPC, heslo, zamčení), export do **CSV** a záznam GPS polohy čtečky u každého tagu.
-
-> **Souběžná instalace:** `applicationId` je `com.rfidw.app.gps` – aplikaci lze mít nainstalovanou vedle původní **RFID Go** (`com.rfidw.app`) bez vzájemného přepisování dat.
+Android aplikace (verze **3.2**) pro čtečku **Chainway C5** (vestavěný UHF UART modul, RSCJA/Chainway SDK).
+Slouží k **přepisu EPC** UHF tagů podle definované šablony, **zaheslování** a **zamčení** tagů, k **zápisu údajů o tagu do tabulky CSV** a k **záznamu GPS polohy čtečky** při každém tagu.
 
 ---
 
-## Přehled obrazovky
+## Co aplikace umí
 
-Aplikace má **jednu hlavní obrazovku** (`MainActivity`) a vyjížděcí panel **Pokročilé**.
+Hlavní obrazovka vede operátora třemi kroky (**TUDU → Načtení → Hotovo**). Výběr TUDU a výhybky je vždy nahoře; pokročilé funkce (EPC šablona, CSV, heslo, zamčení) jsou ve vyjížděcím panelu **Pokročilé**.
 
-| Oblast | Obsah |
-|--------|-------|
-| Horní lišta | Logo, výkon čtečky, stav operace, GPS souřadnice |
-| Indikátor 3 kroků | **UDU** → **Načtení** → **Hotovo** |
-| Pod-kroky zápisu | přepis EPC → zápis do CSV → zápis hesla → zamčení |
-| Karta UDU · výhybka | databáze, režim GPS/ručně, náhled výběru, výkon |
-| Nápověda čipu | jazyk / levé rameno / pravé rameno; větev hlavní/vedlejší |
-| Poslední záznam | náhled posledního řádku CSV |
-| Panel Pokročilé | CSV, EPC šablona, heslo, zamčení, indexace DB |
+### Průběh práce (3 kroky)
 
----
+| Krok | Název | Popis |
+|------|-------|-------|
+| 1 | TUDU | Vybrána databáze SQLite, TUDU a výhybka (z GPS nebo ručně) |
+| 2 | Načtení | Probíhá zápis EPC, hesla a zamčení tagu |
+| 3 | Hotovo | Tag úspěšně zpracován – potvrzení nebo opakování |
 
-## Co aplikace umí dnes (běžný provoz)
-
-Toto je aktuální způsob práce v terénu – funkce, na které aplikace staví každodenní workflow.
-
-### Typický postup operátora
-
-1. Aplikace automaticky načte databázi **`DZS_PASPORT_TPI.sqlite`** ze složky Stažené soubory (nebo ji vyberete ručně).
-2. **GPS** (nebo testovací režim) určí **UDU** a **výhybku**; podle existujícího CSV se doplní **první chybějící čip**.
-3. Operátor zvolí výkon: **v koleji** (16 dBm) nebo **v ruce** (1 dBm).
-4. U dvojvětvých 3částových výhybek vybere u čipů 2–3 větev **hlavní / vedlejší**.
-5. **Spouště čtečky** spustí celý řetězec jedním stiskem:
-   - zápis EPC (výchozí režim **TID → EPC**) → zápis do CSV → zápis access hesla → zamčení tagu
-6. Dialog **„Načetli jste“** nabídne **Pokračovat** (posun na další čip) nebo **Opakovat** (stejný čip znovu). **Pokračovat** lze potvrdit i spouštěm.
-
-### 1. SQLite databáze DZS a výběr UDU / výhybky / čipu
-
-- Zdroj dat je **SQLite** (`.db` / `.sqlite`) s tabulkami `DZS_SUPERTRA_GPS_KM` a `DZS_SUPER_RO_TPI`.
-- Po spuštění aplikace automaticky hledá **`DZS_PASPORT_TPI.sqlite`** ve složce Stažené soubory (funguje i po přeinstalaci – data aplikace se smažou, soubor ve Stažených zůstane). Podporovány jsou i soubory s `DZS` / `PASPORT` v názvu.
-- Ruční výběr databáze zůstává k dispozici.
-- Podle **aktuální GPS polohy** se najde nejbližší výhybka a příslušný **UDU** (stanice = prvních 5 znaků TUDU). Do EPC a CSV se zapisuje **plný TUDU** včetně 6. znaku (podtyp).
-- Hodnoty se zobrazí v **náhledovém panelu** nahoře (UDU / výhybka / čip).
-- **Režim GPS** (výchozí) vs **Ručně** – přepínač v kartě UDU; volba se ukládá.
-- UDU a výhybku lze kdykoli **ručně změnit** klepnutím na náhled – v GPS režimu se tím vypne automatická aktualizace, dokud nekliknete **Načíst polohu**.
-- Výběr výhybky zohledňuje **již zapsané čipy v CSV** – dokončené výhybky jsou v seznamu zašedlé a nevybíratelné.
-- Při výběru výhybky se automaticky nastaví **první chybějící čip**.
-- **Testovací režim GPS**: simuluje polohu podle souřadnic z databáze – vhodné bez signálu (např. v budově) nebo pro testování. Do CSV se zapíší simulované souřadnice (řádek GPS času začíná `TEST`).
+### 1. Zdroj dat – SQLite databáze a GPS
+- Načte databázi **SQLite** (`.db` / `.sqlite`) s tabulkami `DZS_SUPERTRA_GPS_KM` a `DZS_SUPER_RO_TPI`.
+- Po spuštění automaticky hledá a načte soubor **`DZS_PASPORT_TPI.sqlite`** ve složce Stažené soubory (funguje i po přeinstalaci aplikace – data aplikace se smažou, soubor ve Stažených zůstane). Podporovány jsou i soubory s `DZS` / `PASPORT` v názvu. Ruční výběr zůstává k dispozici.
+- Podle **aktuální GPS polohy** najde nejbližší výhybku. Při indexaci se pro každou výhybku dopředu spáruje střed `OD`/`DO` s nejbližším `KM_EXT` v rámci páru `SUPER_Z_ID`/`SUPER_D_ID` – za běhu stačí hledat mezi předpočítanými souřadnicemi výhybek.
+- Hodnoty se automaticky doplní do **náhledového panelu** nahoře (TUDU / Výhybka / čip).
+- TUDU a výhybku lze kdykoli **ručně změnit** klepnutím na náhledový panel – tím se vypne automatická aktualizace z GPS.
+- Výběr výhybky zohledňuje **již zapsané části v CSV** – dokončené výhybky jsou v seznamu zašedlé a nevybíratelné.
+- Při výběru výhybky se automaticky nastaví **první chybějící část** podle CSV.
+- **Testovací režim GPS** (zaškrtávátko v kartě TUDU): simuluje polohu podle souřadnic výhybek z databáze – vhodné bez signálu GPS (např. v budově) nebo pro testování z libovolné vzdálenosti. Vyberte bod v dialogu *Simulovaná poloha*; **TUDU a výhybka se doplní automaticky** stejným postupem jako u skutečné GPS. Do CSV se zapíší simulované souřadnice (řádek GPS stavu začíná `TEST`).
 
 **Očekávané sloupce**
 
 `DZS_SUPERTRA_GPS_KM`: `SUPER_Z_ID`, `SUPER_D_ID`, `KM_EXT`, souřadnice (`LAT`/`LON` primárně, alternativně `LATITUDE`/`LONGITUDE`, …)
 
-`DZS_SUPER_RO_TPI`: `SUPER_Z_ID`, `SUPER_D_ID`, `TUDU`, `COBJEKT` (číslo výhybky; alternativně `VYHYBKA`, …), `OD`, `DO` (volitelně `CAST_MIN`, `CAST_MAX`, `POLOHA`, `RO_ID`). Řádky s prázdnou `POLOHA` nebo textem `NULL` se při indexaci vyřazují. Pokud chybí `CAST_MAX`, aplikace ho odvodí z prvního písmene `POLOHA`: **J** = 3částová výhybka, **C** = 4částová.
+`DZS_SUPER_RO_TPI`: `SUPER_Z_ID`, `SUPER_D_ID`, `TUDU`, `COBJEKT` (číslo výhybky; alternativně `VYHYBKA`, …), `OD`, `DO` (volitelně `CAST_MIN`, `CAST_MAX`, `POLOHA`). Řádky s prázdnou `POLOHA` nebo textem `NULL` se při indexaci vyřazují. Pokud chybí `CAST_MAX`, aplikace ho odvodí z prvního písmene `POLOHA`: **J** = 3částová výhybka (2 řádky v DB), **C** = 4částová (4 řádky).
 
-Vzorová data (legacy formát CSV/SQL, viz níže) jsou ve složce [`sample_data/`](sample_data).
+Výhybky se stejným `SUPER_Z_ID`/`SUPER_D_ID` se rozliší středem `(OD+DO)/2` oproti `KM_EXT` v GPS tabulce.
 
-**Indexace a cache:** Při otevření databáze se nejdřív indexuje okolí GPS (~4 km), poté běží **plná indexace na pozadí** s diskovou cache podle otisku obsahu souboru. Po restartu aplikace se index znovu načte během desítek sekund. Podrobnosti: [`docs/INDEXACE_DZS.md`](docs/INDEXACE_DZS.md).
+Vzorová databáze je ve složce [`sample_data/`](sample_data).
 
-**Nápověda k čipu** – u 3částových výhybek:
-- čip 1 → *jazyk*
-- čip 2 → *levé rameno*
-- čip 3 → *pravé rameno*
+**Indexace a cache:** Při prvním otevření databáze aplikace sama sestaví index (výhybky + předpočítané souřadnice výhybek přes `KM_EXT`). Výsledek uloží do cache podle otisku obsahu souboru – po restartu aplikace se index znovu načte během desítek sekund, bez opakovaného skenování tabulek. Podrobnosti viz [`docs/INDEXACE_DZS.md`](docs/INDEXACE_DZS.md).
 
-U dvojvětvých výhybek (více `RO_ID` v DB) se u čipů 2–3 vybírá větev **hlavní / vedlejší**.
+**Nápověda k části výhybky** – u výhybek se třemi částmi (1–3) se pod výběrem zobrazí textová nápověda:
+- část 1 → *jazyk*
+- část 2 → *levé rameno*
+- část 3 → *pravé rameno*
 
-### 2. Zápis EPC – režim TID → EPC (výchozí)
-
-V běžném provozu se **nepoužívá 7řádková šablona EPC**. Výchozí režim (**Šablona EPC = OFF**):
-
-- Čtečka načte tag v dosahu, přečte jeho **TID** a zapíše ho jako nové **EPC** (24 hex znaků, bank EPC, ptr 2, Len 6).
-- Jeden krok = načtení i přepis; operátor nemusí nic nastavovat v panelu Pokročilé.
-
-Po úspěšném zápisu se zobrazí původní EPC a TID tagu. Při selhání zápisu s uživatelským heslem se automaticky zkusí **preset hesla** `11223344`, `11112222`.
-
-Po dokončení celého cyklu (spouště nebo ruční potvrzení) se automaticky:
-- zvýší `ID_RFID` o 1 (uloženo v aplikaci, minimum 400),
-- posune **čip** o 1; po dokončení výhybky přejde na **další nedokončenou výhybku** v rámci UDU.
-
-### 3. Tabulka CSV
-
-Po každém zápisu EPC (lze vypnout zaškrtávátkem, výchozí zapnuto) se uloží řádek do `rfid_go_gps_output.csv`:
-
-| Sloupec | Popis |
-|---------|-------|
-| ID_RFID | pořadové číslo tagu |
-| EPC | celých 24 hex znaků |
-| TID | přečtený z tagu |
-| TUDU | plný kód úseku |
-| VYHYBKA | číslo výhybky |
-| CIP | část výhybky (1–4) |
-| POLOHA | kód polohy z DB (např. JA, JB) |
-| RO_ID_1 | první RO_ID větve |
-| RO_ID_2 | druhá RO_ID větve (pokud existuje) |
-| KM_EXT | kilometrový bod odvozený z OD/DO/KM_REF |
-| LAT | GPS šířka čtečky |
-| LON | GPS délka čtečky |
-| ACCURACY_M | přesnost GPS v metrech |
-| GPS_TIME | čas měření (`yyyy-MM-dd HH:mm:ss`; v testovacím režimu prefix `TEST`) |
-
-Při zápisu stejného `ID_RFID` se daný řádek **přepíše**.
-Tabulku lze **sdílet / exportovat** nebo **vymazat poslední záznam** (obnoví se předchozí stav šablony a výběru).
-Nad spodním panelem se zobrazuje náhled **posledních 5 řádků** a box **poslední záznam** na hlavní obrazovce.
-
-Soubor: `Android/data/com.rfidw.app.gps/files/rfid_go_gps_output.csv`.
-
-Aplikace při startu **automaticky načte** existující CSV a podle něj určí dokončené čipy a obnoví `ID_RFID`. Starší formáty CSV (včetně sloupce `rok` a bez GPS) jsou zpětně kompatibilní.
-
-### 4. GPS poloha čtečky
-
-- Po spuštění žádá o oprávnění k poloze a **aktualizuje GPS cache každých 500 ms** (satelitní fix má přednost před síťovou polohou).
-- Ve stavu **připraveno** se poloha zobrazuje mezi horním řádkem a indikátorem kroků, např. `49.1951° 16.6084° ±6m`.
-- Při zápisu tagu se do CSV uloží nejlepší známá poloha (bez čekání na nový fix).
-- Pokud GPS není dostupná, tag se uloží bez souřadnic a operátor dostane jednorázové upozornění.
-- Během zápisu zůstává v horním řádku text průběhu operace a řádek GPS je skrytý.
-
-### 5. Zaheslování a zamčení tagu
-
-Spouště po zápisu EPC a CSV automaticky:
-
-1. **Zápis access hesla** – bank RESERVED, ptr 2, len 2 (8 hex znaků). Výchozí nové heslo: `11112222`.
-2. **Zamčení tagu** – lock code `008020` (pevná hodnota).
-
-Stejný fallback na preset hesla jako u zápisu EPC.
-
-### 6. Výkon čtečky
-
-Před zápisem je nutné zvolit preset:
-- **v koleji** – 16 dBm
-- **v ruce** – 1 dBm
-
-Ruční nastavení výkonu v dBm je k dispozici v panelu Pokročilé (viz níže).
-
----
-
-## Co aplikace umí, ale běžně nepoužíváme
-
-Tyto funkce jsou **plně implementované** a dostupné v UI, ale v současném provozu jsou vedlejší, skryté v panelu **Pokročilé**, nebo výchozí vypnuté. Zůstávají v kódu záměrně – lze je kdykoli zapnout bez úprav aplikace.
-
-### Šablona EPC (7 řádků) – výchozí OFF
-
-Kompletní sestavení EPC podle šablony je připravené, ale **v terénu se dnes nepoužívá**. Přepínač **Šablona EPC** v panelu Pokročilé:
-
-| Režim | Chování |
-|-------|---------|
-| **OFF** (výchozí) | EPC = TID načteného tagu |
-| **ON** | EPC se sestaví ze šablony níže |
-
-EPC = **24 hex znaků** (bank EPC, ptr 2, Len 6). Šablona má 7 řádků:
+### 2. Šablona EPC a zápis
+EPC = **24 hex znaků** (bank EPC, ptr 2, Len 6). Skládá se podle 7 řádků šablony:
 
 | # | Délka | Kategorie | Pravidlo | Příklad |
 |---|-------|-----------|----------|---------|
@@ -159,76 +54,86 @@ EPC = **24 hex znaků** (bank EPC, ptr 2, Len 6). Šablona má 7 řádků:
 | 3 | 2 | TUDU 5. znak | ASCII hex | `J` → `4A` |
 | 4 | 2 | TUDU 6. znak | 2-místně | `1` → `01` |
 | 5 | 3 | Výhybka | 3-místně dekadicky | `10` → `010` |
-| 6 | 1 | Čip | 1 znak (1–4) | `1` |
-| 7 | 8 | ID_RFID | 8-místně dekadicky | `30001` → `00030001` |
+| 6 | 1 | Část výhybky | 1 znak (1–4) | `1` |
+| 7 | 8 | ID_RFID | 8-místně dekadicky, +1 | `30001` → `00030001` |
 
-Příklad: TUDU `1501J1`, výhybka `10`, čip `1`, ID `30001` →
-`202615014A01010100030001`.
+Příklad: `1501J1`, výhybka `10`, část `1`, ID `30001` →
+`2026 1501 4A 01 010 1 00030001` = `202615014A01010100030001`.
 
-- Názvy kategorií i hodnoty Rok / Čip / ID_RFID lze ručně přepsat.
-- Náhled EPC a validace (24 hex znaků) fungují i v režimu OFF.
-- Po přepnutí na ON se při zápisu použije `EpcModel.buildEpc()` místo TID→EPC.
-- Logika je v `epc/EpcModel.java` – jádro aplikace, vhodné i pro testování mimo zařízení.
+- **Názvy kategorií** i hodnoty Rok / Část / ID_RFID lze ručně přepsat.
+- Náhled EPC a validace (24 hex znaků) jsou v panelu **Pokročilé**.
+- Pod šablonou je rozhraní zápisu: `bank EPC`, `ptr 2`, `Len 6`, **Access pwd** (default `00000000`) a výkon v dBm.
+- Tlačítko **ZAPSAT EPC** přepíše EPC tagu v dosahu.
+- Po úspěšném zápisu se zobrazí původní EPC a TID tagu.
+- Při selhání zápisu s uživatelským heslem se automaticky zkusí **preset hesla** `11223344`, `11112222` (třetí doplníte později).
+- Po dokončení celého cyklu (viz níže) se automaticky:
+  - `ID_RFID += 1` (hodnota se ukládá do aplikace),
+  - posune **část výhybky** o 1; po překročení maxima se přepne na **další nedokončenou výhybku** v pořadí daného TUDU.
 
-### Ruční jednotlivé kroky (mimo spouště)
+### 3. Tabulka CSV
+Po každém zápisu EPC (lze vypnout zaškrtávátkem) se uloží řádek do `rfid_go_gps_output.csv`:
 
-V panelu Pokročilé lze spustit zvlášť:
-- **ZAPSAT EPC** – jen přepis EPC (v režimu OFF rovnou TID→EPC)
-- **ZAPSAT HESLO** – jen access heslo
-- **ZAMKNOUT** – jen zamčení
+| Sloupec | Zdroj |
+|---------|-------|
+| ID_RFID | řádek 7 bez vodících nul (`00030001` → `30001`) |
+| EPC | celých 24 znaků |
+| TID | přečtený z tagu |
+| Rok | řádek 1 |
+| TUDU | řádek 2 + dekódovaný 3 (`4A`→`J`) + dekódovaný 4 (`01`→`1`) |
+| Vyhybka | řádek 5 (`010` → `10`) |
+| CastVyhybky | řádek 6 |
+| latitude | GPS šířka čtečky v okamžiku zápisu |
+| longitude | GPS délka čtečky v okamžiku zápisu |
+| accuracy_m | přesnost GPS v metrech |
+| gps_time | čas měření GPS (`yyyy-MM-dd HH:mm:ss`) |
 
-V terénu se používá spouště (celý řetězec), ale ruční tlačítka jsou užitečná při ladění nebo opravě jednoho kroku.
+Při zápisu stejného `ID_RFID` se daný řádek **přepíše**.
+Tabulku lze sdílet tlačítkem **Sdílet / Export** nebo **vymazat poslední záznam** (obnoví se předchozí stav šablony).
+Nad spodním panelem se zobrazuje náhled **posledního záznamu** (výhybka a část).
 
-### Ruční výkon čtečky (dBm)
+Soubor je uložen v `Android/data/com.rfidw.app.gps/files/rfid_go_gps_output.csv`.
 
-Kromě presetů **v koleji / v ruce** lze v Pokročilých zadat konkrétní hodnotu v dBm a tlačítkem **Nastavit** ji aplikovat na čtečku.
+> **Souběžná instalace:** GPS verze má `applicationId` `com.rfidw.app.gps`, takže ji lze mít nainstalovanou vedle původní **RFID Go** (`com.rfidw.app`) bez vzájemného přepisování.
 
-### Přepis názvů kategorií šablony EPC
+Starší CSV soubory bez GPS sloupců lze načíst – GPS pole zůstanou prázdná.
 
-Řádky šablony mají editovatelné popisky (rok, TUDU, výhybka, …). Nemění logiku zápisu, jen zobrazení v UI – praktický dopad je minimální.
+### 4. GPS poloha čtečky
+- Aplikace po spuštění žádá o oprávnění k poloze a **aktualizuje GPS cache každých 500 ms** (satelitní fix má přednost před síťovou polohou).
+- Ve stavu **připraveno** se poloha zobrazuje **mezi horním řádkem (logo, režim, stav) a indikátorem 3 kroků**, např. `49.1951° 16.6084° ±6m`. Horní řádek zobrazuje pouze `připraveno`.
+- Při zápisu tagu se do CSV uloží nejlepší známá poloha (bez čekání na nový fix).
+- Pokud GPS není dostupná, tag se uloží bez souřadnic a operátor dostane jednorázové upozornění.
+- Během zápisu EPC / hesla / zamčení zůstává v horním řádku text průběhu operace a řádek GPS je skrytý.
 
-### Karta indexace databáze
+### 5. Zaheslování – zápis access hesla
+- **bank RESERVED**, `ptr 2`, `len 2` (access password, 8 hex znaků)
+- Pole **ACCESS PWD** – aktuální heslo tagu (default `00000000`)
+- Pole **NEW PWD** – nové heslo (8 hex znaků)
+- Tlačítko **ZAPSAT HESLO** zapíše nové access heslo na tag v dosahu
+- Stejný fallback na preset hesla jako u zápisu EPC
 
-V Pokročilých je viditelný průběh **plné indexace na pozadí** (procenta, fáze). Indexace sama probíhá automaticky při otevření DB; karta slouží hlavně pro přehled a diagnostiku.
+### 6. Zamčení tagu
+- Pole **NEW ACCESS PWD** – heslo pro zamčení (po zápisu hesla se doplní automaticky)
+- **Lock code** – pevná hodnota `008020`
+- Tlačítko **ZAMKNOUT** zamkne tag v dosahu
 
-### Třetí preset access hesla
+### Spouště čtečky
+Fyzické tlačítko (spouště) čtečky spouští **celý řetězec** v jednom kroku:
 
-Pole `PRESET_ACCESS_PASSWORDS` má třetí slot prázdný (`null`) – připraveno na doplnění dalšího známého hesla bez změny logiky fallbacku.
+1. zápis EPC → 2. zápis access hesla → 3. zamčení tagu
 
----
+Po úspěšném dokončení se zobrazí přehled **Načetli jste** (výhybka + část) s volbami:
+- **Pokračovat** – posune část/výhybku a připraví další tag (stejně jako po ručním dokončení cyklu),
+- **Opakovat** – zůstane na stejné části pro nový pokus.
 
-## Připravené v kódu, ale nezapojené
+Během zobrazení tohoto dialogu lze **Pokračovat** potvrdit i fyzickým tlačítkem čtečky.
 
-Funkce nebo knihovny, které v repozitáři existují, ale aplikace je v provozu **nevolá**.
-
-| Položka | Stav |
-|---------|------|
-| **`TuduLoader.java`** | Legacy načítání TUDU z `.csv` / `.sql` – nahrazeno `DzsDatabase`; třída zůstává v kódu, vzorová data v [`sample_data/`](sample_data) |
-| **Apache POI, jxl, xUtils** | Knihovny v `app/libs/` pro budoucí **export do XLSX** – žádný import v Java kódu |
-| **`UhfManager.readSingle()`** | Veřejná metoda pro čtení tagu bez zápisu – není napojená na UI |
-| **Hromadné vymazání CSV** | V UI jen smazání **posledního** záznamu |
-| **Samostatná obrazovka Nastavení** | Neexistuje; perzistentní jsou jen vybrané preference (viz níže) |
-| **Import CSV z externího souboru** | Ne – načítá se pouze vlastní výstupní soubor aplikace |
-| **Unit / instrumentační testy** | Složky `app/src/test` a `androidTest` chybí |
-
-### Uložená nastavení (`SharedPreferences`)
-
-| Klíč | Obsah |
-|------|-------|
-| `idRfid` | pořadové číslo tagu |
-| `epcTemplateMode` | ON/OFF šablony EPC |
-| `tuduModeGps` | GPS vs ruční režim UDU |
-| `gpsTestMode` | testovací GPS |
-| `testLat` / `testLon` | simulovaná poloha |
-| `dbSourcePath` / `dbDisplayName` / `dbSourceUri` | poslední databáze |
-
-Access heslo, výkon a rok v šabloně se v UI mění, ale **neukládají se** mezi spuštěními (kromě výše uvedených prefs).
+Jednotlivé akce (jen EPC, jen heslo, jen zamčení) lze spustit i ručně tlačítky v panelu **Pokročilé**.
 
 ---
 
 ## Sestavení
 
-Projekt je standardní Android (Gradle). Otevřete v **Android Studiu** nebo přes Cursor:
+Projekt je standardní Android (Gradle). Otevřete v **Android Studiu** nebo přes Cursor a:
 
 ```bash
 ./gradlew assembleRelease
@@ -236,41 +141,32 @@ Projekt je standardní Android (Gradle). Otevřete v **Android Studiu** nebo př
 
 APK: `app/build/outputs/apk/release/rfid_go_gps_<verze>.apk`
 
-Pro lokální vývoj lze použít `./gradlew assembleDebug` – oba buildy používají stejný podpis z `keystore.properties`, takže nové APK lze nainstalovat přes starší verzi bez odinstalace.
+Pro lokální vývoj lze použít i `./gradlew assembleDebug` – oba buildy používají stejný podpis z `keystore.properties`, takže nové APK lze nainstalovat přes starší verzi bez odinstalace.
 
-| Parametr | Hodnota |
-|----------|---------|
-| `compileSdk` / `targetSdk` | 34 |
-| `minSdk` | 21 |
-| Java | 17 |
-| UI | Material 3 |
-| Android Gradle Plugin | 8.5.2 |
-| Gradle | 8.7 |
-| Cílové zařízení | Chainway **C5** (UHF UART) |
-| ABI | `armeabi-v7a`, `arm64-v8a` (bez x86 – neběží na běžném emulátoru) |
+- `compileSdk 34`, `minSdk 21`, `targetSdk 34`, Java 17, Material 3
+- Android Gradle Plugin **8.5.2**, Gradle **8.7**
+- Knihovny čtečky a Excelu jsou v `app/libs/`:
+  - `DeviceAPI_ver20251103_release.aar` – Chainway/RSCJA UHF SDK (obsahuje i nativní `.so`),
+  - `poi-*`, `jxl.jar`, `xUtils-*` – ponechány pro budoucí export do XLSX.
 
-Knihovny v `app/libs/`:
-- `DeviceAPI_ver20251103_release.aar` – Chainway/RSCJA UHF SDK (nativní `.so`),
-- `poi-*`, `jxl.jar`, `xUtils-*` – připraveno pro budoucí XLSX export.
-
-> Při prvním otevření Android Studio vygeneruje `local.properties` s cestou k SDK.
+> Pozn.: Při prvním otevření Android Studio vygeneruje `local.properties` s cestou k SDK.
 
 ### Aktualizace na zařízení
 
 Všechna APK (CI i lokální build) jsou podepsána stejným klíčem v `app/keystore/rfid_go_gps_upload.jks` (viz `keystore.properties`). Stačí nainstalovat novější verzi přes stávající – Android ji aktualizuje bez ztráty dat aplikace.
 
-> **Jednorázově:** Pokud máte na čtečce starší APK podepsané jiným (debug) klíčem, je nutné ho jednou odinstalovat a nainstalovat nové release APK.
+> **Jednorázově:** Pokud máte na čtečce starší APK podepsané jiným (debug) klíčem, je nutné ho jednou odinstalovat a nainstalovat nové release APK. Od té chvíle už aktualizace fungují normálně.
 
 ### CI (GitHub Actions)
 
 Po mergi PR do `main` workflow [`.github/workflows/android.yml`](.github/workflows/android.yml):
 
 1. zvýší verzi v `version.properties`,
-2. sestaví release APK,
+2. sestaví release APK (`rfid_go_gps_<verze>.apk`),
 3. nahraje artefakt v Actions,
-4. vytvoří **GitHub Release** s APK ke stažení.
+4. vytvoří **GitHub Release** s APK ke stažení (záložka *Releases*).
 
-U otevřeného PR se APK sestaví bez zvýšení verze.
+U otevřeného PR se APK sestaví bez zvýšení verze (artefakt u daného běhu workflow).
 
 ---
 
@@ -278,39 +174,25 @@ U otevřeného PR se APK sestaví bez zvýšení verze.
 
 ```
 app/src/main/java/com/rfidw/app/
-├─ epc/EpcModel.java           – sestavení a rozklad EPC (šablona; jádro logiky)
-├─ data/
-│  ├─ Tudu.java                – model TUDU, výhybka, RO větve, UDU kód
-│  ├─ DzsDatabase.java         – SQLite: GPS lookup, indexace, spatial grid
-│  ├─ DzsIndexCache.java       – disková cache indexů (gzip .idx)
-│  ├─ VyhybkaGpsStore.java     – kompaktní GPS souřadnice výhybek
-│  └─ TuduLoader.java          – (legacy, nepoužíváno) CSV/SQL loader
-├─ csv/
-│  ├─ CsvStore.java            – načtení/zápis CSV, index zapsaných čipů
-│  └─ CsvRecordBuilder.java   – sestavení řádku CSV z provozního stavu
-├─ kmext/KmExtResolver.java    – KM_EXT z OD/DO/KM_REF
-├─ location/LocationCache.java – cache GPS polohy (500 ms)
-├─ rfid/UhfManager.java        – obal nad RFIDWithUHFUART (EPC, heslo, zamčení)
+├─ epc/EpcModel.java       – sestavení a rozklad EPC (jádro logiky)
+├─ data/Tudu.java          – model TUDU + výhybky
+├─ data/DzsDatabase.java   – SQLite: GPS → TUDU / výhybka
+├─ data/TuduLoader.java    – (legacy) načítání z .csv / .sql
+├─ csv/CsvStore.java       – výstupní CSV s přepisem podle ID_RFID
+├─ location/LocationCache.java – cache GPS polohy (satelitní fix, aktualizace 500 ms)
+├─ rfid/UhfManager.java    – obal nad RFIDWithUHFUART (EPC, heslo, zamčení)
 └─ ui/
-   ├─ MainActivity.java        – hlavní obrazovka, workflow, propojení všeho
-   └─ CsvAdapter.java          – tabulka CSV v RecyclerView
+   ├─ MainActivity.java    – obrazovka, workflow a propojení všeho
+   └─ CsvAdapter.java      – zobrazení tabulky CSV v RecyclerView
 
 app/src/main/res/layout/
-├─ activity_main.xml           – hlavní obrazovka
-├─ bottom_sheet_workflow.xml   – panel Pokročilé
-├─ dialog_tudu_picker.xml      – dialog výběru UDU
+├─ activity_main.xml           – hlavní obrazovka (krok 1, indikátor, spodní panel)
+├─ bottom_sheet_workflow.xml   – panel Pokročilé (EPC, karty 2–5)
+├─ dialog_tudu_picker.xml      – dialog výběru TUDU s vyhledáváním
 └─ row_*.xml                   – řádky šablony EPC a CSV
-
-docs/
-└─ INDEXACE_DZS.md              – indexace a cache DZS databáze
 ```
 
----
-
 ## Možné další kroky
-
-- Export do `.xlsx` (knihovny POI/jxl jsou přibalené).
-- Perzistentní nastavení (access pwd, výchozí rok, výkon).
+- Export do `.xlsx` (knihovny POI/jxl jsou už přibalené).
+- Nastavení (uložení access pwd, výchozí rok, výkon).
 - Hromadné vymazání celé CSV tabulky.
-- Doplnění třetího preset access hesla.
-- Zapojení `TuduLoader` nebo jeho odstranění po úplném přechodu na DZS SQLite.
