@@ -2431,7 +2431,7 @@ public class MainActivity extends AppCompatActivity {
                 // Z čipu 3 zpět na 2 – obnovit volbu zrcadlenou z čipu 3
                 castBranchHlavni = !castBranchHlavni;
                 castBranchGroup.check(castBranchHlavni ? R.id.btnCastHlavni : R.id.btnCastVedlejsi);
-            } else {
+            } else if (!restoreCastBranchFromCsv(2)) {
                 clearCastBranchSelection();
             }
         } else if (cast == 3 && previousCast == 2 && isCastBranchSelected()) {
@@ -2439,8 +2439,53 @@ public class MainActivity extends AppCompatActivity {
             castBranchHlavni = !castBranchHlavni;
             castBranchGroup.check(castBranchHlavni ? R.id.btnCastHlavni : R.id.btnCastVedlejsi);
         } else if (cast == 3) {
-            clearCastBranchSelection();
+            if (!restoreCastBranchFromCsv(3)) {
+                clearCastBranchSelection();
+            }
         }
+    }
+
+    /** Obnoví hlavní/vedlejší z CSV – čip 2 určuje větev, čip 3 je opačná. */
+    private boolean restoreCastBranchFromCsv(int targetCast) {
+        if (csvStore == null || currentTudu == null || currentVyhybka == null
+                || !isDualRoVyhybka(currentVyhybka) || castBranchGroup == null) {
+            return false;
+        }
+        CsvStore.Row cast2Row = csvStore.findRowForCast(
+                currentTudu.code, currentVyhybka.cislo, 2);
+        if (cast2Row == null) return false;
+        ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
+        Boolean cast2Hlavni = castBranchHlavniFromRow(cast2Row);
+        if (cast2Hlavni == null) return false;
+        castBranchHlavni = targetCast == 2 ? cast2Hlavni : !cast2Hlavni;
+        castBranchGroup.check(castBranchHlavni ? R.id.btnCastHlavni : R.id.btnCastVedlejsi);
+        return true;
+    }
+
+    private Boolean castBranchHlavniFromRow(CsvStore.Row row) {
+        if (row == null) return null;
+        if (!row.roId1.isEmpty() && row.roId2.isEmpty()) {
+            Tudu.Vyhybka.RoBranch hlavni = currentVyhybka.findHlavniBranch();
+            return hlavni != null && hlavni.roId.equals(row.roId1);
+        }
+        if (row.roId1.isEmpty() && !row.roId2.isEmpty()) {
+            return false;
+        }
+        if (row.poloha != null && !row.poloha.isEmpty()) {
+            return Tudu.Vyhybka.RoBranch.isHlavniPoloha(row.poloha);
+        }
+        return null;
+    }
+
+    private void applyCastBranchFromRow(CsvStore.Row row) {
+        if (row == null || castBranchGroup == null || currentVyhybka == null
+                || !isDualRoVyhybka(currentVyhybka)) {
+            return;
+        }
+        Boolean hlavni = castBranchHlavniFromRow(row);
+        if (hlavni == null) return;
+        castBranchHlavni = hlavni;
+        castBranchGroup.check(castBranchHlavni ? R.id.btnCastHlavni : R.id.btnCastVedlejsi);
     }
 
     private Tudu.Vyhybka.RoBranch resolveBranchForCast(int cast) {
@@ -3582,10 +3627,22 @@ public class MainActivity extends AppCompatActivity {
         updateSummary1();
     }
 
-    private void restoreSelectionFromRow(CsvStore.Row row) {
-        if (row == null) return;
-        applyRowToEpc(row);
+    /** Po smazání posledního řádku nastaví další čip k zápisu podle zbývajícího CSV. */
+    private void restoreStateAfterCsvRemoval() {
+        if (csvStore == null || csvStore.size() == 0) {
+            resetCastBranchSelection();
+            return;
+        }
+        CsvStore.Row last = csvStore.getLastRow();
+        if (last == null) return;
+        applyRowToEpc(last);
+        epc.idRfid = Math.max(DEFAULT_ID_RFID, csvStore.getMaxIdRfid() + 1);
         prefs.edit().putLong("idRfid", epc.idRfid).apply();
+        syncCurrentVyhybka();
+        if (currentVyhybka != null) {
+            lastCastBranchDefault = -1;
+            advanceCastAndVyhybka();
+        }
         refreshTemplate();
         updateStep1();
         updateSummary1();
@@ -3626,17 +3683,10 @@ public class MainActivity extends AppCompatActivity {
                 ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
             }
             if (epc.cast >= 2 && isDualRoVyhybka(currentVyhybka)) {
-                if (!row.roId1.isEmpty() && row.roId2.isEmpty()) {
-                    Tudu.Vyhybka.RoBranch hlavni = currentVyhybka.findHlavniBranch();
-                    castBranchHlavni = hlavni != null && hlavni.roId.equals(row.roId1);
-                } else if (row.roId1.isEmpty() && !row.roId2.isEmpty()) {
-                    castBranchHlavni = false;
-                } else if (row.poloha != null && !row.poloha.isEmpty()) {
-                    castBranchHlavni = Tudu.Vyhybka.RoBranch.isHlavniPoloha(row.poloha);
-                }
-                if (castBranchGroup != null) {
-                    castBranchGroup.check(castBranchHlavni
-                            ? R.id.btnCastHlavni : R.id.btnCastVedlejsi);
+                if (epc.cast == 3 && !restoreCastBranchFromCsv(3)) {
+                    applyCastBranchFromRow(row);
+                } else if (epc.cast == 2) {
+                    applyCastBranchFromRow(row);
                 }
             }
         }
@@ -3654,7 +3704,7 @@ public class MainActivity extends AppCompatActivity {
         }
         persistCsvAsync();
         refreshCsvTable();
-        restoreSelectionFromRow(last);
+        restoreStateAfterCsvRemoval();
         updateLastRecordPreview();
         toast("Poslední záznam vymazán");
     }
