@@ -106,6 +106,15 @@ public class MainActivity extends AppCompatActivity {
     private static final int COLOR_STATUS_WARNING = 0xFFE65100;
     private static final int COLOR_STATUS_GPS_WAIT = 0xFFE65100;
     private static final int COLOR_STATUS_GPS_STALE = 0xFFF57C00;
+
+    private static final int WF_STEP_EPC = 0;
+    private static final int WF_STEP_CSV = 1;
+    private static final int WF_STEP_PWD = 2;
+    private static final int WF_STEP_LOCK = 3;
+    private static final int WF_STATE_PENDING = 0;
+    private static final int WF_STATE_ACTIVE = 1;
+    private static final int WF_STATE_OK = 2;
+    private static final int WF_STATE_FAIL = 3;
     private static final int WORKFLOW_DONE_DELAY_MS = 1500;
     private static final int POWER_PRESET_KOLEJI_DBM = 16;
     private static final int POWER_PRESET_RUCE_DBM = 1;
@@ -182,6 +191,9 @@ public class MainActivity extends AppCompatActivity {
             tvScanDoneVyhybka, tvScanDoneCast,
             tvLastRecordVyhybka, tvLastRecordCast,
             step1Circle, step2Circle, step3Circle, step1Label, step2Label;
+    private View workflowStepIndicators, wfStepEpc, wfStepCsv, wfStepPwd, wfStepLock;
+    private View[] wfStepViews;
+    private final int[] wfStepStates = new int[4];
     private View summary1, colSummaryTudu, colSummaryVyhybka, castHintBox, scanDoneScrim,
             scanDoneDialog, deleteConfirmDialog, lastRecordBox, card1, topBar,
             card1DbProgress, cardDbIndex;
@@ -259,6 +271,13 @@ public class MainActivity extends AppCompatActivity {
 
     private void bindViews() {
         tvReaderStatus = findViewById(R.id.tvReaderStatus);
+        workflowStepIndicators = findViewById(R.id.workflowStepIndicators);
+        wfStepEpc = findViewById(R.id.wfStepEpc);
+        wfStepCsv = findViewById(R.id.wfStepCsv);
+        wfStepPwd = findViewById(R.id.wfStepPwd);
+        wfStepLock = findViewById(R.id.wfStepLock);
+        wfStepViews = new View[]{wfStepEpc, wfStepCsv, wfStepPwd, wfStepLock};
+        resetWorkflowStepIndicators();
         tvGpsStatus = findViewById(R.id.tvGpsStatus);
         tvEpcPreview = findViewById(R.id.tvEpcPreview);
         tvEpcValid = findViewById(R.id.tvEpcValid);
@@ -325,26 +344,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setupTopBarInsets() {
-        tvReaderStatus.post(() -> {
-            float maxWidth = 0f;
-            String[] statusTexts = {
-                    getString(R.string.tudu_select_status),
-                    getString(R.string.power_preset_select_status),
-                    getString(R.string.status_ready),
-                    "zapisuji EPC…",
-                    "zapisuji heslo…",
-                    "zamykám…",
-                    getString(R.string.epc_retry_status),
-                    "chyba hesla",
-                    "chyba zamčení",
-                    "nedostupná",
-                    "inicializuji…"
-            };
-            for (String text : statusTexts) {
-                maxWidth = Math.max(maxWidth, tvReaderStatus.getPaint().measureText(text));
-            }
-            tvReaderStatus.setMinWidth((int) Math.ceil(maxWidth));
-        });
         topBar.getViewTreeObserver().addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
             @Override
             public void onGlobalLayout() {
@@ -1312,6 +1311,70 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    // ---------- indikátor kroků workflow (horní řádek) ----------
+
+    private boolean shouldShowWorkflowStepIndicators() {
+        return step1Done && isPowerPresetSelected();
+    }
+
+    private void updateWorkflowStepIndicatorsVisibility() {
+        boolean show = shouldShowWorkflowStepIndicators();
+        workflowStepIndicators.setVisibility(show ? View.VISIBLE : View.GONE);
+        tvReaderStatus.setVisibility(show ? View.GONE : View.VISIBLE);
+    }
+
+    private void resetWorkflowStepIndicators() {
+        for (int i = 0; i < wfStepStates.length; i++) {
+            wfStepStates[i] = WF_STATE_PENDING;
+            applyWorkflowStepCircle(i);
+        }
+    }
+
+    private void setWorkflowStepState(int step, int state) {
+        if (step < 0 || step >= wfStepStates.length) return;
+        wfStepStates[step] = state;
+        applyWorkflowStepCircle(step);
+        updateWorkflowStepIndicatorsVisibility();
+    }
+
+    private void applyWorkflowStepCircle(int step) {
+        int drawable;
+        switch (wfStepStates[step]) {
+            case WF_STATE_OK:
+                drawable = R.drawable.wf_step_circle_done;
+                break;
+            case WF_STATE_FAIL:
+                drawable = R.drawable.wf_step_circle_error;
+                break;
+            case WF_STATE_ACTIVE:
+                drawable = R.drawable.wf_step_circle_active;
+                break;
+            default:
+                drawable = R.drawable.wf_step_circle_pending;
+                break;
+        }
+        wfStepViews[step].setBackgroundResource(drawable);
+    }
+
+    private boolean advanceWorkflowAfterEpcSuccess(String writtenEpc, String tid) {
+        setWorkflowStepState(WF_STEP_EPC, WF_STATE_OK);
+        if (cbAutoCsv.isChecked()) {
+            setWorkflowStepState(WF_STEP_CSV, WF_STATE_ACTIVE);
+            if (!saveRowToCsv(writtenEpc, tid)) {
+                if (chainWorkflow) {
+                    onWorkflowFailed(WF_STEP_CSV);
+                } else {
+                    setWorkflowStepState(WF_STEP_CSV, WF_STATE_FAIL);
+                }
+                return false;
+            }
+            setWorkflowStepState(WF_STEP_CSV, WF_STATE_OK);
+        } else {
+            setWorkflowStepState(WF_STEP_CSV, WF_STATE_OK);
+        }
+        return true;
+    }
+
     // ---------- indikátor kroků ----------
 
     private void updateStepIndicators() {
@@ -1585,6 +1648,7 @@ public class MainActivity extends AppCompatActivity {
             step2Done = false;
             step2Failed = false;
             step3Done = false;
+            resetWorkflowStepIndicators();
             updateStepIndicators();
             setActionStatusReady();
         });
@@ -1597,6 +1661,7 @@ public class MainActivity extends AppCompatActivity {
             step2Done = false;
             step2Failed = false;
             step3Done = false;
+            resetWorkflowStepIndicators();
             updateStepIndicators();
             refreshTemplate();
             updateSummary1();
@@ -1692,6 +1757,8 @@ public class MainActivity extends AppCompatActivity {
     private void setActionStatus(String text, int color) {
         tvReaderStatus.setText(text);
         tvReaderStatus.setTextColor(color);
+        tvReaderStatus.setVisibility(View.VISIBLE);
+        workflowStepIndicators.setVisibility(View.GONE);
     }
 
     private void setActionStatusReady() {
@@ -1719,6 +1786,8 @@ public class MainActivity extends AppCompatActivity {
                     tvReaderStatus.setText(getString(R.string.gps_tudu_wait));
                     tvReaderStatus.setTextColor(COLOR_STATUS_GPS_WAIT);
                 }
+                tvReaderStatus.setVisibility(View.VISIBLE);
+                workflowStepIndicators.setVisibility(View.GONE);
                 refreshGpsStatus(false);
             } else {
                 showGpsStatus = false;
@@ -1740,7 +1809,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         showGpsStatus = true;
-        tvReaderStatus.setText(getString(R.string.status_ready));
+        updateWorkflowStepIndicatorsVisibility();
         refreshGpsStatus();
     }
 
@@ -1766,9 +1835,11 @@ public class MainActivity extends AppCompatActivity {
         }
         tvGpsStatus.setText(locationCache.formatStatusText());
         tvGpsStatus.setTextColor(color);
-        if (setReadyStatus) {
+        if (setReadyStatus && !shouldShowWorkflowStepIndicators()) {
             tvReaderStatus.setText(getString(R.string.status_ready));
             tvReaderStatus.setTextColor(COLOR_STATUS_READY);
+        } else if (setReadyStatus) {
+            updateWorkflowStepIndicatorsVisibility();
         }
     }
 
@@ -1908,7 +1979,7 @@ public class MainActivity extends AppCompatActivity {
         ensureGpsForTuduLookup();
     }
 
-    private void onWorkflowFailed(String status) {
+    private void onWorkflowFailed(int failedStep) {
         workflowRunning = false;
         chainWorkflow = false;
         scanDoneAwaitingConfirm = false;
@@ -1916,8 +1987,11 @@ public class MainActivity extends AppCompatActivity {
         step2Done = false;
         step2Failed = true;
         step3Done = false;
+        if (failedStep >= 0 && failedStep < wfStepStates.length) {
+            setWorkflowStepState(failedStep, WF_STATE_FAIL);
+        }
         updateStepIndicators();
-        setActionStatus(status, COLOR_STATUS_ERROR);
+        updateWorkflowStepIndicatorsVisibility();
         ui.postDelayed(() -> {
             step2Failed = false;
             activeStep = 0;
@@ -2181,9 +2255,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean requireCastBranchSelection() {
-        if (!requiresCastBranchSelection() || isCastBranchSelected()) return true;
-        setActionStatus(getString(R.string.cast_branch_select_status), COLOR_STATUS_WARNING);
-        return false;
+        return !requiresCastBranchSelection() || isCastBranchSelected();
     }
 
     private boolean isDualRoVyhybka(Tudu.Vyhybka v) {
@@ -3481,25 +3553,26 @@ public class MainActivity extends AppCompatActivity {
     private void doWrite() {
         if (scanDoneAwaitingConfirm) return;
         if (!requirePowerPreset()) {
-            if (chainWorkflow) onWorkflowFailed(getString(R.string.power_preset_required));
+            if (chainWorkflow) onWorkflowFailed(-1);
             return;
         }
         if (!requireCastBranchSelection()) {
-            if (chainWorkflow) onWorkflowFailed(getString(R.string.cast_branch_select_status));
+            if (chainWorkflow) onWorkflowFailed(-1);
             return;
         }
         if (epcTemplateMode && !epc.isValid()) {
             toast("EPC není validní");
-            if (chainWorkflow) onWorkflowFailed("EPC není validní");
+            if (chainWorkflow) onWorkflowFailed(-1);
             return;
         }
         if (!uhf.isReady()) {
             toast("Čtečka není připravena");
-            if (chainWorkflow) onWorkflowFailed("čtečka nedostupná");
+            if (chainWorkflow) onWorkflowFailed(-1);
             return;
         }
         if (!chainWorkflow) {
-            setActionStatus("zapisuji EPC…", COLOR_STATUS_BUSY);
+            setWorkflowStepState(WF_STEP_EPC, WF_STATE_ACTIVE);
+            updateWorkflowStepIndicatorsVisibility();
         }
         final String pwd = etAccessPwd.getText().toString().trim();
         tvWriteResult.setText("Zapisuji…");
@@ -3530,20 +3603,33 @@ public class MainActivity extends AppCompatActivity {
                     + (r.oldEpc != null ? ("\nPůvodní EPC: " + r.oldEpc) : "")
                     + (r.tid != null ? ("\nTID: " + r.tid) : ""));
 
-            if (cbAutoCsv.isChecked()) saveRowToCsv(writtenEpc, r.tid);
-
             if (chainWorkflow) {
-                setActionStatus("zapisuji heslo…", COLOR_STATUS_BUSY);
+                if (!advanceWorkflowAfterEpcSuccess(writtenEpc, r.tid)) return;
+                setWorkflowStepState(WF_STEP_PWD, WF_STATE_ACTIVE);
                 doWritePassword();
             } else {
+                setWorkflowStepState(WF_STEP_EPC, WF_STATE_OK);
+                if (cbAutoCsv.isChecked()) {
+                    setWorkflowStepState(WF_STEP_CSV, WF_STATE_ACTIVE);
+                    if (!saveRowToCsv(writtenEpc, r.tid)) {
+                        setWorkflowStepState(WF_STEP_CSV, WF_STATE_FAIL);
+                    } else {
+                        setWorkflowStepState(WF_STEP_CSV, WF_STATE_OK);
+                    }
+                } else {
+                    setWorkflowStepState(WF_STEP_CSV, WF_STATE_OK);
+                }
                 onTagCycleComplete();
                 setActionStatusReady();
             }
         } else {
             tvWriteResult.setTextColor(0xFFC62828);
             tvWriteResult.setText("✗ " + r.message);
-            if (chainWorkflow) onWorkflowFailed(getString(R.string.epc_retry_status));
-            else setActionStatus(getString(R.string.epc_retry_status), COLOR_STATUS_ERROR);
+            if (chainWorkflow) onWorkflowFailed(WF_STEP_EPC);
+            else {
+                setWorkflowStepState(WF_STEP_EPC, WF_STATE_FAIL);
+                updateWorkflowStepIndicatorsVisibility();
+            }
         }
     }
 
@@ -3552,23 +3638,24 @@ public class MainActivity extends AppCompatActivity {
     private void doWritePassword() {
         if (scanDoneAwaitingConfirm) return;
         if (!requirePowerPreset()) {
-            if (chainWorkflow) onWorkflowFailed(getString(R.string.power_preset_required));
+            if (chainWorkflow) onWorkflowFailed(-1);
             return;
         }
         if (!uhf.isReady()) {
             toast("Čtečka není připravena");
-            if (chainWorkflow) onWorkflowFailed("čtečka nedostupná");
+            if (chainWorkflow) onWorkflowFailed(-1);
             return;
         }
         final String accessPwd = etPwdAccess.getText().toString().trim();
         final String newPwd = etPwdNew.getText().toString().trim();
         if (!newPwd.matches("[0-9A-Fa-f]{8}")) {
             toast("NEW PWD musí mít 8 hex znaků");
-            if (chainWorkflow) onWorkflowFailed("neplatné heslo");
+            if (chainWorkflow) onWorkflowFailed(WF_STEP_PWD);
             return;
         }
         if (!chainWorkflow) {
-            setActionStatus("zapisuji heslo…", COLOR_STATUS_BUSY);
+            setWorkflowStepState(WF_STEP_PWD, WF_STATE_ACTIVE);
+            updateWorkflowStepIndicatorsVisibility();
         }
         tvPwdWriteResult.setText("Zapisuji heslo…");
         tvPwdWriteResult.setTextColor(0xFF5F6A76);
@@ -3590,16 +3677,21 @@ public class MainActivity extends AppCompatActivity {
                     + (r.tid != null ? ("\nTID: " + r.tid) : ""));
             etLockAccessPwd.setText(etPwdNew.getText().toString().trim().toUpperCase());
             if (chainWorkflow) {
-                setActionStatus("zamykám…", COLOR_STATUS_BUSY);
+                setWorkflowStepState(WF_STEP_PWD, WF_STATE_OK);
+                setWorkflowStepState(WF_STEP_LOCK, WF_STATE_ACTIVE);
                 doLock();
             } else {
+                setWorkflowStepState(WF_STEP_PWD, WF_STATE_OK);
                 setActionStatusReady();
             }
         } else {
             tvPwdWriteResult.setTextColor(0xFFC62828);
             tvPwdWriteResult.setText("✗ " + r.message);
-            if (chainWorkflow) onWorkflowFailed("chyba hesla");
-            else setActionStatus("chyba hesla", COLOR_STATUS_ERROR);
+            if (chainWorkflow) onWorkflowFailed(WF_STEP_PWD);
+            else {
+                setWorkflowStepState(WF_STEP_PWD, WF_STATE_FAIL);
+                updateWorkflowStepIndicatorsVisibility();
+            }
         }
     }
 
@@ -3608,16 +3700,17 @@ public class MainActivity extends AppCompatActivity {
     private void doLock() {
         if (scanDoneAwaitingConfirm) return;
         if (!requirePowerPreset()) {
-            if (chainWorkflow) onWorkflowFailed(getString(R.string.power_preset_required));
+            if (chainWorkflow) onWorkflowFailed(-1);
             return;
         }
         if (!uhf.isReady()) {
             toast("Čtečka není připravena");
-            if (chainWorkflow) onWorkflowFailed("čtečka nedostupná");
+            if (chainWorkflow) onWorkflowFailed(-1);
             return;
         }
         if (!chainWorkflow) {
-            setActionStatus("zamykám…", COLOR_STATUS_BUSY);
+            setWorkflowStepState(WF_STEP_LOCK, WF_STATE_ACTIVE);
+            updateWorkflowStepIndicatorsVisibility();
         }
         final String accessPwd = etLockAccessPwd.getText().toString().trim();
         final String lockCode = getString(R.string.lock_code_value);
@@ -3642,12 +3735,14 @@ public class MainActivity extends AppCompatActivity {
                 activeStep = 0;
                 step2Done = true;
                 scanDoneAwaitingConfirm = true;
+                setWorkflowStepState(WF_STEP_LOCK, WF_STATE_OK);
                 updateStepIndicators();
-                setActionStatusReady();
+                updateWorkflowStepIndicatorsVisibility();
                 showScanDoneNotification(epc.vyhybka, epc.cast);
             } else {
                 step2Done = true;
                 scanDoneAwaitingConfirm = true;
+                setWorkflowStepState(WF_STEP_LOCK, WF_STATE_OK);
                 updateStepIndicators();
                 setActionStatusReady();
                 showScanDoneNotification(epc.vyhybka, epc.cast);
@@ -3655,13 +3750,16 @@ public class MainActivity extends AppCompatActivity {
         } else {
             tvLockResult.setTextColor(0xFFC62828);
             tvLockResult.setText("✗ " + r.message);
-            if (chainWorkflow) onWorkflowFailed("chyba zamčení");
-            else setActionStatus("chyba zamčení", COLOR_STATUS_ERROR);
+            if (chainWorkflow) onWorkflowFailed(WF_STEP_LOCK);
+            else {
+                setWorkflowStepState(WF_STEP_LOCK, WF_STATE_FAIL);
+                updateWorkflowStepIndicatorsVisibility();
+            }
         }
     }
 
-    private void saveRowToCsv(String epc24, String tid) {
-        if (csvStore == null) return;
+    private boolean saveRowToCsv(String epc24, String tid) {
+        if (csvStore == null) return false;
         try {
             int cast = epc.cast;
             ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
@@ -3670,25 +3768,24 @@ public class MainActivity extends AppCompatActivity {
             Tudu.Vyhybka.RoBranch branch = cast == 1 && isDualRoVyhybka(currentVyhybka)
                     ? null : resolveBranchForCast(cast);
             if (cast >= 2 && isDualRoVyhybka(currentVyhybka) && !isCastBranchSelected()) {
-                setActionStatus(getString(R.string.cast_branch_select_status), COLOR_STATUS_WARNING);
-                return;
+                return false;
             }
             if (cast >= 2 && branch == null) {
-                setActionStatus(getString(R.string.cast_branch_select_status), COLOR_STATUS_WARNING);
-                return;
+                return false;
             }
             if (cast >= 2 && isDualRoVyhybka(currentVyhybka)
                     && ((castBranchHlavni && currentVyhybka.findHlavniBranch() == null)
                     || (!castBranchHlavni && currentVyhybka.findVedlejsiBranch() == null))) {
-                setActionStatus(getString(R.string.cast_branch_select_status), COLOR_STATUS_WARNING);
-                return;
+                return false;
             }
             CsvStore.Row row = buildCsvRow(epc24, tid, branch);
             csvStore.upsert(row);
             persistCsvAsync();
             refreshCsvTable();
+            return true;
         } catch (Exception e) {
             toast("CSV: " + e.getMessage());
+            return false;
         }
     }
 
@@ -4106,8 +4203,10 @@ public class MainActivity extends AppCompatActivity {
         step2Done = false;
         step2Failed = false;
         step3Done = false;
+        resetWorkflowStepIndicators();
         updateStepIndicators();
-        setActionStatus("zapisuji EPC…", COLOR_STATUS_BUSY);
+        setWorkflowStepState(WF_STEP_EPC, WF_STATE_ACTIVE);
+        updateWorkflowStepIndicatorsVisibility();
         doWrite();
     }
 
