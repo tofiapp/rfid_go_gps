@@ -897,15 +897,14 @@ public class MainActivity extends AppCompatActivity {
             List<VyhybkaPickerItem> loadedItems = Collections.emptyList();
             List<Tudu> loadedTudus = Collections.emptyList();
             Map<String, Double> distances = null;
+            List<VyhybkaPickerPreparedItem> preparedItems = Collections.emptyList();
+            int missingGps = 0;
             try {
                 if (loadId == dbLoadGeneration && db != null) {
                     loadedTudus = db.loadTuduForUdu(uduCode);
                     loadedItems = buildVyhybkaPickerItems(loadedTudus);
                     if (withDistances && !loadedItems.isEmpty()) {
-                        distances = db.findVyhybkaDistancesForUdu(uduCode, lat, lon);
-                    }
-                    for (VyhybkaPickerItem item : loadedItems) {
-                        ensureVyhybkaRoBranches(item.tuduCode, item.vyhybka);
+                        distances = db.findVyhybkaDistancesForUdu(loadedTudus, lat, lon);
                     }
                 }
             } catch (Exception e) {
@@ -916,6 +915,14 @@ public class MainActivity extends AppCompatActivity {
             final List<Tudu> tudusSnapshot = loadedTudus;
             final Map<String, Double> distancesSnapshot = distances;
             final boolean showDistanceHints = withDistances;
+            if (!itemsSnapshot.isEmpty()) {
+                preparedItems = prepareVyhybkaPickerItems(
+                        itemsSnapshot, distancesSnapshot, showDistanceHints);
+                missingGps = countVyhybkaPickerMissingGps(
+                        preparedItems, distancesSnapshot, showDistanceHints);
+            }
+            final List<VyhybkaPickerPreparedItem> preparedSnapshot = preparedItems;
+            final int missingGpsSnapshot = missingGps;
             runOnUiThreadIfAlive(loadId, () -> {
                 for (Tudu t : tudusSnapshot) {
                     mergeTuduIntoList(t);
@@ -923,18 +930,21 @@ public class MainActivity extends AppCompatActivity {
                 if (!tudusSnapshot.isEmpty()) {
                     syncCurrentVyhybkaAfterReload();
                 }
-                List<VyhybkaPickerItem> pickerItems = !itemsSnapshot.isEmpty()
-                        ? itemsSnapshot
-                        : collectVyhybkaItemsForUdu(uduCode);
-                if (pickerItems.isEmpty()) {
-                    toast(getString(R.string.db_select_required));
-                    expandCard1Body();
-                    return;
+                List<VyhybkaPickerPreparedItem> prepared = preparedSnapshot;
+                int missingGpsCount = missingGpsSnapshot;
+                if (prepared.isEmpty()) {
+                    List<VyhybkaPickerItem> pickerItems = collectVyhybkaItemsForUdu(uduCode);
+                    if (pickerItems.isEmpty()) {
+                        toast(getString(R.string.db_select_required));
+                        expandCard1Body();
+                        return;
+                    }
+                    prepared = prepareVyhybkaPickerItems(
+                            pickerItems, distancesSnapshot, showDistanceHints);
+                    missingGpsCount = countVyhybkaPickerMissingGps(
+                            prepared, distancesSnapshot, showDistanceHints);
                 }
-                List<VyhybkaPickerPreparedItem> prepared = prepareVyhybkaPickerItems(
-                        pickerItems, distancesSnapshot, showDistanceHints);
-                int missingGps = countVyhybkaPickerMissingGps(prepared, distancesSnapshot, showDistanceHints);
-                showVyhybkaPickerDialog(prepared, missingGps);
+                showVyhybkaPickerDialog(prepared, missingGpsCount);
             });
         });
     }
@@ -2414,6 +2424,12 @@ public class MainActivity extends AppCompatActivity {
     private void ensureVyhybkaRoBranches(String tuduCode, Tudu.Vyhybka v) {
         if (tuduCode == null || tuduCode.isEmpty() || v == null || dzsDatabase == null) {
             return;
+        }
+        if (!v.getRoBranches().isEmpty()) {
+            int castCount = v.castMax - v.castMin + 1;
+            if (castCount != 3 || v.hasDualRoBranches()) {
+                return;
+            }
         }
         List<Tudu.Vyhybka.RoBranch> loaded = dzsDatabase.findRoBranchesForVyhybka(
                 tuduCode, v.cislo, v.iob);

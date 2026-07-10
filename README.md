@@ -1,6 +1,6 @@
 # RFID Go GPS
 
-Android aplikace (verze **3.97**) pro čtečku **Chainway C5** (vestavěný UHF UART modul, RSCJA/Chainway SDK).
+Android aplikace (verze **3.99**) pro čtečku **Chainway C5** (vestavěný UHF UART modul, RSCJA/Chainway SDK).
 
 Slouží k **terénnímu načítání UHF tagů** na železničních výhybkách: určení polohy a kontextu z **GPS** a **SQLite databáze DZS**, zápis tagu (EPC, heslo, zamčení), export do **CSV** a záznam GPS polohy čtečky u každého tagu.
 
