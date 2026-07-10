@@ -47,6 +47,10 @@
     <string name="tudu_select_status">vyberte UDU</string>
     <string name="epc_retry_status">načtěte znovu</string>
     <string name="status_ready">připraveno</string>
+    <string name="wf_step_epc">přepis EPC</string>
+    <string name="wf_step_csv">zápis do CSV</string>
+    <string name="wf_step_pwd">zápis hesla</string>
+    <string name="wf_step_lock">zamčení hesla</string>
     <string name="gps_unavailable_toast">GPS nedostupná — tag uložen bez souřadnic</string>
     <string name="btn_pick_db">Vybrat databázi SQLite (.db)</string>
     <string name="db_none">Žádná databáze</string>

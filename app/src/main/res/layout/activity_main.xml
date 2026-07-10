@@ -492,9 +492,9 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
-                android:layout_marginEnd="12dp"
+                android:layout_marginEnd="8dp"
                 app:layout_constraintBottom_toBottomOf="parent"
-                app:layout_constraintEnd_toStartOf="@id/tvReaderStatus"
+                app:layout_constraintEnd_toStartOf="@id/topBarStatusArea"
                 app:layout_constraintStart_toEndOf="@id/ivAppLogo"
                 app:layout_constraintTop_toTopOf="parent"
                 app:singleSelection="true"
@@ -531,18 +531,66 @@
                     app:strokeWidth="1dp"/>
             </com.google.android.material.button.MaterialButtonToggleGroup>
 
-            <TextView
-                android:id="@+id/tvReaderStatus"
+            <FrameLayout
+                android:id="@+id/topBarStatusArea"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="4dp"
-                android:gravity="end"
-                android:text="…"
-                android:textColor="@color/text_muted"
-                android:textSize="13sp"
+                android:minWidth="58dp"
                 app:layout_constraintBottom_toBottomOf="parent"
                 app:layout_constraintEnd_toEndOf="parent"
-                app:layout_constraintTop_toTopOf="parent"/>
+                app:layout_constraintTop_toTopOf="parent">
+
+                <TextView
+                    android:id="@+id/tvReaderStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="end|center_vertical"
+                    android:gravity="end"
+                    android:text="…"
+                    android:textColor="@color/text_muted"
+                    android:textSize="13sp"/>
+
+                <LinearLayout
+                    android:id="@+id/workflowStepIndicators"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="end|center_vertical"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:visibility="gone">
+
+                    <View
+                        android:id="@+id/wfStepEpc"
+                        android:layout_width="10dp"
+                        android:layout_height="10dp"
+                        android:background="@drawable/wf_step_circle_pending"
+                        android:contentDescription="@string/wf_step_epc"/>
+
+                    <View
+                        android:id="@+id/wfStepCsv"
+                        android:layout_width="10dp"
+                        android:layout_height="10dp"
+                        android:layout_marginStart="6dp"
+                        android:background="@drawable/wf_step_circle_pending"
+                        android:contentDescription="@string/wf_step_csv"/>
+
+                    <View
+                        android:id="@+id/wfStepPwd"
+                        android:layout_width="10dp"
+                        android:layout_height="10dp"
+                        android:layout_marginStart="6dp"
+                        android:background="@drawable/wf_step_circle_pending"
+                        android:contentDescription="@string/wf_step_pwd"/>
+
+                    <View
+                        android:id="@+id/wfStepLock"
+                        android:layout_width="10dp"
+                        android:layout_height="10dp"
+                        android:layout_marginStart="6dp"
+                        android:background="@drawable/wf_step_circle_pending"
+                        android:contentDescription="@string/wf_step_lock"/>
+                </LinearLayout>
+            </FrameLayout>
         </androidx.constraintlayout.widget.ConstraintLayout>
 
         <TextView
