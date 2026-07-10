@@ -1076,6 +1076,17 @@ public class DzsDatabase implements Closeable {
             return Collections.emptyList();
         }
         String normIob = Tudu.Vyhybka.normalizeIob(iob);
+        List<Tudu.Vyhybka.RoBranch> fromIndex = collectRoBranchesFromIndex(tuduCode, cislo, normIob);
+        if (!fromIndex.isEmpty() && (fullIndexReady || branchesCoverDualRo(fromIndex))) {
+            return dedupeBranches(fromIndex);
+        }
+        List<Tudu.Vyhybka.RoBranch> merged = new ArrayList<>(fromIndex);
+        merged.addAll(queryRoBranchesFromSql(tuduCode, cislo, normIob));
+        return dedupeBranches(merged);
+    }
+
+    private List<Tudu.Vyhybka.RoBranch> collectRoBranchesFromIndex(
+            String tuduCode, int cislo, String normIob) {
         List<Tudu.Vyhybka.RoBranch> found = new ArrayList<>();
         for (List<RoIndexEntry> entries : roByPairKey.values()) {
             for (RoIndexEntry ro : entries) {
@@ -1084,8 +1095,24 @@ public class DzsDatabase implements Closeable {
                 found.add(new Tudu.Vyhybka.RoBranch(ro.roId, ro.poloha, ro.kmExtChip1, ro.kmExtOther));
             }
         }
-        if (!found.isEmpty()) return dedupeBranches(found);
+        return found;
+    }
 
+    /** Index okolí GPS může obsahovat jen nejbližší RO_ID – pro dvojvětvé výhybky doplníme z SQL. */
+    private static boolean branchesCoverDualRo(List<Tudu.Vyhybka.RoBranch> branches) {
+        if (branches.size() < 2) return false;
+        boolean hlavni = false;
+        boolean vedlejsi = false;
+        for (Tudu.Vyhybka.RoBranch b : branches) {
+            if (b.isHlavni()) hlavni = true;
+            if (b.isVedlejsi()) vedlejsi = true;
+        }
+        return hlavni && vedlejsi;
+    }
+
+    private List<Tudu.Vyhybka.RoBranch> queryRoBranchesFromSql(
+            String tuduCode, int cislo, String normIob) {
+        List<Tudu.Vyhybka.RoBranch> found = new ArrayList<>();
         String vyhybkaExpr = roColumns.vyhybkaSelectExpr(null);
         StringBuilder sql = new StringBuilder("SELECT DISTINCT ")
                 .append(roColumns.roId).append(", ");
@@ -1121,7 +1148,7 @@ public class DzsDatabase implements Closeable {
             }
         } catch (Exception ignored) {
         }
-        return dedupeBranches(found);
+        return found;
     }
 
     private static List<Tudu.Vyhybka.RoBranch> dedupeBranches(List<Tudu.Vyhybka.RoBranch> branches) {

@@ -1289,6 +1289,9 @@ public class MainActivity extends AppCompatActivity {
                 break;
             }
         }
+        if (currentVyhybka != null) {
+            ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
+        }
     }
 
     private int findVyhybkaPickerCheckedIndex(List<VyhybkaPickerPreparedItem> items) {
@@ -3324,9 +3327,8 @@ public class MainActivity extends AppCompatActivity {
         Tudu.Vyhybka v = tudu.findOrCreate(match.vyhybka);
         if (!match.roId.isEmpty()) {
             v.addRoBranch(match.roId, match.poloha);
-        } else {
-            ensureVyhybkaRoBranches(tudu.code, v);
         }
+        ensureVyhybkaRoBranches(tudu.code, v);
         if (gpsAutoSelection && isVyhybkaCompleteInCsv(tudu.code, v)) {
             Tudu.Vyhybka nearestIncomplete = nearestIncompleteVyhybkaByGps(tudu);
             if (nearestIncomplete != null) {
@@ -3562,6 +3564,9 @@ public class MainActivity extends AppCompatActivity {
 
     private void selectVyhybka(Tudu.Vyhybka v, boolean resetCast) {
         boolean vyhybkaChanged = currentVyhybka == null || currentVyhybka.cislo != v.cislo;
+        if (currentTudu != null) {
+            ensureVyhybkaRoBranches(currentTudu.code, v);
+        }
         currentVyhybka = v;
         epc.vyhybka = v.cislo;
         if (vyhybkaChanged) {
