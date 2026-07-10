@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Nejdelší střídající se hláška v horním řádku (vyberte hlavní/vedlejší). -->
+    <dimen name="top_bar_status_min_width">186dp</dimen>
+    <dimen name="power_preset_button_min_width">98dp</dimen>
+</resources>
