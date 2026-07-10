@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Nejdelší střídající se hláška v horním řádku (vyberte hlavní/vedlejší). -->
-    <dimen name="top_bar_status_min_width">186dp</dimen>
-    <dimen name="power_preset_button_min_width">98dp</dimen>
+    <!-- 4 kolečka workflow v horním řádku (10dp + 3×6dp mezera). -->
+    <dimen name="top_bar_status_min_width">58dp</dimen>
+    <!-- Stejná šířka obou větví, aby se při výběru neměnila velikost skupiny. -->
+    <dimen name="cast_branch_button_min_width">88dp</dimen>
 </resources>
