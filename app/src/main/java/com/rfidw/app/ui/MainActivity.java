@@ -116,6 +116,8 @@ public class MainActivity extends AppCompatActivity {
     private static final int WF_STATE_OK = 2;
     private static final int WF_STATE_FAIL = 3;
     private static final int WORKFLOW_DONE_DELAY_MS = 1500;
+    private static final long STATUS_ALT_SHOW_MESSAGE_MS = 3000;
+    private static final long STATUS_ALT_SHOW_INDICATORS_MS = 2000;
     private static final int POWER_PRESET_KOLEJI_DBM = 16;
     private static final int POWER_PRESET_RUCE_DBM = 1;
     private static final long DEFAULT_ID_RFID = 400;
@@ -224,6 +226,9 @@ public class MainActivity extends AppCompatActivity {
     private boolean gpsUnavailableToastShown;
     private int lastTopBarHeight = -1;
     private Runnable gpsLookupTimeoutRunnable;
+    private Runnable statusAlternationTick;
+    private boolean statusAlternationActive;
+    private boolean statusAlternationShowingMessage;
 
     // řádky šablony (kontejnery z include)
     private View[] rows = new View[7];
@@ -1313,14 +1318,127 @@ public class MainActivity extends AppCompatActivity {
 
     // ---------- indikátor kroků workflow (horní řádek) ----------
 
+    private static final class AlternatingStatus {
+        final String text;
+        final int color;
+
+        AlternatingStatus(String text, int color) {
+            this.text = text;
+            this.color = color;
+        }
+    }
+
     private boolean shouldShowWorkflowStepIndicators() {
         return step1Done && isPowerPresetSelected();
     }
 
+    private void showWorkflowStepIndicatorsOnly() {
+        workflowStepIndicators.setVisibility(View.VISIBLE);
+        tvReaderStatus.setVisibility(View.GONE);
+    }
+
+    private void showStatusTextOnly(String text, int color) {
+        tvReaderStatus.setText(text);
+        tvReaderStatus.setTextColor(color);
+        tvReaderStatus.setVisibility(View.VISIBLE);
+        workflowStepIndicators.setVisibility(View.GONE);
+    }
+
+    private void stopStatusAlternation() {
+        statusAlternationActive = false;
+        statusAlternationShowingMessage = false;
+        if (statusAlternationTick != null) {
+            ui.removeCallbacks(statusAlternationTick);
+        }
+    }
+
+    private AlternatingStatus resolveAlternatingStatus() {
+        if (!shouldShowWorkflowStepIndicators() || workflowRunning || scanDoneAwaitingConfirm) {
+            return null;
+        }
+        if (requiresCastBranchSelection() && !isCastBranchSelected()) {
+            return new AlternatingStatus(
+                    getString(R.string.cast_branch_select_status), COLOR_STATUS_WARNING);
+        }
+        return getWorkflowStepFailStatus();
+    }
+
+    private AlternatingStatus getWorkflowStepFailStatus() {
+        for (int step = WF_STEP_LOCK; step >= WF_STEP_EPC; step--) {
+            if (wfStepStates[step] != WF_STATE_FAIL) continue;
+            switch (step) {
+                case WF_STEP_EPC:
+                    return new AlternatingStatus(
+                            getString(R.string.epc_retry_status), COLOR_STATUS_ERROR);
+                case WF_STEP_CSV:
+                    return new AlternatingStatus(
+                            getString(R.string.cast_branch_select_status), COLOR_STATUS_WARNING);
+                case WF_STEP_PWD:
+                    return new AlternatingStatus("chyba hesla", COLOR_STATUS_ERROR);
+                case WF_STEP_LOCK:
+                    return new AlternatingStatus("chyba zamčení", COLOR_STATUS_ERROR);
+                default:
+                    break;
+            }
+        }
+        return null;
+    }
+
+    private void scheduleStatusAlternationTick(long delayMs) {
+        if (statusAlternationTick == null) {
+            statusAlternationTick = () -> {
+                if (!statusAlternationActive) return;
+                AlternatingStatus alt = resolveAlternatingStatus();
+                if (alt == null) {
+                    stopStatusAlternation();
+                    if (shouldShowWorkflowStepIndicators()) {
+                        showWorkflowStepIndicatorsOnly();
+                    }
+                    return;
+                }
+                statusAlternationShowingMessage = !statusAlternationShowingMessage;
+                if (statusAlternationShowingMessage) {
+                    showStatusTextOnly(alt.text, alt.color);
+                    scheduleStatusAlternationTick(STATUS_ALT_SHOW_MESSAGE_MS);
+                } else {
+                    showWorkflowStepIndicatorsOnly();
+                    scheduleStatusAlternationTick(STATUS_ALT_SHOW_INDICATORS_MS);
+                }
+            };
+        }
+        ui.removeCallbacks(statusAlternationTick);
+        ui.postDelayed(statusAlternationTick, delayMs);
+    }
+
+    private void startStatusAlternation(boolean showMessageFirst) {
+        AlternatingStatus alt = resolveAlternatingStatus();
+        if (alt == null) return;
+        statusAlternationActive = true;
+        statusAlternationShowingMessage = showMessageFirst;
+        if (showMessageFirst) {
+            showStatusTextOnly(alt.text, alt.color);
+            scheduleStatusAlternationTick(STATUS_ALT_SHOW_MESSAGE_MS);
+        } else {
+            showWorkflowStepIndicatorsOnly();
+            scheduleStatusAlternationTick(STATUS_ALT_SHOW_INDICATORS_MS);
+        }
+    }
+
     private void updateWorkflowStepIndicatorsVisibility() {
-        boolean show = shouldShowWorkflowStepIndicators();
-        workflowStepIndicators.setVisibility(show ? View.VISIBLE : View.GONE);
-        tvReaderStatus.setVisibility(show ? View.GONE : View.VISIBLE);
+        if (!shouldShowWorkflowStepIndicators()) {
+            stopStatusAlternation();
+            workflowStepIndicators.setVisibility(View.GONE);
+            return;
+        }
+        AlternatingStatus alt = resolveAlternatingStatus();
+        if (alt != null) {
+            if (!statusAlternationActive) {
+                startStatusAlternation(true);
+            }
+            return;
+        }
+        stopStatusAlternation();
+        showWorkflowStepIndicatorsOnly();
     }
 
     private void resetWorkflowStepIndicators() {
@@ -1543,6 +1661,9 @@ public class MainActivity extends AppCompatActivity {
                 || currentVyhybka.castMax - currentVyhybka.castMin + 1 != 3) {
             castHintBox.setVisibility(View.GONE);
             if (castBranchGroup != null) castBranchGroup.setVisibility(View.GONE);
+            if (!workflowRunning) {
+                updateWorkflowStepIndicatorsVisibility();
+            }
             return;
         }
         ensureVyhybkaRoBranches(currentTudu != null ? currentTudu.code : null, currentVyhybka);
@@ -1553,6 +1674,9 @@ public class MainActivity extends AppCompatActivity {
         if (partName == null) {
             castHintBox.setVisibility(View.GONE);
             if (castBranchGroup != null) castBranchGroup.setVisibility(View.GONE);
+            if (!workflowRunning) {
+                updateWorkflowStepIndicatorsVisibility();
+            }
             return;
         }
         String prefix = getString(R.string.cast_hint_prefix);
@@ -1593,6 +1717,9 @@ public class MainActivity extends AppCompatActivity {
             castBranchGroup.setVisibility(View.GONE);
         }
         castHintBox.setVisibility(View.VISIBLE);
+        if (!workflowRunning) {
+            updateWorkflowStepIndicatorsVisibility();
+        }
     }
 
     private void applyCastAccent(SpannableString span, int start, int end) {
@@ -1755,10 +1882,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setActionStatus(String text, int color) {
-        tvReaderStatus.setText(text);
-        tvReaderStatus.setTextColor(color);
-        tvReaderStatus.setVisibility(View.VISIBLE);
-        workflowStepIndicators.setVisibility(View.GONE);
+        stopStatusAlternation();
+        showStatusTextOnly(text, color);
     }
 
     private void setActionStatusReady() {
@@ -1786,6 +1911,7 @@ public class MainActivity extends AppCompatActivity {
                     tvReaderStatus.setText(getString(R.string.gps_tudu_wait));
                     tvReaderStatus.setTextColor(COLOR_STATUS_GPS_WAIT);
                 }
+                stopStatusAlternation();
                 tvReaderStatus.setVisibility(View.VISIBLE);
                 workflowStepIndicators.setVisibility(View.GONE);
                 refreshGpsStatus(false);
@@ -2231,6 +2357,9 @@ public class MainActivity extends AppCompatActivity {
         castBranchGroup.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
             if (!isChecked) return;
             castBranchHlavni = checkedId == R.id.btnCastHlavni;
+            if (!workflowRunning) {
+                updateWorkflowStepIndicatorsVisibility();
+            }
         });
     }
 
@@ -2255,7 +2384,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean requireCastBranchSelection() {
-        return !requiresCastBranchSelection() || isCastBranchSelected();
+        if (!requiresCastBranchSelection() || isCastBranchSelected()) return true;
+        startStatusAlternation(true);
+        return false;
     }
 
     private boolean isDualRoVyhybka(Tudu.Vyhybka v) {
@@ -4231,6 +4362,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         dbLoadGeneration++;
         cancelGpsLookupTimeout();
+        stopStatusAlternation();
         if (locationCache != null) locationCache.stop();
         closeDzsDatabase();
         super.onDestroy();
