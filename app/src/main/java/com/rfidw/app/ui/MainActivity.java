@@ -956,6 +956,17 @@ public class MainActivity extends AppCompatActivity {
         return missing;
     }
 
+    private CharSequence formatVyhybkaPickerTitle(int totalCount, int missingGpsCount) {
+        if (totalCount <= 0) {
+            return getString(R.string.vyhybka_picker_title);
+        }
+        if (missingGpsCount > 0) {
+            return getString(R.string.vyhybka_picker_title_total_missing_gps,
+                    totalCount, missingGpsCount);
+        }
+        return getString(R.string.vyhybka_picker_title_total, totalCount);
+    }
+
     private void showVyhybkaPickerDialog(List<VyhybkaPickerPreparedItem> itemsSource,
                                          int missingGpsCount) {
         final List<VyhybkaPickerPreparedItem> allItems = new ArrayList<>(itemsSource);
@@ -1002,9 +1013,7 @@ public class MainActivity extends AppCompatActivity {
         refreshChecked.run();
 
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(missingGpsCount > 0
-                        ? getString(R.string.vyhybka_picker_title_missing_gps, missingGpsCount)
-                        : getString(R.string.vyhybka_picker_title))
+                .setTitle(formatVyhybkaPickerTitle(allItems.size(), missingGpsCount))
                 .setView(dialogView)
                 .setNegativeButton("Zrušit", null)
                 .create();

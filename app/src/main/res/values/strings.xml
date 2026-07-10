@@ -36,7 +36,8 @@
     <string name="vyhybka_picker_missing_many">\u00A0čipů</string>
     <string name="vyhybka_picker_no_gps">bez GPS</string>
     <string name="vyhybka_picker_title">Vyberte výhybku</string>
-    <string name="vyhybka_picker_title_missing_gps">Vyberte výhybku (%1$d bez GPS v DB)</string>
+    <string name="vyhybka_picker_title_total">Vyberte výhybku (%1$d v UDU)</string>
+    <string name="vyhybka_picker_title_total_missing_gps">Vyberte výhybku (%1$d v UDU, %2$d bez GPS v DB)</string>
     <string name="power_preset_koleji">🛤 v koleji</string>
     <string name="power_preset_ruce">✋ v ruce</string>
     <string name="delete_confirm_title">Opravdu chcete vymazat záznam?</string>
