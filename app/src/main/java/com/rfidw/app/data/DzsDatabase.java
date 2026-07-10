@@ -948,7 +948,14 @@ public class DzsDatabase implements Closeable {
         if (udu == null || udu.trim().isEmpty()) {
             return Collections.emptyList();
         }
-        return queryTuduListFromSql(null, udu.trim());
+        String trimmed = udu.trim();
+        if (fullIndexReady) {
+            List<Tudu> fromMemory = buildTuduListFromRoIndexForUdu(trimmed);
+            if (!fromMemory.isEmpty()) {
+                return fromMemory;
+            }
+        }
+        return queryTuduListFromSql(null, trimmed);
     }
 
     public List<Tudu> loadTuduForCodes(Collection<String> codes) {
@@ -983,17 +990,36 @@ public class DzsDatabase implements Closeable {
         for (List<RoIndexEntry> entries : roByPairKey.values()) {
             for (RoIndexEntry ro : entries) {
                 if (codes != null && !codes.contains(ro.tudu)) continue;
-                Tudu tudu = map.get(ro.tudu);
-                if (tudu == null) {
-                    tudu = new Tudu(ro.tudu);
-                    map.put(ro.tudu, tudu);
-                }
-                Tudu.Vyhybka v = tudu.findOrCreate(ro.vyhybka, ro.iob);
-                if (ro.castMin != null) v.castMin = ro.castMin;
-                if (ro.castMax != null) v.castMax = ro.castMax;
-                v.addRoBranch(ro.roId, ro.poloha, ro.kmExtChip1, ro.kmExtOther);
+                addRoIndexEntryToTuduMap(map, ro);
             }
         }
+        return sortedTuduValues(map);
+    }
+
+    private List<Tudu> buildTuduListFromRoIndexForUdu(String uduCode) {
+        Map<String, Tudu> map = new LinkedHashMap<>();
+        for (List<RoIndexEntry> entries : roByPairKey.values()) {
+            for (RoIndexEntry ro : entries) {
+                if (!uduCode.equals(Tudu.uduCode(ro.tudu))) continue;
+                addRoIndexEntryToTuduMap(map, ro);
+            }
+        }
+        return sortedTuduValues(map);
+    }
+
+    private static void addRoIndexEntryToTuduMap(Map<String, Tudu> map, RoIndexEntry ro) {
+        Tudu tudu = map.get(ro.tudu);
+        if (tudu == null) {
+            tudu = new Tudu(ro.tudu);
+            map.put(ro.tudu, tudu);
+        }
+        Tudu.Vyhybka v = tudu.findOrCreate(ro.vyhybka, ro.iob);
+        if (ro.castMin != null) v.castMin = ro.castMin;
+        if (ro.castMax != null) v.castMax = ro.castMax;
+        v.addRoBranch(ro.roId, ro.poloha, ro.kmExtChip1, ro.kmExtOther);
+    }
+
+    private static List<Tudu> sortedTuduValues(Map<String, Tudu> map) {
         List<Tudu> out = new ArrayList<>(map.values());
         out.sort(Comparator.comparing(t -> t.code));
         return out;
@@ -1223,8 +1249,17 @@ public class DzsDatabase implements Closeable {
         if (uduCode == null || uduCode.isEmpty()) {
             return Collections.emptyMap();
         }
+        return findVyhybkaDistancesForUdu(loadTuduForUdu(uduCode), latitude, longitude);
+    }
+
+    /** Vzdálenosti pro již načtený seznam TUDU v rámci UDU (bez druhého SQL dotazu). */
+    public Map<String, Double> findVyhybkaDistancesForUdu(List<Tudu> tudus,
+                                                          double latitude, double longitude) {
+        if (tudus == null || tudus.isEmpty()) {
+            return Collections.emptyMap();
+        }
         Map<String, Double> result = new HashMap<>();
-        for (Tudu t : loadTuduForUdu(uduCode)) {
+        for (Tudu t : tudus) {
             Map<Integer, Double> perTudu = findVyhybkaDistancesForTudu(t.code, latitude, longitude);
             for (Tudu.Vyhybka v : t.vyhybky) {
                 Double dist = perTudu.get(v.cislo);
