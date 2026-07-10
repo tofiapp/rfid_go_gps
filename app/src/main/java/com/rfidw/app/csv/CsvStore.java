@@ -120,6 +120,18 @@ public class CsvStore {
         return last;
     }
 
+    /** Najde řádek pro danou výhybku a část (první shoda v pořadí zápisu). */
+    public synchronized Row findRowForCast(String tuduCode, int vyhybkaCislo, int cast) {
+        if (tuduCode == null || tuduCode.isEmpty()) return null;
+        for (Row r : rows.values()) {
+            if (!tuduCode.equals(r.tudu)) continue;
+            if (parseInt(r.vyhybka, -1) != vyhybkaCislo) continue;
+            if (parseInt(r.cast, -1) != cast) continue;
+            return r;
+        }
+        return null;
+    }
+
     /** Souhrn částí výhybky napříč všemi RO_ID (zpětná kompatibilita). */
     public synchronized Set<Integer> getWrittenCasts(String tuduCode, int vyhybkaCislo) {
         Set<Integer> merged = new HashSet<>();
