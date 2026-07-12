@@ -16,8 +16,8 @@
     <string name="cast_part_1">jazyk</string>
     <string name="cast_part_2">levé rameno</string>
     <string name="cast_part_3">pravé rameno</string>
-    <string name="cast_part_4_pair1">CA/CG</string>
-    <string name="cast_part_4_pair2">CB/CH</string>
+    <string name="cast_part_4_pair1">CA nebo CG</string>
+    <string name="cast_part_4_pair2">CB nebo CH</string>
     <string name="cast_branch_hlavni">hlavní</string>
     <string name="cast_branch_vedlejsi">vedlejší</string>
     <string name="cast_branch_select">Vyberte větev výhybky</string>

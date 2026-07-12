@@ -188,6 +188,11 @@ public class Tudu {
             return castMax - castMin + 1 == 4;
         }
 
+        /** Má oba páry RO větví pro 4částovou výhybku (CA/CG + CB/CH). */
+        public boolean hasFourPartRoBranches() {
+            return findCastPair1Branch() != null && findCastPair2Branch() != null;
+        }
+
         public RoBranch findCastPair1Branch() {
             for (RoBranch b : roBranches) {
                 if (b.isCastPair1()) return b;
@@ -206,6 +211,29 @@ public class Tudu {
         public RoBranch resolveBranchForCastFourPart(int cast) {
             if (cast <= 2) return findCastPair1Branch();
             if (cast <= 4) return findCastPair2Branch();
+            return null;
+        }
+
+        /**
+         * Popisek části 4částové výhybky pro nápovědu (CA, CB, CG nebo CH).
+         * Odvodí chybějící pár z druhého páru, pokud je v DB jen jedna větev.
+         */
+        public String castFourPartLabel(int cast) {
+            RoBranch branch = resolveBranchForCastFourPart(cast);
+            if (branch != null && branch.poloha != null && !branch.poloha.isEmpty()) {
+                return branch.poloha.trim();
+            }
+            RoBranch sibling = cast <= 2 ? findCastPair2Branch() : findCastPair1Branch();
+            if (sibling != null && sibling.poloha != null && sibling.poloha.length() >= 2) {
+                char second = Character.toUpperCase(sibling.poloha.trim().charAt(1));
+                if (cast <= 2) {
+                    if (second == 'B') return "CA";
+                    if (second == 'H') return "CG";
+                } else {
+                    if (second == 'A') return "CB";
+                    if (second == 'G') return "CH";
+                }
+            }
             return null;
         }
 
