@@ -1103,9 +1103,14 @@ public class DzsDatabase implements Closeable {
         }
         String normIob = Tudu.Vyhybka.normalizeIob(iob);
         List<Tudu.Vyhybka.RoBranch> fromIndex = collectRoBranchesFromIndex(tuduCode, cislo, normIob);
-        if (!fromIndex.isEmpty()
-                && (fullIndexReady || branchesCoverDualRo(fromIndex) || branchesCoverFourPart(fromIndex))) {
-            return dedupeBranches(fromIndex);
+        if (!fromIndex.isEmpty()) {
+            if (Tudu.Vyhybka.hasFourPartPolohaFamily(fromIndex)) {
+                if (fullIndexReady || Tudu.Vyhybka.branchesCoverFourPartWriting(fromIndex)) {
+                    return dedupeBranches(fromIndex);
+                }
+            } else if (fullIndexReady || branchesCoverDualRo(fromIndex)) {
+                return dedupeBranches(fromIndex);
+            }
         }
         List<Tudu.Vyhybka.RoBranch> merged = new ArrayList<>(fromIndex);
         merged.addAll(queryRoBranchesFromSql(tuduCode, cislo, normIob));
@@ -1137,16 +1142,9 @@ public class DzsDatabase implements Closeable {
         return hlavni && vedlejsi;
     }
 
-    /** Index může mít jen jeden pár – pro 4částové výhybky doplníme z SQL, dokud nejsou CA/CG i CB/CH. */
+    /** Index může mít jen CC/CD – pro zápis potřebujeme CA/CB nebo CG/CH. */
     private static boolean branchesCoverFourPart(List<Tudu.Vyhybka.RoBranch> branches) {
-        if (branches.isEmpty()) return false;
-        boolean pair1 = false;
-        boolean pair2 = false;
-        for (Tudu.Vyhybka.RoBranch b : branches) {
-            if (b.isCastPair1()) pair1 = true;
-            if (b.isCastPair2()) pair2 = true;
-        }
-        return pair1 && pair2;
+        return Tudu.Vyhybka.branchesCoverFourPartWriting(branches);
     }
 
     private List<Tudu.Vyhybka.RoBranch> queryRoBranchesFromSql(
