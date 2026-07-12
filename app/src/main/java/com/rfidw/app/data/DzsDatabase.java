@@ -1014,8 +1014,8 @@ public class DzsDatabase implements Closeable {
             map.put(ro.tudu, tudu);
         }
         Tudu.Vyhybka v = tudu.findOrCreate(ro.vyhybka, ro.iob);
-        if (ro.castMin != null) v.castMin = ro.castMin;
-        if (ro.castMax != null) v.castMax = ro.castMax;
+        if (ro.castMin != null) v.castMin = Math.min(v.castMin, ro.castMin);
+        if (ro.castMax != null) v.castMax = Math.max(v.castMax, ro.castMax);
         v.addRoBranch(ro.roId, ro.poloha, ro.kmExtChip1, ro.kmExtOther);
     }
 
@@ -1091,8 +1091,8 @@ public class DzsDatabase implements Closeable {
         if (roColumns.hasKmExtColumns()) col += 3;
         Tudu.Vyhybka v = tudu.findOrCreate(cislo, iob);
         CastRange cast = resolveCastRange(cmin, cmax, poloha);
-        if (cast.castMin != null) v.castMin = cast.castMin;
-        if (cast.castMax != null) v.castMax = cast.castMax;
+        if (cast.castMin != null) v.castMin = Math.min(v.castMin, cast.castMin);
+        if (cast.castMax != null) v.castMax = Math.max(v.castMax, cast.castMax);
         v.addRoBranch(roId, poloha, kmExt.chip1, kmExt.other);
     }
 

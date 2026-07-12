@@ -124,11 +124,11 @@ public class TuduLoader {
                 Tudu.Vyhybka v = tudu.findOrCreate(cislo);
                 if (cols.length >= 3) {
                     Integer cmin = toInt(cols[2]);
-                    if (cmin != null) v.castMin = cmin;
+                    if (cmin != null) v.castMin = Math.min(v.castMin, cmin);
                 }
                 if (cols.length >= 4) {
                     Integer cmax = toInt(cols[3]);
-                    if (cmax != null) v.castMax = cmax;
+                    if (cmax != null) v.castMax = Math.max(v.castMax, cmax);
                 }
             }
         }

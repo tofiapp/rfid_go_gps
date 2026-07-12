@@ -755,14 +755,18 @@ public class MainActivity extends AppCompatActivity {
             if (existing.code.equals(loaded.code)) {
                 for (Tudu.Vyhybka v : loaded.vyhybky) {
                     Tudu.Vyhybka target = existing.findOrCreate(v.cislo, v.iob);
-                    if (v.castMin > 0) target.castMin = v.castMin;
-                    if (v.castMax > 0) target.castMax = v.castMax;
+                    if (v.castMin > 0) target.castMin = Math.min(target.castMin, v.castMin);
+                    if (v.castMax > 0) target.castMax = Math.max(target.castMax, v.castMax);
                     for (Tudu.Vyhybka.RoBranch branch : v.getRoBranches()) {
                         target.addRoBranch(branch.roId, branch.poloha, branch.kmExtChip1, branch.kmExtOther);
                     }
+                    target.reconcileCastRangeFromBranches();
                 }
                 return;
             }
+        }
+        for (Tudu.Vyhybka v : loaded.vyhybky) {
+            v.reconcileCastRangeFromBranches();
         }
         tuduList.add(loaded);
     }
@@ -1301,6 +1305,7 @@ public class MainActivity extends AppCompatActivity {
         }
         if (currentVyhybka != null) {
             ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
+            currentVyhybka.reconcileCastRangeFromBranches();
         }
     }
 
@@ -1611,9 +1616,11 @@ public class MainActivity extends AppCompatActivity {
             tvSummaryVyhybka.setText("—");
         }
         if (epc.cast > 0) {
-            int total = currentVyhybka != null
-                    ? currentVyhybka.castMax - currentVyhybka.castMin + 1
-                    : 3;
+            int total = castCountFor(currentVyhybka);
+            if (currentVyhybka == null && epc.tudu != null && !epc.tudu.isEmpty() && epc.vyhybka > 0) {
+                int fromCsv = maxWrittenCastForVyhybka(epc.tudu, epc.vyhybka);
+                total = Math.max(total, Math.max(epc.cast, fromCsv));
+            }
             String current = String.valueOf(epc.cast);
             String rest = "/" + total;
             SpannableString span = new SpannableString(current + rest);
@@ -1671,17 +1678,56 @@ public class MainActivity extends AppCompatActivity {
         lastRecordBox.setVisibility(View.VISIBLE);
     }
 
-    private int castTotalForRow(CsvStore.Row row) {
-        if (row == null) return 3;
+    private int castCountFor(Tudu.Vyhybka v) {
+        return v != null ? v.resolvedCastCount() : 3;
+    }
+
+    private Tudu.Vyhybka findVyhybkaForRow(CsvStore.Row row) {
+        if (row == null || row.tudu == null || row.tudu.isEmpty()) return null;
+        int cislo = parseInt(row.vyhybka, -1);
+        if (cislo < 0) return null;
+        String iob = parseVyhybkaIob(row.vyhybka);
         for (Tudu t : tuduList) {
             if (!t.code.equals(row.tudu)) continue;
             for (Tudu.Vyhybka v : t.vyhybky) {
-                if (v.cislo == parseInt(row.vyhybka, -1)) {
-                    return v.castMax - v.castMin + 1;
-                }
+                if (v.cislo != cislo) continue;
+                if (iob.isEmpty() || v.iob.equals(iob)) return v;
+            }
+            for (Tudu.Vyhybka v : t.vyhybky) {
+                if (v.cislo == cislo) return v;
             }
         }
-        return 3;
+        return null;
+    }
+
+    private static String parseVyhybkaIob(String vyhybkaLabel) {
+        if (vyhybkaLabel == null) return "";
+        String trimmed = vyhybkaLabel.trim();
+        if (trimmed.length() < 2) return "";
+        char last = Character.toUpperCase(trimmed.charAt(trimmed.length() - 1));
+        if (Character.isDigit(last)) return "";
+        return String.valueOf(last);
+    }
+
+    private int maxWrittenCastForVyhybka(String tuduCode, int cislo) {
+        if (csvStore == null || tuduCode == null || tuduCode.isEmpty() || cislo < 0) return 0;
+        int max = 0;
+        for (int cast : csvStore.getWrittenCasts(tuduCode, cislo)) {
+            if (cast > max) max = cast;
+        }
+        return max;
+    }
+
+    private int castTotalForRow(CsvStore.Row row) {
+        if (row == null) return 3;
+        int castInRow = parseInt(row.cast, 0);
+        int fromCsv = maxWrittenCastForVyhybka(row.tudu, parseInt(row.vyhybka, -1));
+        int fromPoloha = 0;
+        Integer polohaMax = Tudu.Vyhybka.RoBranch.castMaxFromPoloha(row.poloha);
+        if (polohaMax != null) fromPoloha = polohaMax;
+        Tudu.Vyhybka v = findVyhybkaForRow(row);
+        int fromVyhybka = castCountFor(v);
+        return Math.max(Math.max(fromVyhybka, fromPoloha), Math.max(castInRow, fromCsv));
     }
 
     private void updateCastHint() {
@@ -1693,7 +1739,7 @@ public class MainActivity extends AppCompatActivity {
             }
             return;
         }
-        int castCount = currentVyhybka.castMax - currentVyhybka.castMin + 1;
+        int castCount = castCountFor(currentVyhybka);
         if (castCount != 3 && castCount != 4) {
             castHintBox.setVisibility(View.GONE);
             if (castBranchGroup != null) castBranchGroup.setVisibility(View.GONE);
@@ -2348,6 +2394,47 @@ public class MainActivity extends AppCompatActivity {
         if (dzsDatabase != null && gpsAutoSelection) {
             ensureGpsForTuduLookup();
         }
+        resyncCastRangeFromPersistedState();
+    }
+
+    /** Po načtení CSV/DB doplní rozsah částí výhybky a obnoví ukazatele čipů. */
+    private void resyncCastRangeFromPersistedState() {
+        if (csvStore == null || csvStore.size() == 0) return;
+        CsvStore.Row last = csvStore.getLastRow();
+        if (last == null) return;
+
+        if (currentTudu == null && last.tudu != null) {
+            for (Tudu t : tuduList) {
+                if (t.code.equals(last.tudu)) {
+                    currentTudu = t;
+                    break;
+                }
+            }
+        }
+        if (currentTudu != null && dzsDatabase != null) {
+            List<Tudu> loaded = dzsDatabase.loadTuduForUdu(currentTudu.uduCode());
+            for (Tudu t : loaded) {
+                mergeTuduIntoList(t);
+            }
+            if (currentTudu.code.equals(last.tudu)) {
+                syncCurrentVyhybkaAfterReload();
+            }
+        }
+        Tudu.Vyhybka rowVyhybka = findVyhybkaForRow(last);
+        if (rowVyhybka != null) {
+            rowVyhybka.ensureCastAtLeast(parseInt(last.cast, 0));
+            rowVyhybka.applyCastRangeFromPoloha(last.poloha);
+            if (currentTudu != null) {
+                ensureVyhybkaRoBranches(currentTudu.code, rowVyhybka);
+            }
+            rowVyhybka.reconcileCastRangeFromBranches();
+        }
+        if (currentVyhybka != null && currentTudu != null) {
+            ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
+            currentVyhybka.reconcileCastRangeFromBranches();
+        }
+        updateSummary1();
+        updateLastRecordPreview();
     }
 
     private void persistCsvAsync() {
@@ -2429,7 +2516,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean isDualRoVyhybka(Tudu.Vyhybka v) {
-        return v != null && v.castMax - v.castMin + 1 == 3 && v.hasDualRoBranches();
+        return v != null && castCountFor(v) == 3 && v.hasDualRoBranches();
     }
 
     private boolean isFourPartVyhybka(Tudu.Vyhybka v) {
@@ -2437,16 +2524,21 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void ensureVyhybkaRoBranches(String tuduCode, Tudu.Vyhybka v) {
-        if (tuduCode == null || tuduCode.isEmpty() || v == null || dzsDatabase == null) {
+        if (tuduCode == null || tuduCode.isEmpty() || v == null) {
+            return;
+        }
+        if (dzsDatabase == null) {
+            v.reconcileCastRangeFromBranches();
             return;
         }
         if (!v.getRoBranches().isEmpty()) {
-            int castCount = v.castMax - v.castMin + 1;
+            int castCount = castCountFor(v);
             if (castCount == 3 && !v.hasDualRoBranches()) {
                 // 3částová s jednou větví – zkusit doplnit druhou z DB
             } else if (castCount == 4 && !v.hasFourPartRoBranches()) {
                 // 4částová – doplnit zápisové páry CA/CB nebo CG/CH z DB
             } else {
+                v.reconcileCastRangeFromBranches();
                 return;
             }
         }
@@ -2455,13 +2547,14 @@ public class MainActivity extends AppCompatActivity {
         for (Tudu.Vyhybka.RoBranch branch : loaded) {
             v.addRoBranch(branch.roId, branch.poloha, branch.kmExtChip1, branch.kmExtOther);
         }
-        if (v.castMax - v.castMin + 1 == 4 && !v.hasFourPartRoBranches()) {
+        if (castCountFor(v) == 4 && !v.hasFourPartRoBranches()) {
             List<Tudu.Vyhybka.RoBranch> fromSql = dzsDatabase.queryRoBranchesForVyhybka(
                     tuduCode, v.cislo, v.iob);
             for (Tudu.Vyhybka.RoBranch branch : fromSql) {
                 v.addRoBranch(branch.roId, branch.poloha, branch.kmExtChip1, branch.kmExtOther);
             }
         }
+        v.reconcileCastRangeFromBranches();
     }
 
     private void updateDefaultCastBranch(int cast, int previousCast) {
@@ -3270,6 +3363,7 @@ public class MainActivity extends AppCompatActivity {
         if (skipCsvTuduRestore) {
             skipCsvTuduRestore = false;
         }
+        resyncCastRangeFromPersistedState();
         Runnable afterProximity = () -> {
             if (!gpsAutoSelection) {
                 if (epc.tudu != null && !epc.tudu.isEmpty()) {
@@ -3432,12 +3526,13 @@ public class MainActivity extends AppCompatActivity {
             resetCastBranchSelection();
         }
         if (uduChanged || vyhybkaChanged || epc.cast <= 0
-                || epc.cast < v.castMin || epc.cast > v.castMax) {
+                || epc.cast < v.resolvedCastMin() || epc.cast > v.resolvedCastMax()) {
             epc.cast = firstMissingCast(tudu.code, v);
         }
         refreshTemplate();
         updateStep1();
         updateSummary1();
+        updateLastRecordPreview();
     }
 
     private void closeDzsDatabase() {
@@ -3604,7 +3699,7 @@ public class MainActivity extends AppCompatActivity {
         if (epc.vyhybka > 0) {
             for (Tudu.Vyhybka v : t.vyhybky) {
                 if (v.cislo == epc.vyhybka) {
-                    if (epc.cast > v.castMax || isVyhybkaCompleteInCsv(t.code, v)) {
+                    if (epc.cast > v.resolvedCastMax() || isVyhybkaCompleteInCsv(t.code, v)) {
                         advanceToNextVyhybka();
                     } else {
                         int expected = firstMissingCast(t.code, v);
@@ -3714,6 +3809,8 @@ public class MainActivity extends AppCompatActivity {
             break;
         }
         if (currentTudu != null && currentVyhybka != null) {
+            currentVyhybka.ensureCastAtLeast(epc.cast);
+            currentVyhybka.applyCastRangeFromPoloha(row.poloha);
             List<String> roIds = CsvStore.rowRoIds(row);
             boolean hasRoIds = !(roIds.size() == 1 && roIds.get(0).isEmpty());
             if (hasRoIds) {
@@ -4178,7 +4275,7 @@ public class MainActivity extends AppCompatActivity {
         syncCurrentVyhybka();
         if (currentVyhybka != null) {
             int next = epc.cast + 1;
-            if (next > currentVyhybka.castMax) {
+            if (next > currentVyhybka.resolvedCastMax()) {
                 advanceToNextVyhybka();
             } else {
                 epc.cast = next;
@@ -4279,7 +4376,7 @@ public class MainActivity extends AppCompatActivity {
 
     private int countMissingCasts(String tuduCode, Tudu.Vyhybka v) {
         if (csvStore == null) {
-            return v.castMax - v.castMin + 1;
+            return castCountFor(v);
         }
         ensureVyhybkaRoBranches(tuduCode, v);
         if (isDualRoVyhybka(v)) {
@@ -4291,7 +4388,7 @@ public class MainActivity extends AppCompatActivity {
         }
         Set<Integer> written = getWrittenCastsForVyhybka(tuduCode, v);
         int missing = 0;
-        for (int c = v.castMin; c <= v.castMax; c++) {
+        for (int c = v.resolvedCastMin(); c <= v.resolvedCastMax(); c++) {
             if (!written.contains(c)) missing++;
         }
         return missing;
@@ -4300,7 +4397,7 @@ public class MainActivity extends AppCompatActivity {
     private int countWrittenCasts(String tuduCode, Tudu.Vyhybka v) {
         Set<Integer> written = getWrittenCastsForVyhybka(tuduCode, v);
         int count = 0;
-        for (int c = v.castMin; c <= v.castMax; c++) {
+        for (int c = v.resolvedCastMin(); c <= v.resolvedCastMax(); c++) {
             if (written.contains(c)) count++;
         }
         return count;
@@ -4308,7 +4405,7 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean isVyhybkaPartialInCsv(String tuduCode, Tudu.Vyhybka v) {
         int written = countWrittenCasts(tuduCode, v);
-        return written > 0 && written < v.castMax - v.castMin + 1;
+        return written > 0 && written < castCountFor(v);
     }
 
     private String vyhybkaDisplayLabel() {
@@ -4392,10 +4489,10 @@ public class MainActivity extends AppCompatActivity {
             if (!hasCastWrittenOnAnyBranch(tuduCode, v, 1)) return 1;
             if (!hasCastWrittenOnAnyBranch(tuduCode, v, 2)) return 2;
             if (!hasCastWrittenOnAnyBranch(tuduCode, v, 3)) return 3;
-            return v.castMax + 1;
+            return v.resolvedCastMax() + 1;
         }
         Set<Integer> written = getWrittenCastsForVyhybka(tuduCode, v);
-        for (int c = v.castMin; c <= v.castMax; c++) {
+        for (int c = v.resolvedCastMin(); c <= v.resolvedCastMax(); c++) {
             if (!written.contains(c)) return c;
         }
         return v.castMin;
