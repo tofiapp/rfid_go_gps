@@ -2455,6 +2455,13 @@ public class MainActivity extends AppCompatActivity {
         for (Tudu.Vyhybka.RoBranch branch : loaded) {
             v.addRoBranch(branch.roId, branch.poloha, branch.kmExtChip1, branch.kmExtOther);
         }
+        if (v.castMax - v.castMin + 1 == 4 && !v.hasFourPartRoBranches()) {
+            List<Tudu.Vyhybka.RoBranch> fromSql = dzsDatabase.queryRoBranchesForVyhybka(
+                    tuduCode, v.cislo, v.iob);
+            for (Tudu.Vyhybka.RoBranch branch : fromSql) {
+                v.addRoBranch(branch.roId, branch.poloha, branch.kmExtChip1, branch.kmExtOther);
+            }
+        }
     }
 
     private void updateDefaultCastBranch(int cast, int previousCast) {
@@ -2527,7 +2534,7 @@ public class MainActivity extends AppCompatActivity {
         if (currentVyhybka == null || currentTudu == null) return null;
         ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
         if (isFourPartVyhybka(currentVyhybka)) {
-            return currentVyhybka.resolveBranchForCastFourPart(cast);
+            return currentVyhybka.branchForFourPartCsv(cast);
         }
         List<Tudu.Vyhybka.RoBranch> branches = currentVyhybka.getRoBranches();
         if (branches.isEmpty()) return null;
@@ -4010,6 +4017,9 @@ public class MainActivity extends AppCompatActivity {
                 return false;
             }
             if (isFourPartVyhybka(currentVyhybka) && branch == null) {
+                branch = currentVyhybka.branchForFourPartCsv(cast);
+            }
+            if (isFourPartVyhybka(currentVyhybka) && branch == null) {
                 return false;
             }
             if (cast >= 2 && branch == null) {
@@ -4049,6 +4059,11 @@ public class MainActivity extends AppCompatActivity {
             toast(getString(R.string.gps_unavailable_toast));
         }
         RoKmColumns roKm = resolveRoKmColumns(epc.cast, branch);
+        String poloha = branch != null ? branch.poloha : "";
+        if (currentVyhybka != null && isFourPartVyhybka(currentVyhybka)) {
+            String label = currentVyhybka.castFourPartLabel(epc.cast);
+            if (label != null) poloha = label;
+        }
         return CsvRecordBuilder.build(
                 epc.idRfid,
                 epc24,
@@ -4056,7 +4071,7 @@ public class MainActivity extends AppCompatActivity {
                 epc.tudu,
                 csvVyhybkaLabel(String.valueOf(epc.vyhybka)),
                 epc.cast,
-                branch != null ? branch.poloha : "",
+                poloha,
                 roKm.roId1,
                 roKm.roId2,
                 roKm.kmExt,

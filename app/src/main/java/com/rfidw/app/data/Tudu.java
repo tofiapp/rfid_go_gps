@@ -112,30 +112,35 @@ public class Tudu {
                 return isVedlejsiPoloha(poloha);
             }
 
+            /** Druhé písmeno POLOHA u 4částové výhybky (C + písmeno). */
+            public static Character fourPartSecondLetter(String poloha) {
+                String code = normalizePoloha(poloha);
+                if (code.length() < 2 || code.charAt(0) != 'C') return null;
+                return code.charAt(1);
+            }
+
             /** POLOHA CA/CG/CE – první pár 4částové výhybky (čipy 1–2). */
             public static boolean isCastPair1Poloha(String poloha) {
-                String code = normalizePoloha(poloha);
-                return "CA".equals(code) || "CG".equals(code) || "CE".equals(code);
+                Character c = fourPartSecondLetter(poloha);
+                return c != null && (c == 'A' || c == 'G' || c == 'E');
             }
 
             /** POLOHA CB/CH/CF – druhý pár 4částové výhybky (čipy 3–4). */
             public static boolean isCastPair2Poloha(String poloha) {
-                String code = normalizePoloha(poloha);
-                return "CB".equals(code) || "CH".equals(code) || "CF".equals(code);
+                Character c = fourPartSecondLetter(poloha);
+                return c != null && (c == 'B' || c == 'H' || c == 'F');
             }
 
             /** Sada CA/CB/CC/CD – čipy 1–2 = CA, čipy 3–4 = CB. */
             public static boolean isAbcdFourPartPoloha(String poloha) {
-                String code = normalizePoloha(poloha);
-                return "CA".equals(code) || "CB".equals(code)
-                        || "CC".equals(code) || "CD".equals(code);
+                Character c = fourPartSecondLetter(poloha);
+                return c != null && c >= 'A' && c <= 'D';
             }
 
             /** Sada CE/CF/CG/CH – čipy 1–2 = CG, čipy 3–4 = CH. */
             public static boolean isEfghFourPartPoloha(String poloha) {
-                String code = normalizePoloha(poloha);
-                return "CE".equals(code) || "CF".equals(code)
-                        || "CG".equals(code) || "CH".equals(code);
+                Character c = fourPartSecondLetter(poloha);
+                return c != null && c >= 'E' && c <= 'H';
             }
 
             public static String normalizePoloha(String poloha) {
@@ -224,38 +229,26 @@ public class Tudu {
         /** Index/SQL obsahuje oba zápisové páry pro 4částovou výhybku. */
         public static boolean branchesCoverFourPartWriting(List<RoBranch> branches) {
             if (branches == null || branches.isEmpty()) return false;
-            boolean abcd = false;
-            boolean efgh = false;
+            FourPartFamily family = FourPartFamily.UNKNOWN;
             for (RoBranch b : branches) {
-                if (RoBranch.isAbcdFourPartPoloha(b.poloha)) abcd = true;
-                if (RoBranch.isEfghFourPartPoloha(b.poloha)) efgh = true;
-            }
-            if (abcd) {
-                return findBranchByPoloha(branches, "CA") != null
-                        && findBranchByPoloha(branches, "CB") != null;
-            }
-            if (efgh) {
-                return findBranchByPoloha(branches, "CG") != null
-                        && findBranchByPoloha(branches, "CH") != null;
-            }
-            return false;
-        }
-
-        private static RoBranch findBranchByPoloha(List<RoBranch> branches, String... codes) {
-            if (branches == null || codes == null) return null;
-            for (String code : codes) {
-                String wanted = RoBranch.normalizePoloha(code);
-                for (RoBranch b : branches) {
-                    if (wanted.equals(RoBranch.normalizePoloha(b.poloha))) {
-                        return b;
-                    }
+                if (RoBranch.isAbcdFourPartPoloha(b.poloha)) {
+                    family = FourPartFamily.ABCD;
+                    break;
+                }
+                if (RoBranch.isEfghFourPartPoloha(b.poloha)) {
+                    family = FourPartFamily.EFGH;
+                    break;
                 }
             }
-            return null;
-        }
-
-        private RoBranch findBranchByPoloha(String... codes) {
-            return findBranchByPoloha(roBranches, codes);
+            if (family == FourPartFamily.ABCD) {
+                return findBranchByWritingLetter(branches, 'A') != null
+                        && findBranchByWritingLetter(branches, 'B') != null;
+            }
+            if (family == FourPartFamily.EFGH) {
+                return findBranchByWritingLetter(branches, 'G') != null
+                        && findBranchByWritingLetter(branches, 'H') != null;
+            }
+            return false;
         }
 
         /** Sada 4částové výhybky podle POLOHA v DB. */
@@ -271,26 +264,66 @@ public class Tudu {
             ABCD, EFGH, UNKNOWN
         }
 
-        public RoBranch findCastPair1Branch() {
-            FourPartFamily family = fourPartFamily();
+        /** Zápisový kód POLOHA pro CSV (CA, CB, CG, CH). */
+        public static String fourPartWritingCode(FourPartFamily family, int cast) {
             if (family == FourPartFamily.ABCD) {
-                return findBranchByPoloha("CA");
+                return cast <= 2 ? "CA" : "CB";
             }
             if (family == FourPartFamily.EFGH) {
-                return findBranchByPoloha("CG");
+                return cast <= 2 ? "CG" : "CH";
             }
-            return findBranchByPoloha("CA", "CG", "CE");
+            return null;
+        }
+
+        /** Druhé písmeno zápisového páru (A/B pro ABCD, G/H pro EFGH). */
+        public static char fourPartWritingSecondLetter(FourPartFamily family, int cast) {
+            if (family == FourPartFamily.ABCD) {
+                return cast <= 2 ? 'A' : 'B';
+            }
+            if (family == FourPartFamily.EFGH) {
+                return cast <= 2 ? 'G' : 'H';
+            }
+            return '\0';
+        }
+
+        private static RoBranch findBranchByWritingLetter(List<RoBranch> branches, char secondLetter) {
+            if (branches == null || secondLetter == '\0') return null;
+            RoBranch exact = null;
+            RoBranch withSuffix = null;
+            for (RoBranch b : branches) {
+                String p = RoBranch.normalizePoloha(b.poloha);
+                if (p.length() < 2 || p.charAt(0) != 'C' || p.charAt(1) != secondLetter) continue;
+                if (p.length() == 2) {
+                    exact = b;
+                } else if (withSuffix == null) {
+                    withSuffix = b;
+                }
+            }
+            return exact != null ? exact : withSuffix;
+        }
+
+        private RoBranch findBranchByWritingLetter(char secondLetter) {
+            return findBranchByWritingLetter(roBranches, secondLetter);
+        }
+
+        public RoBranch findCastPair1Branch() {
+            FourPartFamily family = fourPartFamily();
+            char letter = fourPartWritingSecondLetter(family, 1);
+            if (letter != '\0') {
+                RoBranch found = findBranchByWritingLetter(letter);
+                if (found != null) return found;
+            }
+            return findBranchByWritingLetter('A');
         }
 
         public RoBranch findCastPair2Branch() {
             FourPartFamily family = fourPartFamily();
-            if (family == FourPartFamily.ABCD) {
-                return findBranchByPoloha("CB");
+            char letter = fourPartWritingSecondLetter(family, 3);
+            if (letter != '\0') {
+                RoBranch found = findBranchByWritingLetter(letter);
+                if (found != null) return found;
             }
-            if (family == FourPartFamily.EFGH) {
-                return findBranchByPoloha("CH");
-            }
-            return findBranchByPoloha("CB", "CH", "CF");
+            return findBranchByWritingLetter('B');
         }
 
         /** Větev pro čip 4částové výhybky: čipy 1–2 = CA/CG, čipy 3–4 = CB/CH. */
@@ -303,18 +336,27 @@ public class Tudu {
         /** Popisek části 4částové výhybky pro nápovědu – vždy konkrétní kód z DB sady. */
         public String castFourPartLabel(int cast) {
             if (cast <= 0 || cast > 4) return null;
+            FourPartFamily family = fourPartFamily();
+            String code = fourPartWritingCode(family, cast);
+            if (code != null) return code;
             RoBranch branch = resolveBranchForCastFourPart(cast);
             if (branch != null && branch.poloha != null && !branch.poloha.isEmpty()) {
                 return RoBranch.normalizePoloha(branch.poloha);
             }
-            FourPartFamily family = fourPartFamily();
-            if (family == FourPartFamily.ABCD) {
-                return cast <= 2 ? "CA" : "CB";
-            }
-            if (family == FourPartFamily.EFGH) {
-                return cast <= 2 ? "CG" : "CH";
-            }
             return null;
+        }
+
+        /**
+         * Větev pro zápis CSV – vždy vrátí POLOHA/RO_ID pokud je sada známa,
+         * i když v indexu chybí přesný řádek CA/CB.
+         */
+        public RoBranch branchForFourPartCsv(int cast) {
+            RoBranch branch = resolveBranchForCastFourPart(cast);
+            if (branch != null) return branch;
+            FourPartFamily family = fourPartFamily();
+            String poloha = fourPartWritingCode(family, cast);
+            if (poloha == null) return null;
+            return new RoBranch("", poloha, "", "");
         }
 
         /** Číslo výhybky s volitelným IOB pro náhled a CSV (např. 10A). */
