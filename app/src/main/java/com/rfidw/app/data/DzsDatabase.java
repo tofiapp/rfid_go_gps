@@ -1105,7 +1105,7 @@ public class DzsDatabase implements Closeable {
         List<Tudu.Vyhybka.RoBranch> fromIndex = collectRoBranchesFromIndex(tuduCode, cislo, normIob);
         if (!fromIndex.isEmpty()) {
             if (Tudu.Vyhybka.hasFourPartPolohaFamily(fromIndex)) {
-                if (fullIndexReady || Tudu.Vyhybka.branchesCoverFourPartWriting(fromIndex)) {
+                if (Tudu.Vyhybka.branchesCoverFourPartWriting(fromIndex)) {
                     return dedupeBranches(fromIndex);
                 }
             } else if (fullIndexReady || branchesCoverDualRo(fromIndex)) {
@@ -1140,11 +1140,6 @@ public class DzsDatabase implements Closeable {
             if (b.isVedlejsi()) vedlejsi = true;
         }
         return hlavni && vedlejsi;
-    }
-
-    /** Index může mít jen CC/CD – pro zápis potřebujeme CA/CB nebo CG/CH. */
-    private static boolean branchesCoverFourPart(List<Tudu.Vyhybka.RoBranch> branches) {
-        return Tudu.Vyhybka.branchesCoverFourPartWriting(branches);
     }
 
     private List<Tudu.Vyhybka.RoBranch> queryRoBranchesFromSql(
@@ -1191,9 +1186,21 @@ public class DzsDatabase implements Closeable {
     private static List<Tudu.Vyhybka.RoBranch> dedupeBranches(List<Tudu.Vyhybka.RoBranch> branches) {
         Map<String, Tudu.Vyhybka.RoBranch> map = new LinkedHashMap<>();
         for (Tudu.Vyhybka.RoBranch b : branches) {
-            if (!b.roId.isEmpty()) map.putIfAbsent(b.roId, b);
+            if (b.roId.isEmpty()) continue;
+            String key = b.roId + "\0" + Tudu.Vyhybka.RoBranch.normalizePoloha(b.poloha);
+            map.putIfAbsent(key, b);
         }
         return new ArrayList<>(map.values());
+    }
+
+    /** Všechny RO větve výhybky přímo z SQL (obejde zkrácený index). */
+    public List<Tudu.Vyhybka.RoBranch> queryRoBranchesForVyhybka(
+            String tuduCode, int cislo, String iob) {
+        if (tuduCode == null || tuduCode.isEmpty() || cislo <= 0) {
+            return Collections.emptyList();
+        }
+        return dedupeBranches(queryRoBranchesFromSql(
+                tuduCode, cislo, Tudu.Vyhybka.normalizeIob(iob)));
     }
 
     /** Najde nejbližší výhybku podle předpočítaných souřadnic (RO_ID). */
