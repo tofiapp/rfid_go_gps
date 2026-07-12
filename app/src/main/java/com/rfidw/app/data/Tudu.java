@@ -112,18 +112,35 @@ public class Tudu {
                 return isVedlejsiPoloha(poloha);
             }
 
-            /** POLOHA CA/CG – první pár 4částové výhybky (čipy 1–2). */
+            /** POLOHA CA/CG/CE – první pár 4částové výhybky (čipy 1–2). */
             public static boolean isCastPair1Poloha(String poloha) {
-                if (poloha == null || poloha.length() < 2) return false;
-                char c = Character.toUpperCase(poloha.trim().charAt(1));
-                return c == 'A' || c == 'G';
+                String code = normalizePoloha(poloha);
+                return "CA".equals(code) || "CG".equals(code) || "CE".equals(code);
             }
 
-            /** POLOHA CB/CH – druhý pár 4částové výhybky (čipy 3–4). */
+            /** POLOHA CB/CH/CF – druhý pár 4částové výhybky (čipy 3–4). */
             public static boolean isCastPair2Poloha(String poloha) {
-                if (poloha == null || poloha.length() < 2) return false;
-                char c = Character.toUpperCase(poloha.trim().charAt(1));
-                return c == 'B' || c == 'H';
+                String code = normalizePoloha(poloha);
+                return "CB".equals(code) || "CH".equals(code) || "CF".equals(code);
+            }
+
+            /** Sada CA/CB/CC/CD – čipy 1–2 = CA, čipy 3–4 = CB. */
+            public static boolean isAbcdFourPartPoloha(String poloha) {
+                String code = normalizePoloha(poloha);
+                return "CA".equals(code) || "CB".equals(code)
+                        || "CC".equals(code) || "CD".equals(code);
+            }
+
+            /** Sada CE/CF/CG/CH – čipy 1–2 = CG, čipy 3–4 = CH. */
+            public static boolean isEfghFourPartPoloha(String poloha) {
+                String code = normalizePoloha(poloha);
+                return "CE".equals(code) || "CF".equals(code)
+                        || "CG".equals(code) || "CH".equals(code);
+            }
+
+            public static String normalizePoloha(String poloha) {
+                if (poloha == null) return "";
+                return poloha.trim().toUpperCase(Locale.ROOT);
             }
 
             public boolean isCastPair1() {
@@ -183,28 +200,97 @@ public class Tudu {
             return findHlavniBranch() != null && findVedlejsiBranch() != null;
         }
 
-        /** 4částová výhybka (C-type): čipy 1–4, páry POLOHA CA/CG a CB/CH. */
+        /** 4částová výhybka (C-type): čipy 1–4. */
         public boolean isFourPart() {
             return castMax - castMin + 1 == 4;
         }
 
-        /** Má oba páry RO větví pro 4částovou výhybku (CA/CG + CB/CH). */
+        /** V DB je některá POLOHA ze sady CA/CB/CC/CD nebo CE/CF/CG/CH. */
+        public static boolean hasFourPartPolohaFamily(List<RoBranch> branches) {
+            if (branches == null) return false;
+            for (RoBranch b : branches) {
+                if (RoBranch.isAbcdFourPartPoloha(b.poloha) || RoBranch.isEfghFourPartPoloha(b.poloha)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /** Má oba zápisové páry RO větví (CA+CB nebo CG+CH). */
         public boolean hasFourPartRoBranches() {
             return findCastPair1Branch() != null && findCastPair2Branch() != null;
         }
 
-        public RoBranch findCastPair1Branch() {
-            for (RoBranch b : roBranches) {
-                if (b.isCastPair1()) return b;
+        /** Index/SQL obsahuje oba zápisové páry pro 4částovou výhybku. */
+        public static boolean branchesCoverFourPartWriting(List<RoBranch> branches) {
+            if (branches == null || branches.isEmpty()) return false;
+            boolean abcd = false;
+            boolean efgh = false;
+            for (RoBranch b : branches) {
+                if (RoBranch.isAbcdFourPartPoloha(b.poloha)) abcd = true;
+                if (RoBranch.isEfghFourPartPoloha(b.poloha)) efgh = true;
+            }
+            if (abcd) {
+                return findBranchByPoloha(branches, "CA") != null
+                        && findBranchByPoloha(branches, "CB") != null;
+            }
+            if (efgh) {
+                return findBranchByPoloha(branches, "CG") != null
+                        && findBranchByPoloha(branches, "CH") != null;
+            }
+            return false;
+        }
+
+        private static RoBranch findBranchByPoloha(List<RoBranch> branches, String... codes) {
+            if (branches == null || codes == null) return null;
+            for (String code : codes) {
+                String wanted = RoBranch.normalizePoloha(code);
+                for (RoBranch b : branches) {
+                    if (wanted.equals(RoBranch.normalizePoloha(b.poloha))) {
+                        return b;
+                    }
+                }
             }
             return null;
         }
 
-        public RoBranch findCastPair2Branch() {
+        private RoBranch findBranchByPoloha(String... codes) {
+            return findBranchByPoloha(roBranches, codes);
+        }
+
+        /** Sada 4částové výhybky podle POLOHA v DB. */
+        public FourPartFamily fourPartFamily() {
             for (RoBranch b : roBranches) {
-                if (b.isCastPair2()) return b;
+                if (RoBranch.isAbcdFourPartPoloha(b.poloha)) return FourPartFamily.ABCD;
+                if (RoBranch.isEfghFourPartPoloha(b.poloha)) return FourPartFamily.EFGH;
             }
-            return null;
+            return FourPartFamily.UNKNOWN;
+        }
+
+        public enum FourPartFamily {
+            ABCD, EFGH, UNKNOWN
+        }
+
+        public RoBranch findCastPair1Branch() {
+            FourPartFamily family = fourPartFamily();
+            if (family == FourPartFamily.ABCD) {
+                return findBranchByPoloha("CA");
+            }
+            if (family == FourPartFamily.EFGH) {
+                return findBranchByPoloha("CG");
+            }
+            return findBranchByPoloha("CA", "CG", "CE");
+        }
+
+        public RoBranch findCastPair2Branch() {
+            FourPartFamily family = fourPartFamily();
+            if (family == FourPartFamily.ABCD) {
+                return findBranchByPoloha("CB");
+            }
+            if (family == FourPartFamily.EFGH) {
+                return findBranchByPoloha("CH");
+            }
+            return findBranchByPoloha("CB", "CH", "CF");
         }
 
         /** Větev pro čip 4částové výhybky: čipy 1–2 = CA/CG, čipy 3–4 = CB/CH. */
@@ -214,25 +300,19 @@ public class Tudu {
             return null;
         }
 
-        /**
-         * Popisek části 4částové výhybky pro nápovědu (CA, CB, CG nebo CH).
-         * Odvodí chybějící pár z druhého páru, pokud je v DB jen jedna větev.
-         */
+        /** Popisek části 4částové výhybky pro nápovědu – vždy konkrétní kód z DB sady. */
         public String castFourPartLabel(int cast) {
+            if (cast <= 0 || cast > 4) return null;
             RoBranch branch = resolveBranchForCastFourPart(cast);
             if (branch != null && branch.poloha != null && !branch.poloha.isEmpty()) {
-                return branch.poloha.trim();
+                return RoBranch.normalizePoloha(branch.poloha);
             }
-            RoBranch sibling = cast <= 2 ? findCastPair2Branch() : findCastPair1Branch();
-            if (sibling != null && sibling.poloha != null && sibling.poloha.length() >= 2) {
-                char second = Character.toUpperCase(sibling.poloha.trim().charAt(1));
-                if (cast <= 2) {
-                    if (second == 'B') return "CA";
-                    if (second == 'H') return "CG";
-                } else {
-                    if (second == 'A') return "CB";
-                    if (second == 'G') return "CH";
-                }
+            FourPartFamily family = fourPartFamily();
+            if (family == FourPartFamily.ABCD) {
+                return cast <= 2 ? "CA" : "CB";
+            }
+            if (family == FourPartFamily.EFGH) {
+                return cast <= 2 ? "CG" : "CH";
             }
             return null;
         }

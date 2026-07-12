@@ -1898,20 +1898,7 @@ public class MainActivity extends AppCompatActivity {
 
     private String castPartName(int cast) {
         if (currentVyhybka != null && isFourPartVyhybka(currentVyhybka)) {
-            String label = currentVyhybka.castFourPartLabel(cast);
-            if (label != null && !label.isEmpty()) {
-                return label;
-            }
-            switch (cast) {
-                case 1:
-                case 2:
-                    return getString(R.string.cast_part_4_pair1);
-                case 3:
-                case 4:
-                    return getString(R.string.cast_part_4_pair2);
-                default:
-                    return null;
-            }
+            return currentVyhybka.castFourPartLabel(cast);
         }
         switch (cast) {
             case 1: return getString(R.string.cast_part_1);
@@ -2458,7 +2445,7 @@ public class MainActivity extends AppCompatActivity {
             if (castCount == 3 && !v.hasDualRoBranches()) {
                 // 3částová s jednou větví – zkusit doplnit druhou z DB
             } else if (castCount == 4 && !v.hasFourPartRoBranches()) {
-                // 4částová s neúplnými větvemi – doplnit CA/CB nebo CG/CH z DB
+                // 4částová – doplnit zápisové páry CA/CB nebo CG/CH z DB
             } else {
                 return;
             }
@@ -4095,7 +4082,7 @@ public class MainActivity extends AppCompatActivity {
      * RO_ID_1 / RO_ID_2:
      * čip 1 u dvojvětvé výhybky vyplní oba sloupce (hlavní JAx/JCx, vedlejší JBx/JDx),
      * čipy 2–3 jen sloupec odpovídající zvolené větvi.
-     * 4částová: čipy 1–2 = RO_ID_1 z CA/CG, čipy 3–4 = RO_ID_2 z CB/CH.
+     * 4částová: čipy 1–2 = RO_ID_1 z CA nebo CG, čipy 3–4 = RO_ID_2 z CB nebo CH.
      * KM_EXT: čip 1 = KM_REF (jednou, shodné pro obě větve), čipy 2–3 = druhá hodnota z OD/DO.
      */
     private RoKmColumns resolveRoKmColumns(int cast, Tudu.Vyhybka.RoBranch branch) {
