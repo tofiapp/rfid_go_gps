@@ -1898,9 +1898,9 @@ public class MainActivity extends AppCompatActivity {
 
     private String castPartName(int cast) {
         if (currentVyhybka != null && isFourPartVyhybka(currentVyhybka)) {
-            Tudu.Vyhybka.RoBranch branch = currentVyhybka.resolveBranchForCastFourPart(cast);
-            if (branch != null && branch.poloha != null && !branch.poloha.isEmpty()) {
-                return branch.poloha.trim();
+            String label = currentVyhybka.castFourPartLabel(cast);
+            if (label != null && !label.isEmpty()) {
+                return label;
             }
             switch (cast) {
                 case 1:
@@ -2457,6 +2457,8 @@ public class MainActivity extends AppCompatActivity {
             int castCount = v.castMax - v.castMin + 1;
             if (castCount == 3 && !v.hasDualRoBranches()) {
                 // 3částová s jednou větví – zkusit doplnit druhou z DB
+            } else if (castCount == 4 && !v.hasFourPartRoBranches()) {
+                // 4částová s neúplnými větvemi – doplnit CA/CB nebo CG/CH z DB
             } else {
                 return;
             }
