@@ -122,7 +122,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int POWER_PRESET_RUCE_DBM = 1;
     private static final long DEFAULT_ID_RFID = 400;
     /** Výchozí NEW PWD v kartě 4 – změňte zde při budoucí úpravě hesla. */
-    private static final String NEW_PWD_PRESET = "11112222";
+    private static final String NEW_PWD_PRESET = "12345678";
 
     private final UhfManager uhf = new UhfManager();
     private final EpcModel epc = new EpcModel();
