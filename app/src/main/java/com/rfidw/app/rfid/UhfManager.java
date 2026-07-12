@@ -35,12 +35,11 @@ public class UhfManager {
 
     /**
      * Preset access hesla zkoušená při selhání zápisu s uživatelským heslem.
-     * Třetí položka je zatím prázdná – doplní se později.
      */
     public static final String[] PRESET_ACCESS_PASSWORDS = {
             "11223344",
             "11112222",
-            null,
+            "12345678",
     };
 
     private RFIDWithUHFUART reader;

@@ -75,7 +75,7 @@ V běžném provozu se **nepoužívá 7řádková šablona EPC**. Výchozí rež
 - Čtečka načte tag v dosahu, přečte jeho **TID** a zapíše ho jako nové **EPC** (24 hex znaků, bank EPC, ptr 2, Len 6).
 - Jeden krok = načtení i přepis; operátor nemusí nic nastavovat v panelu Pokročilé.
 
-Po úspěšném zápisu se zobrazí původní EPC a TID tagu. Při selhání zápisu s uživatelským heslem se automaticky zkusí **preset hesla** `11223344`, `11112222`.
+Po úspěšném zápisu se zobrazí původní EPC a TID tagu. Při selhání zápisu s uživatelským heslem se automaticky zkusí **preset hesla** `11223344`, `11112222`, `12345678`.
 
 Po dokončení celého cyklu (spouště nebo ruční potvrzení) se automaticky:
 - zvýší `ID_RFID` o 1 (uloženo v aplikaci, minimum 400),
@@ -122,7 +122,7 @@ Aplikace při startu **automaticky načte** existující CSV a podle něj určí
 
 Spouště po zápisu EPC a CSV automaticky:
 
-1. **Zápis access hesla** – bank RESERVED, ptr 2, len 2 (8 hex znaků). Výchozí nové heslo: `11112222`.
+1. **Zápis access hesla** – bank RESERVED, ptr 2, len 2 (8 hex znaků). Výchozí nové heslo: `12345678`.
 2. **Zamčení tagu** – lock code `008020` (pevná hodnota).
 
 Stejný fallback na preset hesla jako u zápisu EPC.
@@ -191,9 +191,9 @@ Kromě presetů **v koleji / v ruce** lze v Pokročilých zadat konkrétní hodn
 
 V Pokročilých je viditelný průběh **plné indexace na pozadí** (procenta, fáze). Indexace sama probíhá automaticky při otevření DB; karta slouží hlavně pro přehled a diagnostiku.
 
-### Třetí preset access hesla
+### Preset access hesla
 
-Pole `PRESET_ACCESS_PASSWORDS` má třetí slot prázdný (`null`) – připraveno na doplnění dalšího známého hesla bez změny logiky fallbacku.
+Pole `PRESET_ACCESS_PASSWORDS` obsahuje známá hesla (`11223344`, `11112222`, `12345678`) zkoušená při selhání zápisu s uživatelským heslem.
 
 ---
 
