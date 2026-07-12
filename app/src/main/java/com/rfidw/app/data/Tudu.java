@@ -111,6 +111,28 @@ public class Tudu {
             public boolean isVedlejsi() {
                 return isVedlejsiPoloha(poloha);
             }
+
+            /** POLOHA CA/CG – první pár 4částové výhybky (čipy 1–2). */
+            public static boolean isCastPair1Poloha(String poloha) {
+                if (poloha == null || poloha.length() < 2) return false;
+                char c = Character.toUpperCase(poloha.trim().charAt(1));
+                return c == 'A' || c == 'G';
+            }
+
+            /** POLOHA CB/CH – druhý pár 4částové výhybky (čipy 3–4). */
+            public static boolean isCastPair2Poloha(String poloha) {
+                if (poloha == null || poloha.length() < 2) return false;
+                char c = Character.toUpperCase(poloha.trim().charAt(1));
+                return c == 'B' || c == 'H';
+            }
+
+            public boolean isCastPair1() {
+                return isCastPair1Poloha(poloha);
+            }
+
+            public boolean isCastPair2() {
+                return isCastPair2Poloha(poloha);
+            }
         }
 
         public List<RoBranch> getRoBranches() {
@@ -159,6 +181,32 @@ public class Tudu {
 
         public boolean hasDualRoBranches() {
             return findHlavniBranch() != null && findVedlejsiBranch() != null;
+        }
+
+        /** 4částová výhybka (C-type): čipy 1–4, páry POLOHA CA/CG a CB/CH. */
+        public boolean isFourPart() {
+            return castMax - castMin + 1 == 4;
+        }
+
+        public RoBranch findCastPair1Branch() {
+            for (RoBranch b : roBranches) {
+                if (b.isCastPair1()) return b;
+            }
+            return null;
+        }
+
+        public RoBranch findCastPair2Branch() {
+            for (RoBranch b : roBranches) {
+                if (b.isCastPair2()) return b;
+            }
+            return null;
+        }
+
+        /** Větev pro čip 4částové výhybky: čipy 1–2 = CA/CG, čipy 3–4 = CB/CH. */
+        public RoBranch resolveBranchForCastFourPart(int cast) {
+            if (cast <= 2) return findCastPair1Branch();
+            if (cast <= 4) return findCastPair2Branch();
+            return null;
         }
 
         /** Číslo výhybky s volitelným IOB pro náhled a CSV (např. 10A). */

@@ -1685,8 +1685,16 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateCastHint() {
-        if (currentVyhybka == null || epc.cast <= 0
-                || currentVyhybka.castMax - currentVyhybka.castMin + 1 != 3) {
+        if (currentVyhybka == null || epc.cast <= 0) {
+            castHintBox.setVisibility(View.GONE);
+            if (castBranchGroup != null) castBranchGroup.setVisibility(View.GONE);
+            if (!workflowRunning) {
+                updateWorkflowStepIndicatorsVisibility();
+            }
+            return;
+        }
+        int castCount = currentVyhybka.castMax - currentVyhybka.castMin + 1;
+        if (castCount != 3 && castCount != 4) {
             castHintBox.setVisibility(View.GONE);
             if (castBranchGroup != null) castBranchGroup.setVisibility(View.GONE);
             if (!workflowRunning) {
@@ -1889,6 +1897,22 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String castPartName(int cast) {
+        if (currentVyhybka != null && isFourPartVyhybka(currentVyhybka)) {
+            Tudu.Vyhybka.RoBranch branch = currentVyhybka.resolveBranchForCastFourPart(cast);
+            if (branch != null && branch.poloha != null && !branch.poloha.isEmpty()) {
+                return branch.poloha.trim();
+            }
+            switch (cast) {
+                case 1:
+                case 2:
+                    return getString(R.string.cast_part_4_pair1);
+                case 3:
+                case 4:
+                    return getString(R.string.cast_part_4_pair2);
+                default:
+                    return null;
+            }
+        }
         switch (cast) {
             case 1: return getString(R.string.cast_part_1);
             case 2: return getString(R.string.cast_part_2);
@@ -2421,13 +2445,19 @@ public class MainActivity extends AppCompatActivity {
         return v != null && v.castMax - v.castMin + 1 == 3 && v.hasDualRoBranches();
     }
 
+    private boolean isFourPartVyhybka(Tudu.Vyhybka v) {
+        return v != null && v.isFourPart();
+    }
+
     private void ensureVyhybkaRoBranches(String tuduCode, Tudu.Vyhybka v) {
         if (tuduCode == null || tuduCode.isEmpty() || v == null || dzsDatabase == null) {
             return;
         }
         if (!v.getRoBranches().isEmpty()) {
             int castCount = v.castMax - v.castMin + 1;
-            if (castCount != 3 || v.hasDualRoBranches()) {
+            if (castCount == 3 && !v.hasDualRoBranches()) {
+                // 3částová s jednou větví – zkusit doplnit druhou z DB
+            } else {
                 return;
             }
         }
@@ -2507,6 +2537,9 @@ public class MainActivity extends AppCompatActivity {
     private Tudu.Vyhybka.RoBranch resolveBranchForCast(int cast) {
         if (currentVyhybka == null || currentTudu == null) return null;
         ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
+        if (isFourPartVyhybka(currentVyhybka)) {
+            return currentVyhybka.resolveBranchForCastFourPart(cast);
+        }
         List<Tudu.Vyhybka.RoBranch> branches = currentVyhybka.getRoBranches();
         if (branches.isEmpty()) return null;
         if (cast == 1 || !isDualRoVyhybka(currentVyhybka)) {
@@ -3987,6 +4020,9 @@ public class MainActivity extends AppCompatActivity {
             if (cast >= 2 && isDualRoVyhybka(currentVyhybka) && !isCastBranchSelected()) {
                 return false;
             }
+            if (isFourPartVyhybka(currentVyhybka) && branch == null) {
+                return false;
+            }
             if (cast >= 2 && branch == null) {
                 return false;
             }
@@ -4057,11 +4093,22 @@ public class MainActivity extends AppCompatActivity {
      * RO_ID_1 / RO_ID_2:
      * čip 1 u dvojvětvé výhybky vyplní oba sloupce (hlavní JAx/JCx, vedlejší JBx/JDx),
      * čipy 2–3 jen sloupec odpovídající zvolené větvi.
+     * 4částová: čipy 1–2 = RO_ID_1 z CA/CG, čipy 3–4 = RO_ID_2 z CB/CH.
      * KM_EXT: čip 1 = KM_REF (jednou, shodné pro obě větve), čipy 2–3 = druhá hodnota z OD/DO.
      */
     private RoKmColumns resolveRoKmColumns(int cast, Tudu.Vyhybka.RoBranch branch) {
         if (currentVyhybka == null) {
             return new RoKmColumns("", "", "");
+        }
+        if (isFourPartVyhybka(currentVyhybka)) {
+            String roId1 = "";
+            String roId2 = "";
+            if (cast <= 2 && branch != null) {
+                roId1 = branch.roId;
+            } else if (cast >= 3 && branch != null) {
+                roId2 = branch.roId;
+            }
+            return new RoKmColumns(roId1, roId2, "");
         }
         Tudu.Vyhybka.RoBranch hlavni = currentVyhybka.findHlavniBranch();
         Tudu.Vyhybka.RoBranch vedlejsi = currentVyhybka.findVedlejsiBranch();
@@ -4082,8 +4129,11 @@ public class MainActivity extends AppCompatActivity {
         return new RoKmColumns(roId1, roId2, resolveKmExtForCast(cast, branch));
     }
 
-    /** KM_EXT z OD/DO/KM_REF: čip 1 = KM_REF, čipy 2–3 = druhá hodnota podle RO_ID. */
+    /** KM_EXT z OD/DO/KM_REF: čip 1 = KM_REF, čipy 2–3 = druhá hodnota podle RO_ID. U 4částové zatím prázdné. */
     private String resolveKmExtForCast(int cast, Tudu.Vyhybka.RoBranch branch) {
+        if (currentVyhybka != null && isFourPartVyhybka(currentVyhybka)) {
+            return "";
+        }
         if (cast == 1 && currentVyhybka != null && isDualRoVyhybka(currentVyhybka)) {
             return sharedKmExtChip1(currentVyhybka.getRoBranches());
         }
