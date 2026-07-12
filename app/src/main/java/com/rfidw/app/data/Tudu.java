@@ -148,6 +148,16 @@ public class Tudu {
                 return poloha.trim().toUpperCase(Locale.ROOT);
             }
 
+            /** J = 3částová výhybka, C = 4částová – stejná logika jako v {@link DzsDatabase}. */
+            public static Integer castMaxFromPoloha(String poloha) {
+                String code = normalizePoloha(poloha);
+                if (code.isEmpty()) return null;
+                char first = code.charAt(0);
+                if (first == 'J') return 3;
+                if (first == 'C') return 4;
+                return null;
+            }
+
             public boolean isCastPair1() {
                 return isCastPair1Poloha(poloha);
             }
@@ -181,10 +191,60 @@ public class Tudu {
                         || !mergedKm1.equals(existing.kmExtChip1)
                         || !mergedKm2.equals(existing.kmExtOther)) {
                     roBranches.set(i, new RoBranch(id, mergedPoloha, mergedKm1, mergedKm2));
+                    applyCastRangeFromPoloha(mergedPoloha);
                 }
                 return;
             }
             roBranches.add(new RoBranch(id, pol, km1, km2));
+            applyCastRangeFromPoloha(pol);
+        }
+
+        /** POLOHA / větve v DB – doplní castMax (J→3, C→4). */
+        public void applyCastRangeFromPoloha(String poloha) {
+            Integer fromPoloha = RoBranch.castMaxFromPoloha(poloha);
+            if (fromPoloha != null) {
+                castMax = Math.max(castMax, fromPoloha);
+            }
+        }
+
+        /** Sloučí rozsah částí z větví a explicitního castMax z DB. */
+        public void reconcileCastRangeFromBranches() {
+            for (RoBranch branch : roBranches) {
+                applyCastRangeFromPoloha(branch.poloha);
+            }
+            if (hasFourPartPolohaFamily(roBranches) || branchesCoverFourPartWriting(roBranches)) {
+                castMax = Math.max(castMax, 4);
+            }
+        }
+
+        /** Zajistí, že rozsah pojme daný čip (např. po obnově z CSV). */
+        public void ensureCastAtLeast(int cast) {
+            if (cast > castMax) {
+                castMax = cast;
+            }
+        }
+
+        /** Efektivní horní hranice – bere v úvahu DB, POLOHA i 4částové sady. */
+        public int resolvedCastMax() {
+            int max = castMax;
+            for (RoBranch branch : roBranches) {
+                Integer fromPoloha = RoBranch.castMaxFromPoloha(branch.poloha);
+                if (fromPoloha != null) {
+                    max = Math.max(max, fromPoloha);
+                }
+            }
+            if (hasFourPartPolohaFamily(roBranches) || branchesCoverFourPartWriting(roBranches)) {
+                max = Math.max(max, 4);
+            }
+            return max;
+        }
+
+        public int resolvedCastMin() {
+            return Math.max(1, castMin);
+        }
+
+        public int resolvedCastCount() {
+            return resolvedCastMax() - resolvedCastMin() + 1;
         }
 
         public RoBranch findHlavniBranch() {
@@ -207,7 +267,7 @@ public class Tudu {
 
         /** 4částová výhybka (C-type): čipy 1–4. */
         public boolean isFourPart() {
-            return castMax - castMin + 1 == 4;
+            return resolvedCastCount() == 4;
         }
 
         /** V DB je některá POLOHA ze sady CA/CB/CC/CD nebo CE/CF/CG/CH. */
