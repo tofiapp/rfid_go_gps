@@ -18,8 +18,8 @@
     <string name="cast_part_3">pravé rameno</string>
     <string name="cast_branch_hlavni">hlavní</string>
     <string name="cast_branch_vedlejsi">vedlejší</string>
-    <string name="cast_branch_select">Vyberte větev výhybky</string>
-    <string name="cast_branch_select_status">vyberte hlavní/vedlejší</string>
+    <string name="cast_branch_select">Vyberte jazyk, hlavní nebo vedlejší</string>
+    <string name="cast_branch_select_status">vyberte jazyk/hlavní/vedlejší</string>
     <string name="scan_done_title">Načetli jste</string>
     <string name="scan_done_vyhybka_prefix">výhybku\u00A0</string>
     <string name="scan_done_cast_prefix">čip\u00A0</string>
