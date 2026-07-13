@@ -1617,6 +1617,10 @@ public class MainActivity extends AppCompatActivity {
         }
         if (epc.cast > 0) {
             int total = castCountFor(currentVyhybka);
+            if (currentVyhybka == null && epc.tudu != null && !epc.tudu.isEmpty() && epc.vyhybka > 0) {
+                int fromCsv = maxWrittenCastForVyhybka(epc.tudu, epc.vyhybka);
+                total = Math.max(total, Math.max(epc.cast, fromCsv));
+            }
             String current = String.valueOf(epc.cast);
             String rest = "/" + total;
             SpannableString span = new SpannableString(current + rest);
@@ -1675,34 +1679,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private int castCountFor(Tudu.Vyhybka v) {
-        if (v == null) return 3;
-        if (currentTudu != null) {
-            ensureVyhybkaCastRange(currentTudu.code, v);
-        }
-        return v.resolvedCastCount();
-    }
-
-    /** Doplní rozsah částí z DB a všech zbývajících řádků CSV (POLOHA, ne max. čip). */
-    private void ensureVyhybkaCastRange(String tuduCode, Tudu.Vyhybka v) {
-        if (v == null) return;
-        ensureVyhybkaRoBranches(tuduCode, v);
-        inferCastRangeFromCsvHistory(tuduCode, v);
-        v.reconcileCastRangeFromBranches();
-    }
-
-    private void inferCastRangeFromCsvHistory(String tuduCode, Tudu.Vyhybka v) {
-        if (csvStore == null || tuduCode == null || tuduCode.isEmpty() || v == null) return;
-        int cislo = v.cislo;
-        String iob = v.iob;
-        for (CsvStore.Row row : csvStore.getRows()) {
-            if (!tuduCode.equals(row.tudu)) continue;
-            if (parseInt(row.vyhybka, -1) != cislo) continue;
-            if (!iob.isEmpty()) {
-                String rowIob = parseVyhybkaIob(row.vyhybka);
-                if (!rowIob.isEmpty() && !rowIob.equals(iob)) continue;
-            }
-            v.applyCastRangeFromPoloha(row.poloha);
-        }
+        return v != null ? v.resolvedCastCount() : 3;
     }
 
     private Tudu.Vyhybka findVyhybkaForRow(CsvStore.Row row) {
@@ -1732,18 +1709,25 @@ public class MainActivity extends AppCompatActivity {
         return String.valueOf(last);
     }
 
+    private int maxWrittenCastForVyhybka(String tuduCode, int cislo) {
+        if (csvStore == null || tuduCode == null || tuduCode.isEmpty() || cislo < 0) return 0;
+        int max = 0;
+        for (int cast : csvStore.getWrittenCasts(tuduCode, cislo)) {
+            if (cast > max) max = cast;
+        }
+        return max;
+    }
+
     private int castTotalForRow(CsvStore.Row row) {
         if (row == null) return 3;
-        Tudu.Vyhybka v = findVyhybkaForRow(row);
-        if (v != null && row.tudu != null) {
-            ensureVyhybkaCastRange(row.tudu, v);
-        }
+        int castInRow = parseInt(row.cast, 0);
+        int fromCsv = maxWrittenCastForVyhybka(row.tudu, parseInt(row.vyhybka, -1));
         int fromPoloha = 0;
         Integer polohaMax = Tudu.Vyhybka.RoBranch.castMaxFromPoloha(row.poloha);
         if (polohaMax != null) fromPoloha = polohaMax;
-        if (v != null) return v.resolvedCastCount();
-        int castInRow = parseInt(row.cast, 0);
-        return Math.max(fromPoloha, castInRow > 0 ? castInRow : 3);
+        Tudu.Vyhybka v = findVyhybkaForRow(row);
+        int fromVyhybka = castCountFor(v);
+        return Math.max(Math.max(fromVyhybka, fromPoloha), Math.max(castInRow, fromCsv));
     }
 
     private void updateCastHint() {
@@ -2437,11 +2421,17 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         Tudu.Vyhybka rowVyhybka = findVyhybkaForRow(last);
-        if (rowVyhybka != null && last.tudu != null) {
-            ensureVyhybkaCastRange(last.tudu, rowVyhybka);
+        if (rowVyhybka != null) {
+            rowVyhybka.ensureCastAtLeast(parseInt(last.cast, 0));
+            rowVyhybka.applyCastRangeFromPoloha(last.poloha);
+            if (currentTudu != null) {
+                ensureVyhybkaRoBranches(currentTudu.code, rowVyhybka);
+            }
+            rowVyhybka.reconcileCastRangeFromBranches();
         }
         if (currentVyhybka != null && currentTudu != null) {
-            ensureVyhybkaCastRange(currentTudu.code, currentVyhybka);
+            ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
+            currentVyhybka.reconcileCastRangeFromBranches();
         }
         updateSummary1();
         updateLastRecordPreview();
@@ -3789,16 +3779,14 @@ public class MainActivity extends AppCompatActivity {
         epc.idRfid = Math.max(DEFAULT_ID_RFID, csvStore.getMaxIdRfid() + 1);
         prefs.edit().putLong("idRfid", epc.idRfid).apply();
         syncCurrentVyhybka();
-        resyncCastRangeFromPersistedState();
-        if (currentVyhybka != null && currentTudu != null) {
+        if (currentVyhybka != null) {
             lastCastBranchDefault = -1;
-            epc.cast = firstMissingCast(currentTudu.code, currentVyhybka);
+            advanceCastAndVyhybka();
         }
         refreshTemplate();
         updateStep1();
         updateSummary1();
         resetTagWorkflow();
-        updateLastRecordPreview();
     }
 
     private void applyRowToEpc(CsvStore.Row row) {
@@ -3821,6 +3809,7 @@ public class MainActivity extends AppCompatActivity {
             break;
         }
         if (currentTudu != null && currentVyhybka != null) {
+            currentVyhybka.ensureCastAtLeast(epc.cast);
             currentVyhybka.applyCastRangeFromPoloha(row.poloha);
             List<String> roIds = CsvStore.rowRoIds(row);
             boolean hasRoIds = !(roIds.size() == 1 && roIds.get(0).isEmpty());
@@ -3832,8 +3821,9 @@ public class MainActivity extends AppCompatActivity {
                 if (!row.roId2.isEmpty()) {
                     currentVyhybka.addRoBranch(row.roId2, "");
                 }
+            } else {
+                ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
             }
-            ensureVyhybkaCastRange(currentTudu.code, currentVyhybka);
             if (epc.cast >= 2 && isDualRoVyhybka(currentVyhybka)) {
                 if (epc.cast == 3 && !restoreCastBranchFromCsv(3)) {
                     applyCastBranchFromRow(row);
@@ -4388,7 +4378,7 @@ public class MainActivity extends AppCompatActivity {
         if (csvStore == null) {
             return castCountFor(v);
         }
-        ensureVyhybkaCastRange(tuduCode, v);
+        ensureVyhybkaRoBranches(tuduCode, v);
         if (isDualRoVyhybka(v)) {
             int missing = 0;
             if (!hasCastWrittenOnAnyBranch(tuduCode, v, 1)) missing++;
@@ -4494,7 +4484,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private int firstMissingCast(String tuduCode, Tudu.Vyhybka v) {
-        ensureVyhybkaCastRange(tuduCode, v);
+        ensureVyhybkaRoBranches(tuduCode, v);
         if (csvStore != null && isDualRoVyhybka(v)) {
             if (!hasCastWrittenOnAnyBranch(tuduCode, v, 1)) return 1;
             if (!hasCastWrittenOnAnyBranch(tuduCode, v, 2)) return 2;
