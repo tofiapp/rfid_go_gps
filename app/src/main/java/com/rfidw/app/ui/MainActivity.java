@@ -211,6 +211,7 @@ public class MainActivity extends AppCompatActivity {
     private MaterialButtonToggleGroup powerPresetGroup;
     private MaterialButtonToggleGroup tuduModeGroup;
     private MaterialButtonToggleGroup castBranchGroup;
+    private MaterialButton btnCastJazyk, btnCastHlavni, btnCastVedlejsi;
     private MaterialButtonToggleGroup templateModeGroup;
     private MaterialButton btnGpsReloadLocation;
     private TextView tvTuduModeHint;
@@ -218,8 +219,11 @@ public class MainActivity extends AppCompatActivity {
     private View templateRowsBox;
     private boolean epcTemplateMode;
     private boolean tuduListFullyLoaded;
-    private boolean castBranchHlavni;
-    private int lastCastBranchDefault = -1;
+    private CastPartType selectedCastPartType = CastPartType.NONE;
+    private int lastCastHintCast = -1;
+
+    /** Typ části dvojvětvé 3částové výhybky – nezávisí na pořadí čipu. */
+    private enum CastPartType { NONE, JAZYK, HLAVNI, VEDLEJSI }
     private int lastChip1WriteCount = 1;
     private Boolean powerPresetInKoleji;
     private boolean showGpsStatus;
@@ -1750,7 +1754,7 @@ public class MainActivity extends AppCompatActivity {
         }
         ensureVyhybkaRoBranches(currentTudu != null ? currentTudu.code : null, currentVyhybka);
         boolean dualRo = isDualRoVyhybka(currentVyhybka);
-        String partName = dualRo && epc.cast >= 2
+        String partName = dualRo
                 ? getString(R.string.cast_branch_select)
                 : castPartName(epc.cast);
         if (partName == null) {
@@ -1778,22 +1782,20 @@ public class MainActivity extends AppCompatActivity {
         applyVyhybkaAccent(span, vyhStart, vyhEnd);
 
         tvCastHintAction.setText(span);
-        if (dualRo && epc.cast >= 2) {
+        if (dualRo) {
             tvCastHintPart.setVisibility(View.GONE);
             castBranchGroup.setVisibility(View.VISIBLE);
-            if (epc.cast != lastCastBranchDefault) {
-                int previousCast = lastCastBranchDefault;
-                lastCastBranchDefault = epc.cast;
-                updateDefaultCastBranch(epc.cast, previousCast);
-            } else if (isCastBranchSelected()) {
-                int checkedId = castBranchHlavni
-                        ? R.id.btnCastHlavni : R.id.btnCastVedlejsi;
-                if (castBranchGroup.getCheckedButtonId() != checkedId) {
-                    castBranchGroup.check(checkedId);
+            if (epc.cast != lastCastHintCast) {
+                lastCastHintCast = epc.cast;
+                if (!restoreCastPartFromCsv()) {
+                    clearCastPartSelection();
                 }
+            } else if (isCastPartTypeSelected()) {
+                applyCastPartType(selectedCastPartType);
             }
+            updateCastPartButtonStates();
         } else {
-            lastCastBranchDefault = -1;
+            lastCastHintCast = -1;
             tvCastHintPart.setVisibility(View.VISIBLE);
             tvCastHintPart.setText(partName);
             castBranchGroup.setVisibility(View.GONE);
@@ -2478,11 +2480,20 @@ public class MainActivity extends AppCompatActivity {
 
     private void setupCastBranchSelection() {
         castBranchGroup = findViewById(R.id.castBranchGroup);
+        btnCastJazyk = findViewById(R.id.btnCastJazyk);
+        btnCastHlavni = findViewById(R.id.btnCastHlavni);
+        btnCastVedlejsi = findViewById(R.id.btnCastVedlejsi);
         if (castBranchGroup == null) return;
         castBranchGroup.setSelectionRequired(false);
         castBranchGroup.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
             if (!isChecked) return;
-            castBranchHlavni = checkedId == R.id.btnCastHlavni;
+            if (checkedId == R.id.btnCastJazyk) {
+                selectedCastPartType = CastPartType.JAZYK;
+            } else if (checkedId == R.id.btnCastHlavni) {
+                selectedCastPartType = CastPartType.HLAVNI;
+            } else if (checkedId == R.id.btnCastVedlejsi) {
+                selectedCastPartType = CastPartType.VEDLEJSI;
+            }
             if (!workflowRunning) {
                 updateWorkflowStepIndicatorsVisibility();
             }
@@ -2490,29 +2501,138 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void resetCastBranchSelection() {
-        castBranchHlavni = false;
-        lastCastBranchDefault = -1;
-        clearCastBranchSelection();
+        selectedCastPartType = CastPartType.NONE;
+        lastCastHintCast = -1;
+        clearCastPartSelection();
     }
 
-    private void clearCastBranchSelection() {
+    private void clearCastPartSelection() {
+        selectedCastPartType = CastPartType.NONE;
         if (castBranchGroup != null) {
             castBranchGroup.clearChecked();
         }
     }
 
     private boolean requiresCastBranchSelection() {
-        return epc.cast >= 2 && currentVyhybka != null && isDualRoVyhybka(currentVyhybka);
+        return currentVyhybka != null && isDualRoVyhybka(currentVyhybka);
+    }
+
+    private boolean isCastPartTypeSelected() {
+        return selectedCastPartType != CastPartType.NONE;
     }
 
     private boolean isCastBranchSelected() {
-        return castBranchGroup != null && castBranchGroup.getCheckedButtonId() != View.NO_ID;
+        return isCastPartTypeSelected();
     }
 
     private boolean requireCastBranchSelection() {
-        if (!requiresCastBranchSelection() || isCastBranchSelected()) return true;
+        if (!requiresCastBranchSelection() || isCastPartTypeSelected()) return true;
         promptCastBranchSelection();
         return false;
+    }
+
+    private void applyCastPartType(CastPartType type) {
+        selectedCastPartType = type;
+        if (castBranchGroup == null || type == CastPartType.NONE) {
+            clearCastPartSelection();
+            return;
+        }
+        int checkedId;
+        switch (type) {
+            case JAZYK:
+                checkedId = R.id.btnCastJazyk;
+                break;
+            case HLAVNI:
+                checkedId = R.id.btnCastHlavni;
+                break;
+            case VEDLEJSI:
+                checkedId = R.id.btnCastVedlejsi;
+                break;
+            default:
+                clearCastPartSelection();
+                return;
+        }
+        if (castBranchGroup.getCheckedButtonId() != checkedId) {
+            castBranchGroup.check(checkedId);
+        }
+    }
+
+    /** Typy částí už zapsané u jiných čipů stejné výhybky (aktuální čip se nepočítá). */
+    private Set<CastPartType> getUsedCastPartTypes(int excludeCast) {
+        Set<CastPartType> used = new HashSet<>();
+        if (csvStore == null || currentTudu == null || currentVyhybka == null) {
+            return used;
+        }
+        for (CsvStore.Row row : csvStore.getRows()) {
+            if (!currentTudu.code.equals(row.tudu)) continue;
+            if (parseInt(row.vyhybka, -1) != currentVyhybka.cislo) continue;
+            int cast = parseInt(row.cast, -1);
+            if (cast == excludeCast) continue;
+            CastPartType type = castPartTypeFromRow(row);
+            if (type != CastPartType.NONE) used.add(type);
+        }
+        return used;
+    }
+
+    private void updateCastPartButtonStates() {
+        if (!isDualRoVyhybka(currentVyhybka)) return;
+        Set<CastPartType> used = getUsedCastPartTypes(epc.cast);
+        if (btnCastJazyk != null) {
+            btnCastJazyk.setEnabled(!used.contains(CastPartType.JAZYK));
+        }
+        if (btnCastHlavni != null) {
+            btnCastHlavni.setEnabled(!used.contains(CastPartType.HLAVNI));
+        }
+        if (btnCastVedlejsi != null) {
+            btnCastVedlejsi.setEnabled(!used.contains(CastPartType.VEDLEJSI));
+        }
+        if (isCastPartTypeSelected() && !isCastPartTypeAvailable(selectedCastPartType)) {
+            clearCastPartSelection();
+        }
+    }
+
+    private boolean isCastPartTypeAvailable(CastPartType type) {
+        if (type == CastPartType.NONE) return false;
+        Set<CastPartType> used = getUsedCastPartTypes(epc.cast);
+        return !used.contains(type);
+    }
+
+    private CastPartType castPartTypeFromRow(CsvStore.Row row) {
+        if (row == null) return CastPartType.NONE;
+        boolean has1 = row.roId1 != null && !row.roId1.isEmpty();
+        boolean has2 = row.roId2 != null && !row.roId2.isEmpty();
+        if (has1 && has2) return CastPartType.JAZYK;
+        if (has1) return CastPartType.HLAVNI;
+        if (has2) return CastPartType.VEDLEJSI;
+        if (row.poloha != null && !row.poloha.isEmpty()) {
+            if (Tudu.Vyhybka.RoBranch.isHlavniPoloha(row.poloha)) return CastPartType.HLAVNI;
+            if (Tudu.Vyhybka.RoBranch.isVedlejsiPoloha(row.poloha)) return CastPartType.VEDLEJSI;
+        }
+        return CastPartType.NONE;
+    }
+
+    private boolean restoreCastPartFromCsv() {
+        if (csvStore == null || currentTudu == null || currentVyhybka == null
+                || !isDualRoVyhybka(currentVyhybka)) {
+            return false;
+        }
+        CsvStore.Row row = csvStore.findRowForCast(
+                currentTudu.code, currentVyhybka.cislo, epc.cast);
+        if (row == null) return false;
+        CastPartType type = castPartTypeFromRow(row);
+        if (type == CastPartType.NONE) return false;
+        applyCastPartType(type);
+        return true;
+    }
+
+    private void applyCastPartFromRow(CsvStore.Row row) {
+        if (row == null || castBranchGroup == null || currentVyhybka == null
+                || !isDualRoVyhybka(currentVyhybka)) {
+            return;
+        }
+        CastPartType type = castPartTypeFromRow(row);
+        if (type == CastPartType.NONE) return;
+        applyCastPartType(type);
     }
 
     private boolean isDualRoVyhybka(Tudu.Vyhybka v) {
@@ -2557,72 +2677,6 @@ public class MainActivity extends AppCompatActivity {
         v.reconcileCastRangeFromBranches();
     }
 
-    private void updateDefaultCastBranch(int cast, int previousCast) {
-        if (castBranchGroup == null || currentVyhybka == null || !isDualRoVyhybka(currentVyhybka)) {
-            return;
-        }
-        if (cast == 2) {
-            if (previousCast == 3) {
-                // Z čipu 3 zpět na 2 – obnovit volbu zrcadlenou z čipu 3
-                castBranchHlavni = !castBranchHlavni;
-                castBranchGroup.check(castBranchHlavni ? R.id.btnCastHlavni : R.id.btnCastVedlejsi);
-            } else if (!restoreCastBranchFromCsv(2)) {
-                clearCastBranchSelection();
-            }
-        } else if (cast == 3 && previousCast == 2 && isCastBranchSelected()) {
-            // Čip 3 = opačná větev než u čipu 2 (hlavní ↔ vedlejší)
-            castBranchHlavni = !castBranchHlavni;
-            castBranchGroup.check(castBranchHlavni ? R.id.btnCastHlavni : R.id.btnCastVedlejsi);
-        } else if (cast == 3) {
-            if (!restoreCastBranchFromCsv(3)) {
-                clearCastBranchSelection();
-            }
-        }
-    }
-
-    /** Obnoví hlavní/vedlejší z CSV – čip 2 určuje větev, čip 3 je opačná. */
-    private boolean restoreCastBranchFromCsv(int targetCast) {
-        if (csvStore == null || currentTudu == null || currentVyhybka == null
-                || !isDualRoVyhybka(currentVyhybka) || castBranchGroup == null) {
-            return false;
-        }
-        CsvStore.Row cast2Row = csvStore.findRowForCast(
-                currentTudu.code, currentVyhybka.cislo, 2);
-        if (cast2Row == null) return false;
-        ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
-        Boolean cast2Hlavni = castBranchHlavniFromRow(cast2Row);
-        if (cast2Hlavni == null) return false;
-        castBranchHlavni = targetCast == 2 ? cast2Hlavni : !cast2Hlavni;
-        castBranchGroup.check(castBranchHlavni ? R.id.btnCastHlavni : R.id.btnCastVedlejsi);
-        return true;
-    }
-
-    private Boolean castBranchHlavniFromRow(CsvStore.Row row) {
-        if (row == null) return null;
-        if (!row.roId1.isEmpty() && row.roId2.isEmpty()) {
-            Tudu.Vyhybka.RoBranch hlavni = currentVyhybka.findHlavniBranch();
-            return hlavni != null && hlavni.roId.equals(row.roId1);
-        }
-        if (row.roId1.isEmpty() && !row.roId2.isEmpty()) {
-            return false;
-        }
-        if (row.poloha != null && !row.poloha.isEmpty()) {
-            return Tudu.Vyhybka.RoBranch.isHlavniPoloha(row.poloha);
-        }
-        return null;
-    }
-
-    private void applyCastBranchFromRow(CsvStore.Row row) {
-        if (row == null || castBranchGroup == null || currentVyhybka == null
-                || !isDualRoVyhybka(currentVyhybka)) {
-            return;
-        }
-        Boolean hlavni = castBranchHlavniFromRow(row);
-        if (hlavni == null) return;
-        castBranchHlavni = hlavni;
-        castBranchGroup.check(castBranchHlavni ? R.id.btnCastHlavni : R.id.btnCastVedlejsi);
-    }
-
     private Tudu.Vyhybka.RoBranch resolveBranchForCast(int cast) {
         if (currentVyhybka == null || currentTudu == null) return null;
         ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
@@ -2631,17 +2685,18 @@ public class MainActivity extends AppCompatActivity {
         }
         List<Tudu.Vyhybka.RoBranch> branches = currentVyhybka.getRoBranches();
         if (branches.isEmpty()) return null;
-        if (cast == 1 || !isDualRoVyhybka(currentVyhybka)) {
+        if (!isDualRoVyhybka(currentVyhybka)) {
             return branches.get(0);
         }
-        if (!isCastBranchSelected()) return null;
-        if (castBranchHlavni) {
+        if (!isCastPartTypeSelected()) return null;
+        if (selectedCastPartType == CastPartType.JAZYK) return null;
+        if (selectedCastPartType == CastPartType.HLAVNI) {
             Tudu.Vyhybka.RoBranch hlavni = currentVyhybka.findHlavniBranch();
             if (hlavni != null) return hlavni;
             for (Tudu.Vyhybka.RoBranch b : branches) {
                 if (!b.isVedlejsi()) return b;
             }
-        } else {
+        } else if (selectedCastPartType == CastPartType.VEDLEJSI) {
             Tudu.Vyhybka.RoBranch vedlejsi = currentVyhybka.findVedlejsiBranch();
             if (vedlejsi != null) return vedlejsi;
             for (Tudu.Vyhybka.RoBranch b : branches) {
@@ -3780,7 +3835,7 @@ public class MainActivity extends AppCompatActivity {
         prefs.edit().putLong("idRfid", epc.idRfid).apply();
         syncCurrentVyhybka();
         if (currentVyhybka != null) {
-            lastCastBranchDefault = -1;
+            lastCastHintCast = -1;
             advanceCastAndVyhybka();
         }
         refreshTemplate();
@@ -3824,12 +3879,8 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
             }
-            if (epc.cast >= 2 && isDualRoVyhybka(currentVyhybka)) {
-                if (epc.cast == 3 && !restoreCastBranchFromCsv(3)) {
-                    applyCastBranchFromRow(row);
-                } else if (epc.cast == 2) {
-                    applyCastBranchFromRow(row);
-                }
+            if (isDualRoVyhybka(currentVyhybka)) {
+                applyCastPartFromRow(row);
             }
         }
     }
@@ -4108,9 +4159,10 @@ public class MainActivity extends AppCompatActivity {
             ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
             lastChip1WriteCount = 1;
 
-            Tudu.Vyhybka.RoBranch branch = cast == 1 && isDualRoVyhybka(currentVyhybka)
+            boolean dualRo = isDualRoVyhybka(currentVyhybka);
+            Tudu.Vyhybka.RoBranch branch = dualRo && selectedCastPartType == CastPartType.JAZYK
                     ? null : resolveBranchForCast(cast);
-            if (cast >= 2 && isDualRoVyhybka(currentVyhybka) && !isCastBranchSelected()) {
+            if (dualRo && !isCastPartTypeSelected()) {
                 return false;
             }
             if (isFourPartVyhybka(currentVyhybka) && branch == null) {
@@ -4119,12 +4171,15 @@ public class MainActivity extends AppCompatActivity {
             if (isFourPartVyhybka(currentVyhybka) && branch == null) {
                 return false;
             }
-            if (cast >= 2 && branch == null) {
+            if (!dualRo && cast >= 2 && branch == null) {
                 return false;
             }
-            if (cast >= 2 && isDualRoVyhybka(currentVyhybka)
-                    && ((castBranchHlavni && currentVyhybka.findHlavniBranch() == null)
-                    || (!castBranchHlavni && currentVyhybka.findVedlejsiBranch() == null))) {
+            if (dualRo && selectedCastPartType == CastPartType.HLAVNI
+                    && currentVyhybka.findHlavniBranch() == null) {
+                return false;
+            }
+            if (dualRo && selectedCastPartType == CastPartType.VEDLEJSI
+                    && currentVyhybka.findVedlejsiBranch() == null) {
                 return false;
             }
             CsvStore.Row row = buildCsvRow(epc24, tid, branch);
@@ -4192,10 +4247,10 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * RO_ID_1 / RO_ID_2:
-     * čip 1 u dvojvětvé výhybky vyplní oba sloupce (hlavní JAx/JCx, vedlejší JBx/JDx),
-     * čipy 2–3 jen sloupec odpovídající zvolené větvi.
+     * jazyk u dvojvětvé výhybky vyplní oba sloupce (hlavní JAx/JCx, vedlejší JBx/JDx),
+     * hlavní jen RO_ID_1, vedlejší jen RO_ID_2 – nezávisle na pořadí čipu.
      * 4částová: čipy 1–2 = RO_ID_1 z CA nebo CG, čipy 3–4 = RO_ID_2 z CB nebo CH.
-     * KM_EXT: čip 1 = KM_REF (jednou, shodné pro obě větve), čipy 2–3 = druhá hodnota z OD/DO.
+     * KM_EXT: jazyk = KM_REF, hlavní/vedlejší = druhá hodnota z OD/DO.
      */
     private RoKmColumns resolveRoKmColumns(int cast, Tudu.Vyhybka.RoBranch branch) {
         if (currentVyhybka == null) {
@@ -4215,10 +4270,22 @@ public class MainActivity extends AppCompatActivity {
         Tudu.Vyhybka.RoBranch vedlejsi = currentVyhybka.findVedlejsiBranch();
         String roId1 = "";
         String roId2 = "";
-        if (cast == 1 && isDualRoVyhybka(currentVyhybka)) {
-            roId1 = hlavni != null ? hlavni.roId : "";
-            roId2 = vedlejsi != null ? vedlejsi.roId : "";
-        } else if (branch != null) {
+        if (isDualRoVyhybka(currentVyhybka)) {
+            if (selectedCastPartType == CastPartType.JAZYK) {
+                roId1 = hlavni != null ? hlavni.roId : "";
+                roId2 = vedlejsi != null ? vedlejsi.roId : "";
+            } else if (branch != null) {
+                if (branch.isHlavni()) {
+                    roId1 = branch.roId;
+                } else if (branch.isVedlejsi()) {
+                    roId2 = branch.roId;
+                } else {
+                    roId1 = branch.roId;
+                }
+            }
+            return new RoKmColumns(roId1, roId2, resolveKmExtForDualRo(selectedCastPartType, branch));
+        }
+        if (branch != null) {
             if (branch.isHlavni()) {
                 roId1 = branch.roId;
             } else if (branch.isVedlejsi()) {
@@ -4235,11 +4302,17 @@ public class MainActivity extends AppCompatActivity {
         if (currentVyhybka != null && isFourPartVyhybka(currentVyhybka)) {
             return "";
         }
-        if (cast == 1 && currentVyhybka != null && isDualRoVyhybka(currentVyhybka)) {
+        if (branch == null) return "";
+        if (cast == 1) return branch.kmExtChip1;
+        return branch.kmExtOther.isEmpty() ? branch.kmExtChip1 : branch.kmExtOther;
+    }
+
+    /** KM_EXT pro dvojvětvou 3částovou výhybku podle zvoleného typu části. */
+    private String resolveKmExtForDualRo(CastPartType partType, Tudu.Vyhybka.RoBranch branch) {
+        if (partType == CastPartType.JAZYK) {
             return sharedKmExtChip1(currentVyhybka.getRoBranches());
         }
         if (branch == null) return "";
-        if (cast == 1) return branch.kmExtChip1;
         return branch.kmExtOther.isEmpty() ? branch.kmExtChip1 : branch.kmExtOther;
     }
 
