@@ -44,6 +44,8 @@ public class DzsDatabase implements Closeable {
 
     public static final String TABLE_GPS_KM = "DZS_SUPERTRA_GPS_KM";
     public static final String TABLE_RO_TPI = "DZS_SUPER_RO_TPI";
+    /** Řádky s tímto OPERATOR v DZS_SUPER_RO_TPI se při indexaci i dotazech vynechávají. */
+    private static final String EXCLUDED_RO_OPERATOR = "TUDC";
     private static final String TEMP_RO_GPS_LOOKUP = "_dzs_ro_gps_lookup";
     /** Bbox ±0,04° kolem GPS (~4 km) – odpovídá SQL dotazu v dokumentaci. */
     private static final double PROXIMITY_BBOX_DEG = 0.04;
@@ -930,6 +932,7 @@ public class DzsDatabase implements Closeable {
                 .append(roColumns.tudu).append(" <> ''")
                 .append(" AND ").append(vyhybkaExpr).append(" IS NOT NULL");
         roColumns.appendPolohaFilter(sql, null);
+        roColumns.appendOperatorFilter(sql, null);
         try (Cursor c = db.rawQuery(sql.toString(), null)) {
             if (c.moveToFirst() && !c.isNull(0)) {
                 return c.getInt(0);
@@ -1041,6 +1044,7 @@ public class DzsDatabase implements Closeable {
                 .append(roColumns.tudu).append(" <> ''")
                 .append(" AND ").append(vyhybkaExpr).append(" IS NOT NULL");
         roColumns.appendPolohaFilter(sql, null);
+        roColumns.appendOperatorFilter(sql, null);
 
         List<String> args = new ArrayList<>();
         if (uduCode != null && !uduCode.isEmpty()) {
@@ -1155,6 +1159,7 @@ public class DzsDatabase implements Closeable {
                 .append(" WHERE ").append(roColumns.tudu).append(" = ?")
                 .append(" AND ").append(vyhybkaExpr).append(" = ?");
         roColumns.appendPolohaFilter(sql, null);
+        roColumns.appendOperatorFilter(sql, null);
         List<String> args = new ArrayList<>();
         args.add(tuduCode);
         args.add(String.valueOf(cislo));
@@ -1599,6 +1604,7 @@ public class DzsDatabase implements Closeable {
         sql.append(" AND ro.").append(roColumns.roId).append(" IS NOT NULL AND ")
                 .append(roRoIdExpr).append(" <> ''");
         roColumns.appendPolohaFilter(sql, "ro");
+        roColumns.appendOperatorFilter(sql, "ro");
 
         String[] args = {
                 String.valueOf(minLat), String.valueOf(maxLat),
@@ -1675,6 +1681,7 @@ public class DzsDatabase implements Closeable {
                 .append(" AND ").append(roColumns.roId).append(" IS NOT NULL")
                 .append(" AND ").append(roIdExpr).append(" <> ''");
         roColumns.appendPolohaFilter(sql, null);
+        roColumns.appendOperatorFilter(sql, null);
 
         try (Cursor c = db.rawQuery(sql.toString(), null)) {
             while (c.moveToNext()) {
@@ -1934,6 +1941,7 @@ public class DzsDatabase implements Closeable {
         final String castMax;
         final String poloha;
         final String iob;
+        final String operator;
         final String roId;
         final String od;
         final String doKm;
@@ -1941,7 +1949,7 @@ public class DzsDatabase implements Closeable {
 
         RoColumns(String superZId, String superDId, String tudu, String vyhybka,
                   String vyhybkaFallback, String castMin, String castMax, String poloha,
-                  String iob, String roId, String od, String doKm, String kmRef) {
+                  String iob, String operator, String roId, String od, String doKm, String kmRef) {
             this.superZId = superZId;
             this.superDId = superDId;
             this.tudu = tudu;
@@ -1951,6 +1959,7 @@ public class DzsDatabase implements Closeable {
             this.castMax = castMax;
             this.poloha = poloha;
             this.iob = iob;
+            this.operator = operator;
             this.roId = roId;
             this.od = od;
             this.doKm = doKm;
@@ -1978,6 +1987,15 @@ public class DzsDatabase implements Closeable {
             sql.append(" AND ").append(prefix).append(poloha).append(" IS NOT NULL")
                     .append(" AND ").append(expr).append(" <> ''")
                     .append(" AND UPPER(").append(expr).append(") <> 'NULL'");
+        }
+
+        void appendOperatorFilter(StringBuilder sql, String tableAlias) {
+            if (operator == null) return;
+            String prefix = tableAlias == null || tableAlias.isEmpty()
+                    ? "" : tableAlias + ".";
+            String expr = "UPPER(TRIM(CAST(" + prefix + operator + " AS TEXT)))";
+            sql.append(" AND (").append(prefix).append(operator).append(" IS NULL OR ")
+                    .append(expr).append(" <> '").append(EXCLUDED_RO_OPERATOR).append("')");
         }
 
         void appendUduFilter(StringBuilder sql, String tableAlias) {
@@ -2019,6 +2037,7 @@ public class DzsDatabase implements Closeable {
                     findOptionalColumn(cols, "CAST_MAX", "CASTMAX"),
                     findOptionalColumn(cols, "POLOHA"),
                     findOptionalColumn(cols, "IOB"),
+                    findOptionalColumn(cols, "OPERATOR"),
                     requireColumn(cols, "RO_ID"),
                     findOptionalColumn(cols, "OD"),
                     findOptionalColumn(cols, "DO"),

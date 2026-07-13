@@ -30,9 +30,9 @@ import java.util.zip.GZIPOutputStream;
 final class DzsIndexCache {
 
     private static final int MAGIC = 0x445A5349; // "DZSI"
-    private static final int VERSION = 20;
+    private static final int VERSION = 21;
     /** Cache indexu okolí GPS (bbox ±0,04° ~4 km). */
-    private static final int PROXIMITY_VERSION = 20;
+    private static final int PROXIMITY_VERSION = 21;
     private static final int VERSION_LEGACY_V16 = 16;
     private static final int VERSION_LEGACY_V14 = 14;
     private static final int VERSION_LEGACY_V13 = 13;
