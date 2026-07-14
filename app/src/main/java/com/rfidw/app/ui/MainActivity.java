@@ -163,7 +163,6 @@ public class MainActivity extends AppCompatActivity {
     private static final int GPS_NEARBY_TUDU_LIMIT = 10;
     /** Čip 5 = hranice TUDU (manuální zápis, mimo běžný cyklus výhybky). */
     private static final int CAST_TUDU_BOUNDARY = 5;
-    private static final int VYHYBKA_CHIP_MAX = 4;
     private static final String PREFS_NAME = "rfidgogps";
     private static final String PREF_GPS_TEST_MODE = "gpsTestMode";
     private static final String PREF_TUDU_MODE_GPS = "tuduModeGps";
@@ -647,11 +646,6 @@ public class MainActivity extends AppCompatActivity {
         return cast == CAST_TUDU_BOUNDARY;
     }
 
-    private int vyhybkaChipMax(Tudu.Vyhybka v) {
-        if (v == null) return VYHYBKA_CHIP_MAX;
-        return Math.min(v.resolvedCastMax(), VYHYBKA_CHIP_MAX);
-    }
-
     private void exitTuduBoundaryMode() {
         tuduBoundaryMode = false;
         tuduBoundaryVyhybkaLabel = "";
@@ -721,15 +715,6 @@ public class MainActivity extends AppCompatActivity {
         updateStep1();
         updateSummary1();
         toast(getString(R.string.tudu_boundary_active));
-    }
-
-    private void applyTuduBoundaryFromRow(CsvStore.Row row) {
-        if (row == null) return;
-        tuduBoundaryMode = true;
-        tuduBoundaryVyhybkaLabel = row.vyhybka != null ? row.vyhybka : "";
-        tuduBoundaryKmExt = row.kmExt != null ? row.kmExt : "";
-        epc.cast = CAST_TUDU_BOUNDARY;
-        currentVyhybka = null;
     }
 
     private void showNearbyFullTuduPickerForBoundary(
@@ -1910,7 +1895,6 @@ public class MainActivity extends AppCompatActivity {
         if (csvStore == null || tuduCode == null || tuduCode.isEmpty() || cislo < 0) return 0;
         int max = 0;
         for (int cast : csvStore.getWrittenCasts(tuduCode, cislo)) {
-            if (isTuduBoundaryCast(cast)) continue;
             if (cast > max) max = cast;
         }
         return max;
@@ -1919,7 +1903,6 @@ public class MainActivity extends AppCompatActivity {
     private int castTotalForRow(CsvStore.Row row) {
         if (row == null) return 3;
         int castInRow = parseInt(row.cast, 0);
-        if (isTuduBoundaryCast(castInRow)) return castInRow;
         int fromCsv = maxWrittenCastForVyhybka(row.tudu, parseInt(row.vyhybka, -1));
         int fromPoloha = 0;
         Integer polohaMax = Tudu.Vyhybka.RoBranch.castMaxFromPoloha(row.poloha);
@@ -2583,9 +2566,7 @@ public class MainActivity extends AppCompatActivity {
         epc.idRfid = Math.max(DEFAULT_ID_RFID, csvStore.getMaxIdRfid() + 1);
         prefs.edit().putLong("idRfid", epc.idRfid).apply();
         syncCurrentVyhybka();
-        if (isTuduBoundaryCast(parseInt(last.cast, 0))) {
-            applyTuduBoundaryFromRow(last);
-        } else if (currentVyhybka != null) {
+        if (currentVyhybka != null) {
             advanceCastAndVyhybka();
         } else {
             pendingAdvanceFromCsv = true;
@@ -2628,7 +2609,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         Tudu.Vyhybka rowVyhybka = findVyhybkaForRow(last);
-        if (rowVyhybka != null && !isTuduBoundaryCast(parseInt(last.cast, 0))) {
+        if (rowVyhybka != null) {
             rowVyhybka.ensureCastAtLeast(parseInt(last.cast, 0));
             rowVyhybka.applyCastRangeFromPoloha(last.poloha);
             if (currentTudu != null) {
@@ -4043,9 +4024,7 @@ public class MainActivity extends AppCompatActivity {
         epc.idRfid = Math.max(DEFAULT_ID_RFID, csvStore.getMaxIdRfid() + 1);
         prefs.edit().putLong("idRfid", epc.idRfid).apply();
         syncCurrentVyhybka();
-        if (isTuduBoundaryCast(parseInt(last.cast, 0))) {
-            applyTuduBoundaryFromRow(last);
-        } else if (currentVyhybka != null) {
+        if (currentVyhybka != null) {
             lastCastHintCast = -1;
             advanceCastAndVyhybka();
         }
@@ -4061,21 +4040,6 @@ public class MainActivity extends AppCompatActivity {
         epc.cast = parseInt(row.cast, epc.cast);
         epc.idRfid = parseLong(row.idRfid, epc.idRfid);
 
-        if (isTuduBoundaryCast(epc.cast)) {
-            applyTuduBoundaryFromRow(row);
-            currentTudu = null;
-            for (Tudu t : tuduList) {
-                if (t.code.equals(row.tudu)) {
-                    currentTudu = t;
-                    break;
-                }
-            }
-            return;
-        }
-        tuduBoundaryMode = false;
-        tuduBoundaryVyhybkaLabel = "";
-        tuduBoundaryKmExt = "";
-
         currentTudu = null;
         currentVyhybka = null;
         for (int i = 0; i < tuduList.size(); i++) {
@@ -4089,7 +4053,7 @@ public class MainActivity extends AppCompatActivity {
             }
             break;
         }
-        if (currentTudu != null && currentVyhybka != null && !isTuduBoundaryCast(epc.cast)) {
+        if (currentTudu != null && currentVyhybka != null) {
             currentVyhybka.ensureCastAtLeast(epc.cast);
             currentVyhybka.applyCastRangeFromPoloha(row.poloha);
             List<String> roIds = CsvStore.rowRoIds(row);
@@ -4735,7 +4699,7 @@ public class MainActivity extends AppCompatActivity {
         }
         Set<Integer> written = getWrittenCastsForVyhybka(tuduCode, v);
         int missing = 0;
-        for (int c = v.resolvedCastMin(); c <= vyhybkaChipMax(v); c++) {
+        for (int c = v.resolvedCastMin(); c <= v.resolvedCastMax(); c++) {
             if (!written.contains(c)) missing++;
         }
         return missing;
@@ -4744,7 +4708,7 @@ public class MainActivity extends AppCompatActivity {
     private int countWrittenCasts(String tuduCode, Tudu.Vyhybka v) {
         Set<Integer> written = getWrittenCastsForVyhybka(tuduCode, v);
         int count = 0;
-        for (int c = v.resolvedCastMin(); c <= vyhybkaChipMax(v); c++) {
+        for (int c = v.resolvedCastMin(); c <= v.resolvedCastMax(); c++) {
             if (written.contains(c)) count++;
         }
         return count;
@@ -4839,7 +4803,7 @@ public class MainActivity extends AppCompatActivity {
             return v.resolvedCastMax() + 1;
         }
         Set<Integer> written = getWrittenCastsForVyhybka(tuduCode, v);
-        for (int c = v.resolvedCastMin(); c <= vyhybkaChipMax(v); c++) {
+        for (int c = v.resolvedCastMin(); c <= v.resolvedCastMax(); c++) {
             if (!written.contains(c)) return c;
         }
         return v.castMin;
