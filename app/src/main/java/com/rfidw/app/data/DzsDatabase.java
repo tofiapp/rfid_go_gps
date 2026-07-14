@@ -1266,6 +1266,45 @@ public class DzsDatabase implements Closeable {
         return new ArrayList<>(sorted.subList(0, limit));
     }
 
+    /** Nejbližší výhybka pro každý unikátní plný kód TUDU (6 znaků), seřazené podle vzdálenosti. */
+    public List<GpsMatch> findNearestDistinctFullTudu(double latitude, double longitude, int limit) {
+        if (limit <= 0) return Collections.emptyList();
+        ensureProximityLoaded(latitude, longitude);
+        if (vyhybkaGpsStore.isEmpty()) return Collections.emptyList();
+        Map<String, GpsMatch> bestByTudu = new HashMap<>();
+        double cosLat = Math.cos(Math.toRadians(latitude));
+        SpatialGrid grid = spatialGrid();
+        for (int ring = 0; ring <= SpatialGrid.MAX_RING; ring++) {
+            grid.forEachInRing(latitude, longitude, ring, idx -> {
+                String tudu = vyhybkaGpsStore.tuduAt(idx);
+                if (tudu == null || tudu.isEmpty()) return;
+                double dLat = vyhybkaGpsStore.latitudeAt(idx) - latitude;
+                double dLon = (vyhybkaGpsStore.longitudeAt(idx) - longitude) * cosLat;
+                double distSq = dLat * dLat + dLon * dLon;
+                GpsMatch existing = bestByTudu.get(tudu);
+                if (existing != null) {
+                    double existingDistSq = approximateDistSq(
+                            latitude, longitude, existing.latitude, existing.longitude, cosLat);
+                    if (distSq >= existingDistSq) return;
+                }
+                bestByTudu.put(tudu, vyhybkaToMatch(idx, latitude, longitude));
+            });
+            if (bestByTudu.size() >= limit) {
+                List<GpsMatch> candidates = new ArrayList<>(bestByTudu.values());
+                candidates.sort(Comparator.comparingDouble(m -> m.distanceM));
+                GpsMatch nth = candidates.get(limit - 1);
+                double nthDistSq = approximateDistSq(
+                        latitude, longitude, nth.latitude, nth.longitude, cosLat);
+                double ringBoundDeg = (ring + 1) * SpatialGrid.CELL_DEG;
+                if (nthDistSq <= ringBoundDeg * ringBoundDeg) break;
+            }
+        }
+        List<GpsMatch> sorted = new ArrayList<>(bestByTudu.values());
+        sorted.sort(Comparator.comparingDouble(m -> m.distanceM));
+        if (sorted.size() <= limit) return sorted;
+        return new ArrayList<>(sorted.subList(0, limit));
+    }
+
     /** Pro danou stanici (UDU) vrátí vzdálenosti k výhybkám všech podtypů TUDU. */
     public Map<String, Double> findVyhybkaDistancesForUdu(String uduCode,
                                                           double latitude, double longitude) {

@@ -161,6 +161,9 @@ public class MainActivity extends AppCompatActivity {
     /** Při ručním výběru souboru lze počkat déle, ale ne donekonečna. */
     private static final long GPS_DB_LOAD_MAX_WAIT_MANUAL_MS = 20_000;
     private static final int GPS_NEARBY_TUDU_LIMIT = 10;
+    /** Čip 5 = hranice TUDU (manuální zápis, mimo běžný cyklus výhybky). */
+    private static final int CAST_TUDU_BOUNDARY = 5;
+    private static final int VYHYBKA_CHIP_MAX = 4;
     private static final String PREFS_NAME = "rfidgogps";
     private static final String PREF_GPS_TEST_MODE = "gpsTestMode";
     private static final String PREF_TUDU_MODE_GPS = "tuduModeGps";
@@ -221,6 +224,10 @@ public class MainActivity extends AppCompatActivity {
     private boolean tuduListFullyLoaded;
     private CastPartType selectedCastPartType = CastPartType.NONE;
     private int lastCastHintCast = -1;
+    /** Režim manuálního zápisu hranice TUDU (čip 5). */
+    private boolean tuduBoundaryMode;
+    private String tuduBoundaryVyhybkaLabel = "";
+    private String tuduBoundaryKmExt = "";
 
     /** Typ části dvojvětvé 3částové výhybky – nezávisí na pořadí čipu. */
     private enum CastPartType { NONE, JAZYK, HLAVNI, VEDLEJSI }
@@ -429,8 +436,14 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        colSummaryTudu.setOnClickListener(v -> showTuduPicker());
-        colSummaryVyhybka.setOnClickListener(v -> showVyhybkaPicker());
+        colSummaryTudu.setOnClickListener(v -> {
+            if (tuduBoundaryMode) showTuduBoundaryForm();
+            else showTuduPicker();
+        });
+        colSummaryVyhybka.setOnClickListener(v -> {
+            if (tuduBoundaryMode) showTuduBoundaryForm();
+            else showVyhybkaPicker();
+        });
     }
 
     private void updateWorkflowSheetOverlay(View sheet, boolean expanded) {
@@ -628,6 +641,160 @@ public class MainActivity extends AppCompatActivity {
         } else {
             ensureFullTuduListLoaded(this::showFullTuduPicker);
         }
+    }
+
+    private static boolean isTuduBoundaryCast(int cast) {
+        return cast == CAST_TUDU_BOUNDARY;
+    }
+
+    private int vyhybkaChipMax(Tudu.Vyhybka v) {
+        if (v == null) return VYHYBKA_CHIP_MAX;
+        return Math.min(v.resolvedCastMax(), VYHYBKA_CHIP_MAX);
+    }
+
+    private void exitTuduBoundaryMode() {
+        tuduBoundaryMode = false;
+        tuduBoundaryVyhybkaLabel = "";
+        tuduBoundaryKmExt = "";
+    }
+
+    private void showTuduBoundaryForm() {
+        expandCard1Body();
+        View dialogView = getLayoutInflater().inflate(R.layout.dialog_tudu_boundary, null);
+        com.google.android.material.textfield.TextInputEditText etTudu =
+                dialogView.findViewById(R.id.etBoundaryTudu);
+        com.google.android.material.textfield.TextInputEditText etVyhybka =
+                dialogView.findViewById(R.id.etBoundaryVyhybka);
+        com.google.android.material.textfield.TextInputEditText etKmExt =
+                dialogView.findViewById(R.id.etBoundaryKmExt);
+        View btnPickNearby = dialogView.findViewById(R.id.btnPickNearbyTudu);
+
+        if (epc.tudu != null && !epc.tudu.isEmpty()) {
+            etTudu.setText(epc.tudu);
+        }
+        if (tuduBoundaryVyhybkaLabel != null && !tuduBoundaryVyhybkaLabel.isEmpty()) {
+            etVyhybka.setText(tuduBoundaryVyhybkaLabel);
+        }
+        if (tuduBoundaryKmExt != null && !tuduBoundaryKmExt.isEmpty()) {
+            etKmExt.setText(tuduBoundaryKmExt);
+        }
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.tudu_boundary_title))
+                .setView(dialogView)
+                .setPositiveButton("Použít", null)
+                .setNegativeButton("Zrušit", null)
+                .create();
+
+        btnPickNearby.setOnClickListener(v -> showNearbyFullTuduPickerForBoundary(etTudu));
+
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String tudu = etTudu.getText() != null ? etTudu.getText().toString().trim() : "";
+            String vyhybka = etVyhybka.getText() != null ? etVyhybka.getText().toString().trim() : "";
+            String kmExt = etKmExt.getText() != null ? etKmExt.getText().toString().trim() : "";
+            if (tudu.isEmpty()) {
+                toast(getString(R.string.tudu_boundary_tudu_required));
+                return;
+            }
+            if (vyhybka.isEmpty()) {
+                toast(getString(R.string.tudu_boundary_vyhybka_required));
+                return;
+            }
+            applyTuduBoundaryForm(tudu, vyhybka, kmExt);
+            dialog.dismiss();
+        }));
+
+        dialog.show();
+    }
+
+    private void applyTuduBoundaryForm(String tudu, String vyhybkaLabel, String kmExt) {
+        tuduBoundaryMode = true;
+        tuduBoundaryVyhybkaLabel = vyhybkaLabel;
+        tuduBoundaryKmExt = kmExt != null ? kmExt : "";
+        epc.tudu = tudu;
+        epc.cast = CAST_TUDU_BOUNDARY;
+        epc.vyhybka = parseInt(vyhybkaLabel, 0);
+        currentTudu = resolveTuduForUdu(Tudu.uduCode(tudu));
+        currentVyhybka = null;
+        resetCastBranchSelection();
+        refreshTemplate();
+        updateStep1();
+        updateSummary1();
+        toast(getString(R.string.tudu_boundary_active));
+    }
+
+    private void applyTuduBoundaryFromRow(CsvStore.Row row) {
+        if (row == null) return;
+        tuduBoundaryMode = true;
+        tuduBoundaryVyhybkaLabel = row.vyhybka != null ? row.vyhybka : "";
+        tuduBoundaryKmExt = row.kmExt != null ? row.kmExt : "";
+        epc.cast = CAST_TUDU_BOUNDARY;
+        currentVyhybka = null;
+    }
+
+    private void showNearbyFullTuduPickerForBoundary(
+            com.google.android.material.textfield.TextInputEditText targetField) {
+        if (dzsDatabase == null) {
+            toast(getString(R.string.db_select_required));
+            return;
+        }
+        if (locationCache == null || !locationCache.getSnapshot().valid) {
+            toast(getString(R.string.tudu_picker_no_gps));
+            return;
+        }
+        final double lat = locationCache.getSnapshot().latitude;
+        final double lon = locationCache.getSnapshot().longitude;
+        ensureProximityFromGpsIfNeeded(() -> gpsIo.execute(() -> {
+            List<DzsDatabase.GpsMatch> matches = Collections.emptyList();
+            try {
+                if (dzsDatabase != null) {
+                    matches = dzsDatabase.findNearestDistinctFullTudu(
+                            lat, lon, GPS_NEARBY_TUDU_LIMIT);
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Nearest full TUDU lookup selhal", e);
+            }
+            final List<DzsDatabase.GpsMatch> result = matches;
+            ui.post(() -> {
+                if (result.isEmpty()) {
+                    toast(getString(R.string.gps_tudu_not_found));
+                    return;
+                }
+                showNearbyFullTuduPickerDialog(result, targetField);
+            });
+        }));
+    }
+
+    private void showNearbyFullTuduPickerDialog(List<DzsDatabase.GpsMatch> matches,
+                                                com.google.android.material.textfield.TextInputEditText targetField) {
+        View dialogView = getLayoutInflater().inflate(R.layout.dialog_tudu_picker, null);
+        EditText etSearch = dialogView.findViewById(R.id.etTuduSearch);
+        ListView listView = dialogView.findViewById(R.id.lvTudu);
+        etSearch.setVisibility(View.GONE);
+
+        List<String> labels = new ArrayList<>(matches.size());
+        for (DzsDatabase.GpsMatch m : matches) {
+            labels.add(m.tudu + " · " + formatDistanceM(m.distanceM));
+        }
+
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_list_item_single_choice, labels);
+        listView.setAdapter(adapter);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.tudu_boundary_picker_title))
+                .setView(dialogView)
+                .setNegativeButton("Zrušit", null)
+                .create();
+
+        listView.setOnItemClickListener((parent, v, position, id) -> {
+            if (targetField != null) {
+                targetField.setText(matches.get(position).tudu);
+            }
+            dialog.dismiss();
+        });
+
+        dialog.show();
     }
 
     private void showNearbyTuduPicker() {
@@ -1577,8 +1744,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateStep1() {
-        step1Done = currentTudu != null && currentVyhybka != null
-                && epc.tudu != null && !epc.tudu.isEmpty();
+        if (tuduBoundaryMode) {
+            step1Done = epc.tudu != null && !epc.tudu.isEmpty()
+                    && tuduBoundaryVyhybkaLabel != null && !tuduBoundaryVyhybkaLabel.isEmpty();
+        } else {
+            step1Done = currentTudu != null && currentVyhybka != null
+                    && epc.tudu != null && !epc.tudu.isEmpty();
+        }
         updatePowerPresetUi();
         updateStepIndicators();
         if (!workflowRunning) {
@@ -1611,7 +1783,11 @@ public class MainActivity extends AppCompatActivity {
         String tuduPreview = epc.tudu == null || epc.tudu.isEmpty()
                 ? "—" : Tudu.uduCode(epc.tudu);
         tvSummaryTudu.setText(tuduPreview);
-        if (epc.vyhybka > 0) {
+        if (tuduBoundaryMode && tuduBoundaryVyhybkaLabel != null && !tuduBoundaryVyhybkaLabel.isEmpty()) {
+            SpannableString vyhSpan = new SpannableString(tuduBoundaryVyhybkaLabel);
+            applyVyhybkaAccent(vyhSpan, 0, tuduBoundaryVyhybkaLabel.length());
+            tvSummaryVyhybka.setText(vyhSpan);
+        } else if (epc.vyhybka > 0) {
             String vyhStr = vyhybkaDisplayLabel();
             SpannableString vyhSpan = new SpannableString(vyhStr);
             applyVyhybkaAccent(vyhSpan, 0, vyhStr.length());
@@ -1620,19 +1796,26 @@ public class MainActivity extends AppCompatActivity {
             tvSummaryVyhybka.setText("—");
         }
         if (epc.cast > 0) {
-            int total = castCountFor(currentVyhybka);
-            if (currentVyhybka == null && epc.tudu != null && !epc.tudu.isEmpty() && epc.vyhybka > 0) {
-                int fromCsv = maxWrittenCastForVyhybka(epc.tudu, epc.vyhybka);
-                total = Math.max(total, Math.max(epc.cast, fromCsv));
+            if (tuduBoundaryMode || isTuduBoundaryCast(epc.cast)) {
+                String current = String.valueOf(epc.cast);
+                SpannableString span = new SpannableString(current);
+                applyCastAccent(span, 0, current.length());
+                tvSummaryCast.setText(span);
+            } else {
+                int total = castCountFor(currentVyhybka);
+                if (currentVyhybka == null && epc.tudu != null && !epc.tudu.isEmpty() && epc.vyhybka > 0) {
+                    int fromCsv = maxWrittenCastForVyhybka(epc.tudu, epc.vyhybka);
+                    total = Math.max(total, Math.max(epc.cast, fromCsv));
+                }
+                String current = String.valueOf(epc.cast);
+                String rest = "/" + total;
+                SpannableString span = new SpannableString(current + rest);
+                applyCastAccent(span, 0, current.length());
+                int muted = ContextCompat.getColor(this, R.color.text_muted);
+                span.setSpan(new ForegroundColorSpan(muted), current.length(), span.length(),
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                tvSummaryCast.setText(span);
             }
-            String current = String.valueOf(epc.cast);
-            String rest = "/" + total;
-            SpannableString span = new SpannableString(current + rest);
-            applyCastAccent(span, 0, current.length());
-            int muted = ContextCompat.getColor(this, R.color.text_muted);
-            span.setSpan(new ForegroundColorSpan(muted), current.length(), span.length(),
-                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            tvSummaryCast.setText(span);
         } else {
             tvSummaryCast.setText("—");
         }
@@ -1652,7 +1835,11 @@ public class MainActivity extends AppCompatActivity {
 
         int vyhybka = parseInt(last.vyhybka, 0);
         int cast = parseInt(last.cast, 0);
-        if (vyhybka <= 0 || cast <= 0) {
+        if (cast <= 0) {
+            lastRecordBox.setVisibility(View.GONE);
+            return;
+        }
+        if (!isTuduBoundaryCast(cast) && vyhybka <= 0) {
             lastRecordBox.setVisibility(View.GONE);
             return;
         }
@@ -1662,21 +1849,27 @@ public class MainActivity extends AppCompatActivity {
         String vyhStr = last.vyhybka != null && !last.vyhybka.isEmpty()
                 ? last.vyhybka
                 : Tudu.Vyhybka.formatDisplay(vyhybka, "");
-        int total = castTotalForRow(last);
-        String current = String.valueOf(cast);
-        String rest = "/" + total;
 
         SpannableString vyhSpan = new SpannableString(vyhPrefix + vyhStr);
         applyVyhybkaAccent(vyhSpan, vyhPrefix.length(), vyhSpan.length());
         tvLastRecordVyhybka.setText(vyhSpan);
 
-        SpannableString castSpan = new SpannableString(castPrefix + current + rest);
-        int castValueStart = castPrefix.length();
-        int castValueEnd = castValueStart + current.length();
-        applyCastAccent(castSpan, castValueStart, castValueEnd);
-        int muted = ContextCompat.getColor(this, R.color.text_muted);
-        castSpan.setSpan(new ForegroundColorSpan(muted), castValueEnd, castSpan.length(),
-                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        int total = castTotalForRow(last);
+        String current = String.valueOf(cast);
+        SpannableString castSpan;
+        if (isTuduBoundaryCast(cast)) {
+            castSpan = new SpannableString(castPrefix + current);
+            applyCastAccent(castSpan, castPrefix.length(), castSpan.length());
+        } else {
+            String rest = "/" + total;
+            castSpan = new SpannableString(castPrefix + current + rest);
+            int castValueStart = castPrefix.length();
+            int castValueEnd = castValueStart + current.length();
+            applyCastAccent(castSpan, castValueStart, castValueEnd);
+            int muted = ContextCompat.getColor(this, R.color.text_muted);
+            castSpan.setSpan(new ForegroundColorSpan(muted), castValueEnd, castSpan.length(),
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
         tvLastRecordCast.setText(castSpan);
 
         lastRecordBox.setVisibility(View.VISIBLE);
@@ -1717,6 +1910,7 @@ public class MainActivity extends AppCompatActivity {
         if (csvStore == null || tuduCode == null || tuduCode.isEmpty() || cislo < 0) return 0;
         int max = 0;
         for (int cast : csvStore.getWrittenCasts(tuduCode, cislo)) {
+            if (isTuduBoundaryCast(cast)) continue;
             if (cast > max) max = cast;
         }
         return max;
@@ -1725,6 +1919,7 @@ public class MainActivity extends AppCompatActivity {
     private int castTotalForRow(CsvStore.Row row) {
         if (row == null) return 3;
         int castInRow = parseInt(row.cast, 0);
+        if (isTuduBoundaryCast(castInRow)) return castInRow;
         int fromCsv = maxWrittenCastForVyhybka(row.tudu, parseInt(row.vyhybka, -1));
         int fromPoloha = 0;
         Integer polohaMax = Tudu.Vyhybka.RoBranch.castMaxFromPoloha(row.poloha);
@@ -1735,7 +1930,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateCastHint() {
-        if (currentVyhybka == null || epc.cast <= 0) {
+        if (tuduBoundaryMode || currentVyhybka == null || epc.cast <= 0) {
             castHintBox.setVisibility(View.GONE);
             if (castBranchGroup != null) castBranchGroup.setVisibility(View.GONE);
             if (!workflowRunning) {
@@ -1825,9 +2020,14 @@ public class MainActivity extends AppCompatActivity {
     private void showScanDoneNotification(int vyhybka, int cast) {
         String vyhPrefix = getString(R.string.scan_done_vyhybka_prefix);
         String castPrefix = getString(R.string.scan_done_cast_prefix);
-        String vyhStr = currentVyhybka != null && currentVyhybka.cislo == vyhybka
-                ? currentVyhybka.displayLabel()
-                : Tudu.Vyhybka.formatDisplay(vyhybka, "");
+        String vyhStr;
+        if (tuduBoundaryMode && tuduBoundaryVyhybkaLabel != null && !tuduBoundaryVyhybkaLabel.isEmpty()) {
+            vyhStr = tuduBoundaryVyhybkaLabel;
+        } else if (currentVyhybka != null && currentVyhybka.cislo == vyhybka) {
+            vyhStr = currentVyhybka.displayLabel();
+        } else {
+            vyhStr = Tudu.Vyhybka.formatDisplay(vyhybka, "");
+        }
         String castStr = String.valueOf(cast);
 
         SpannableString vyhSpan = new SpannableString(vyhPrefix + vyhStr);
@@ -1945,6 +2145,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String castPartName(int cast) {
+        if (isTuduBoundaryCast(cast)) {
+            return getString(R.string.cast_part_5);
+        }
         if (currentVyhybka != null && isFourPartVyhybka(currentVyhybka)) {
             return currentVyhybka.castFourPartLabel(cast);
         }
@@ -2380,7 +2583,9 @@ public class MainActivity extends AppCompatActivity {
         epc.idRfid = Math.max(DEFAULT_ID_RFID, csvStore.getMaxIdRfid() + 1);
         prefs.edit().putLong("idRfid", epc.idRfid).apply();
         syncCurrentVyhybka();
-        if (currentVyhybka != null) {
+        if (isTuduBoundaryCast(parseInt(last.cast, 0))) {
+            applyTuduBoundaryFromRow(last);
+        } else if (currentVyhybka != null) {
             advanceCastAndVyhybka();
         } else {
             pendingAdvanceFromCsv = true;
@@ -2423,7 +2628,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         Tudu.Vyhybka rowVyhybka = findVyhybkaForRow(last);
-        if (rowVyhybka != null) {
+        if (rowVyhybka != null && !isTuduBoundaryCast(parseInt(last.cast, 0))) {
             rowVyhybka.ensureCastAtLeast(parseInt(last.cast, 0));
             rowVyhybka.applyCastRangeFromPoloha(last.poloha);
             if (currentTudu != null) {
@@ -2460,6 +2665,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void setupListeners() {
         findViewById(R.id.btnPickSource).setOnClickListener(v -> pickSourceFile());
+        findViewById(R.id.btnTuduBoundary).setOnClickListener(v -> showTuduBoundaryForm());
 
         powerPresetGroup.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
             if (!isChecked) return;
@@ -2514,7 +2720,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean requiresCastBranchSelection() {
-        return currentVyhybka != null && isDualRoVyhybka(currentVyhybka);
+        return !tuduBoundaryMode && currentVyhybka != null && isDualRoVyhybka(currentVyhybka);
     }
 
     private boolean isCastPartTypeSelected() {
@@ -3546,6 +3752,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void applyGpsMatch(DzsDatabase.GpsMatch match) {
         pendingAdvanceFromCsv = false;
+        exitTuduBoundaryMode();
         boolean uduChanged = epc.tudu == null || epc.tudu.isEmpty()
                 || !Tudu.uduCode(match.tudu).equals(Tudu.uduCode(epc.tudu));
 
@@ -3789,6 +3996,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void selectTudu(Tudu t) {
         pendingAdvanceFromCsv = false;
+        exitTuduBoundaryMode();
         currentTudu = t;
         epc.tudu = t.code;
         if (!t.vyhybky.isEmpty()) {
@@ -3803,6 +4011,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void selectVyhybka(Tudu.Vyhybka v, boolean resetCast) {
+        exitTuduBoundaryMode();
         boolean vyhybkaChanged = currentVyhybka == null || currentVyhybka.cislo != v.cislo;
         if (currentTudu != null) {
             ensureVyhybkaRoBranches(currentTudu.code, v);
@@ -3834,7 +4043,9 @@ public class MainActivity extends AppCompatActivity {
         epc.idRfid = Math.max(DEFAULT_ID_RFID, csvStore.getMaxIdRfid() + 1);
         prefs.edit().putLong("idRfid", epc.idRfid).apply();
         syncCurrentVyhybka();
-        if (currentVyhybka != null) {
+        if (isTuduBoundaryCast(parseInt(last.cast, 0))) {
+            applyTuduBoundaryFromRow(last);
+        } else if (currentVyhybka != null) {
             lastCastHintCast = -1;
             advanceCastAndVyhybka();
         }
@@ -3850,6 +4061,21 @@ public class MainActivity extends AppCompatActivity {
         epc.cast = parseInt(row.cast, epc.cast);
         epc.idRfid = parseLong(row.idRfid, epc.idRfid);
 
+        if (isTuduBoundaryCast(epc.cast)) {
+            applyTuduBoundaryFromRow(row);
+            currentTudu = null;
+            for (Tudu t : tuduList) {
+                if (t.code.equals(row.tudu)) {
+                    currentTudu = t;
+                    break;
+                }
+            }
+            return;
+        }
+        tuduBoundaryMode = false;
+        tuduBoundaryVyhybkaLabel = "";
+        tuduBoundaryKmExt = "";
+
         currentTudu = null;
         currentVyhybka = null;
         for (int i = 0; i < tuduList.size(); i++) {
@@ -3863,7 +4089,7 @@ public class MainActivity extends AppCompatActivity {
             }
             break;
         }
-        if (currentTudu != null && currentVyhybka != null) {
+        if (currentTudu != null && currentVyhybka != null && !isTuduBoundaryCast(epc.cast)) {
             currentVyhybka.ensureCastAtLeast(epc.cast);
             currentVyhybka.applyCastRangeFromPoloha(row.poloha);
             List<String> roIds = CsvStore.rowRoIds(row);
@@ -4154,6 +4380,9 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean saveRowToCsv(String epc24, String tid) {
         if (csvStore == null) return false;
+        if (tuduBoundaryMode) {
+            return saveTuduBoundaryRowToCsv(epc24, tid);
+        }
         try {
             int cast = epc.cast;
             ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
@@ -4183,6 +4412,48 @@ public class MainActivity extends AppCompatActivity {
                 return false;
             }
             CsvStore.Row row = buildCsvRow(epc24, tid, branch);
+            csvStore.upsert(row);
+            persistCsvAsync();
+            refreshCsvTable();
+            return true;
+        } catch (Exception e) {
+            toast("CSV: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean saveTuduBoundaryRowToCsv(String epc24, String tid) {
+        try {
+            LocationCache.Snapshot gps = locationCache != null
+                    ? locationCache.getSnapshot() : LocationCache.Snapshot.empty();
+            String latitude = "";
+            String longitude = "";
+            String accuracyM = "";
+            String gpsTime = "";
+            if (gps.valid) {
+                latitude = LocationCache.formatLatitude(gps.latitude);
+                longitude = LocationCache.formatLongitude(gps.longitude);
+                accuracyM = LocationCache.formatAccuracyM(gps.accuracyM);
+                gpsTime = LocationCache.formatGpsTime(gps.gpsTimeMs);
+            } else if (!gpsUnavailableToastShown) {
+                gpsUnavailableToastShown = true;
+                toast(getString(R.string.gps_unavailable_toast));
+            }
+            CsvStore.Row row = CsvRecordBuilder.build(
+                    epc.idRfid,
+                    epc24,
+                    tid,
+                    epc.tudu,
+                    tuduBoundaryVyhybkaLabel,
+                    CAST_TUDU_BOUNDARY,
+                    "",
+                    "",
+                    "",
+                    tuduBoundaryKmExt != null ? tuduBoundaryKmExt : "",
+                    latitude,
+                    longitude,
+                    accuracyM,
+                    gpsTime);
             csvStore.upsert(row);
             persistCsvAsync();
             refreshCsvTable();
@@ -4330,7 +4601,9 @@ public class MainActivity extends AppCompatActivity {
         epc.idRfid += Math.max(1, lastChip1WriteCount);
         lastChip1WriteCount = 1;
         prefs.edit().putLong("idRfid", epc.idRfid).apply();
-        advanceCastAndVyhybka();
+        if (!tuduBoundaryMode) {
+            advanceCastAndVyhybka();
+        }
         refreshTemplate();
         updateSummary1();
         resetAccessPasswordFields();
@@ -4345,6 +4618,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void advanceCastAndVyhybka() {
+        if (tuduBoundaryMode) return;
         syncCurrentVyhybka();
         if (currentVyhybka != null) {
             int next = epc.cast + 1;
@@ -4461,7 +4735,7 @@ public class MainActivity extends AppCompatActivity {
         }
         Set<Integer> written = getWrittenCastsForVyhybka(tuduCode, v);
         int missing = 0;
-        for (int c = v.resolvedCastMin(); c <= v.resolvedCastMax(); c++) {
+        for (int c = v.resolvedCastMin(); c <= vyhybkaChipMax(v); c++) {
             if (!written.contains(c)) missing++;
         }
         return missing;
@@ -4470,7 +4744,7 @@ public class MainActivity extends AppCompatActivity {
     private int countWrittenCasts(String tuduCode, Tudu.Vyhybka v) {
         Set<Integer> written = getWrittenCastsForVyhybka(tuduCode, v);
         int count = 0;
-        for (int c = v.resolvedCastMin(); c <= v.resolvedCastMax(); c++) {
+        for (int c = v.resolvedCastMin(); c <= vyhybkaChipMax(v); c++) {
             if (written.contains(c)) count++;
         }
         return count;
@@ -4565,7 +4839,7 @@ public class MainActivity extends AppCompatActivity {
             return v.resolvedCastMax() + 1;
         }
         Set<Integer> written = getWrittenCastsForVyhybka(tuduCode, v);
-        for (int c = v.resolvedCastMin(); c <= v.resolvedCastMax(); c++) {
+        for (int c = v.resolvedCastMin(); c <= vyhybkaChipMax(v); c++) {
             if (!written.contains(c)) return c;
         }
         return v.castMin;

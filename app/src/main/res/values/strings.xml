@@ -95,4 +95,18 @@
     <string name="epc_tid_mode_hint">OFF (výchozí): nové EPC = TID načteného tagu. ON: EPC ze šablony níže.</string>
     <string name="epc_template_mode_hint">ON: EPC se sestaví ze šablony (rok, UDU, výhybka, čip, ID_RFID).</string>
     <string name="epc_tid_mode_valid">✓ Režim TID → EPC (nové EPC = TID tagu při zápisu)</string>
+    <string name="tudu_boundary_btn">hranice TUDU</string>
+    <string name="tudu_boundary_title">Hranice TUDU</string>
+    <string name="tudu_boundary_step_tudu">1. TUDU</string>
+    <string name="tudu_boundary_step_vyhybka">2. Kolej (VYHYBKA)</string>
+    <string name="tudu_boundary_step_km_ext">3. KM_EXT (volitelné)</string>
+    <string name="tudu_boundary_pick_nearby">Vybrat TUDU z okolí</string>
+    <string name="tudu_boundary_tudu_hint">TUDU (ručně)</string>
+    <string name="tudu_boundary_vyhybka_hint">Kolej / výhybka</string>
+    <string name="tudu_boundary_km_ext_hint">KM_EXT – lze doplnit později</string>
+    <string name="tudu_boundary_tudu_required">Vyplňte TUDU</string>
+    <string name="tudu_boundary_vyhybka_required">Vyplňte kolej (VYHYBKA)</string>
+    <string name="tudu_boundary_picker_title">Nejbližší TUDU (10)</string>
+    <string name="tudu_boundary_active">režim hranice TUDU · čip 5</string>
+    <string name="cast_part_5">hranice TUDU</string>
 </resources>
