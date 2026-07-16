@@ -103,7 +103,6 @@ public class CsvStore {
 
     /** Upsert a okamžitý zápis na disk v jedné synchronizované operaci. */
     public synchronized void upsertAndPersist(Row row) {
-        reloadIfChanged();
         upsert(row);
         save();
     }

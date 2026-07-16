@@ -2647,16 +2647,18 @@ public class MainActivity extends AppCompatActivity {
         io.execute(() -> {
             boolean changed = csvStore.reloadIfChanged();
             if (!changed) return;
-            ui.post(() -> {
-                refreshCsvTable();
-                if (csvStore.size() > 0) {
-                    restoreStateFromLoadedCsv();
-                }
-                if (showToast) {
-                    toast(getString(R.string.csv_reloaded_toast));
-                }
-            });
+            ui.post(() -> applyReloadedCsvState(showToast));
         });
+    }
+
+    private void applyReloadedCsvState(boolean showToast) {
+        refreshCsvTable();
+        if (csvStore.size() > 0) {
+            restoreStateFromLoadedCsv();
+        }
+        if (showToast) {
+            toast(getString(R.string.csv_reloaded_toast));
+        }
     }
 
     private void refreshCsvTable() {
@@ -4453,8 +4455,7 @@ public class MainActivity extends AppCompatActivity {
         refreshCsvTable();
         io.execute(() -> {
             try {
-                csvStore.upsertAndPersist(row);
-                ui.post(this::refreshCsvTable);
+                csvStore.persist();
             } catch (Exception e) {
                 ui.post(() -> toast("CSV uložení: " + e.getMessage()));
             }
