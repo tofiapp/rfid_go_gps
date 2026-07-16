@@ -122,7 +122,7 @@ public final class CsvStorage {
         return file.canWrite() || canDirectWritePublicDownload();
     }
 
-    static boolean canDirectWritePublicDownload() {
+    public static boolean canDirectWritePublicDownload() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return true;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             return Environment.isExternalStorageManager();
