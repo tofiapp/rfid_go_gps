@@ -112,6 +112,7 @@ public final class CsvStorage {
         if (target.isFile()) return;
 
         File[] sources = {
+                new File(RfidPublicStorage.legacyDocumentsWorkDir(), FILE_NAME),
                 new File(context.getExternalFilesDir(null), FILE_NAME),
                 new File(Environment.getExternalStoragePublicDirectory(
                         Environment.DIRECTORY_DOWNLOADS), FILE_NAME)
