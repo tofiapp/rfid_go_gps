@@ -23,8 +23,8 @@ import java.io.OutputStream;
  * Výstupní CSV ve složce Stažené soubory (Download).
  * Z PC přes USB (MTP) lze soubor {@link #FILE_NAME} normálně nahrát a přepsat.
  *
- * Na Androidu 10+ se při zápisu preferuje přímý soubor na disku (viditelný přes MTP),
- * MediaStore slouží jako záloha a pro čtení, když scoped storage skryje cestu.
+ * Na Androidu 10+ nové soubory vznikají přes MediaStore (IS_PENDING → publikace pro MTP).
+ * Přímý zápis na disk jen u již existujícího souboru (typicky nahraného z PC přes MTP).
  */
 public final class CsvStorage {
 
@@ -51,6 +51,12 @@ public final class CsvStorage {
     public static boolean isPresent(Context context, File file) {
         if (file != null && file.isFile()) return true;
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && findInMediaStore(context) != null;
+    }
+
+    /** MediaStore URI výstupního CSV (Android 10+), nebo null. */
+    public static Uri getMediaStoreUri(Context context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null;
+        return findInMediaStore(context);
     }
 
     public static void copyTo(Context context, InputStream in) throws IOException {
@@ -84,7 +90,7 @@ public final class CsvStorage {
     static OutputStream openOutputStream(Context context, File file) throws IOException {
         ensureParentExists(file);
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            return new FileOutputStream(file, false);
+            return wrapPublishOnClose(context, file, new FileOutputStream(file, false), null);
         }
         if (preferDirectFileIo(file)) {
             try {
@@ -98,34 +104,44 @@ public final class CsvStorage {
             markMediaStorePending(context, uri, true);
             OutputStream out = context.getContentResolver().openOutputStream(uri, "wt");
             if (out != null) {
-                return wrapMediaStoreOutput(context, uri, out);
+                return wrapMediaStoreOutput(context, file, uri, out);
             }
         }
-        return wrapDirectOutput(context, file);
+        if (canDirectWritePublicDownload()) {
+            return wrapDirectOutput(context, file);
+        }
+        throw new IOException("CSV nelze uložit do Stažených souborů");
     }
 
+    /**
+     * Přímý zápis jen u existujícího souboru na disku (nahrání z PC přes MTP)
+     * nebo při povolení „Přístup ke všem souborům“ (Android 11+).
+     */
     private static boolean preferDirectFileIo(File file) {
-        if (file == null) return false;
-        if (file.isFile() && file.canWrite()) return true;
-        File parent = file.getParentFile();
+        if (file == null || !file.isFile()) return false;
+        return file.canWrite() || canDirectWritePublicDownload();
+    }
+
+    public static boolean canDirectWritePublicDownload() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return true;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            return Environment.isExternalStorageManager();
+        }
+        File parent = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
         return parent != null && parent.isDirectory() && parent.canWrite();
     }
 
     private static OutputStream wrapDirectOutput(Context context, File file) throws IOException {
-        return new FilterOutputStream(new FileOutputStream(file, false)) {
-            private boolean closed;
-
-            @Override
-            public void close() throws IOException {
-                if (closed) return;
-                closed = true;
-                super.close();
-                scanIntoMediaStore(context, file);
-            }
-        };
+        return wrapPublishOnClose(context, file, new FileOutputStream(file, false), null);
     }
 
-    private static OutputStream wrapMediaStoreOutput(Context context, Uri uri, OutputStream out) {
+    private static OutputStream wrapMediaStoreOutput(
+            Context context, File file, Uri uri, OutputStream out) {
+        return wrapPublishOnClose(context, file, out, uri);
+    }
+
+    private static OutputStream wrapPublishOnClose(
+            Context context, File file, OutputStream out, Uri mediaStoreUri) {
         return new FilterOutputStream(out) {
             private boolean closed;
 
@@ -133,14 +149,72 @@ public final class CsvStorage {
             public void close() throws IOException {
                 if (closed) return;
                 closed = true;
-                super.close();
-                markMediaStorePending(context, uri, false);
+                IOException closeError = null;
+                try {
+                    super.close();
+                } catch (IOException e) {
+                    closeError = e;
+                }
+                try {
+                    if (mediaStoreUri != null) {
+                        markMediaStorePending(context, mediaStoreUri, false);
+                    }
+                    publishForMtp(context, file, mediaStoreUri);
+                } catch (Exception e) {
+                    Log.w(TAG, "Publikace CSV pro MTP selhala", e);
+                }
+                if (closeError != null) throw closeError;
             }
         };
     }
 
-    private static void scanIntoMediaStore(Context context, File file) {
+    /**
+     * Zviditelní soubor pro MTP / Průzkumník Windows: zruší IS_PENDING,
+     * spustí media scan a při povoleném přístupu zkopíruje obsah na veřejnou cestu Download/.
+     */
+    public static void publishForMtp(Context context, File file, Uri mediaStoreUri) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return;
+        if (mediaStoreUri != null) {
+            markMediaStorePending(context, mediaStoreUri, false);
+        } else {
+            Uri existing = findInMediaStore(context);
+            if (existing != null) {
+                markMediaStorePending(context, existing, false);
+            }
+        }
+        if (file != null && file.isFile()) {
+            scanIntoMediaStore(context, file);
+            return;
+        }
+        if (canDirectWritePublicDownload()) {
+            try {
+                mirrorMediaStoreToPublicDownload(context, file);
+            } catch (IOException e) {
+                Log.w(TAG, "Zrcadlení CSV do Download/ selhalo", e);
+            }
+        }
+    }
+
+    private static void mirrorMediaStoreToPublicDownload(Context context, File target) throws IOException {
+        if (target == null) return;
+        Uri uri = findInMediaStore(context);
+        if (uri == null) return;
+        ensureParentExists(target);
+        try (InputStream in = context.getContentResolver().openInputStream(uri);
+             OutputStream out = new FileOutputStream(target, false)) {
+            if (in == null) throw new IOException("MediaStore CSV nelze otevřít");
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                out.write(buf, 0, n);
+            }
+        }
+        scanIntoMediaStore(context, target);
+        Log.i(TAG, "CSV zrcadleno do " + target.getAbsolutePath());
+    }
+
+    private static void scanIntoMediaStore(Context context, File file) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || file == null || !file.isFile()) return;
         MediaScannerConnection.scanFile(
                 context,
                 new String[]{file.getAbsolutePath()},
@@ -170,14 +244,13 @@ public final class CsvStorage {
         try {
             ensureParentExists(target);
             try (InputStream in = new FileInputStream(legacy);
-                 OutputStream out = new FileOutputStream(target, false)) {
+                 OutputStream out = openOutputStream(context, target)) {
                 byte[] buf = new byte[8192];
                 int n;
                 while ((n = in.read(buf)) > 0) {
                     out.write(buf, 0, n);
                 }
             }
-            scanIntoMediaStore(context, target);
             Log.i(TAG, "CSV migrováno do Download: " + target.getAbsolutePath());
         } catch (IOException e) {
             Log.w(TAG, "Migrace CSV do Download selhala", e);

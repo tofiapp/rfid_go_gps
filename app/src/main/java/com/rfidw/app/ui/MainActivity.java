@@ -10,6 +10,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -17,6 +18,7 @@ import android.graphics.Typeface;
 import android.provider.DocumentsContract;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
+import android.provider.Settings;
 import android.text.Editable;
 import android.text.SpannableString;
 import android.text.Spanned;
@@ -87,6 +89,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int REQUEST_LOCATION_PERMISSION = 1001;
     private static final int REQUEST_STORAGE_PERMISSION = 1002;
     private static final int REQUEST_CSV_STORAGE_PERMISSION = 1003;
+    private static final String PREF_STORAGE_ACCESS_PROMPTED = "storageAccessPrompted";
     private static final String DEFAULT_DB_NAME = "DZS_PASPORT_TPI.sqlite";
 
     /** Výsledek automatického vyhledání DB ve Stažených / úložišti. */
@@ -2387,6 +2390,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
         reloadCsvFromDiskIfChanged(false);
+        publishCsvForMtpIfNeeded();
         ensureGpsForTuduLookup();
     }
 
@@ -2564,6 +2568,37 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         initCsvStoreAsync();
+        maybePromptForAllFilesAccess();
+    }
+
+    /** Android 11+ – bez „přístupu ke všem souborům“ zůstává CSV jen v MediaStore (MTP ho neukáže). */
+    private void maybePromptForAllFilesAccess() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return;
+        if (CsvStorage.canDirectWritePublicDownload()) return;
+        if (prefs.getBoolean(PREF_STORAGE_ACCESS_PROMPTED, false)) return;
+        prefs.edit().putBoolean(PREF_STORAGE_ACCESS_PROMPTED, true).apply();
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.storage_access_title)
+                .setMessage(R.string.storage_access_message)
+                .setPositiveButton(R.string.storage_access_open, (d, w) -> openAllFilesAccessSettings())
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void openAllFilesAccessSettings() {
+        try {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+            intent.setData(Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+        } catch (Exception e) {
+            startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+        }
+    }
+
+    private void publishCsvForMtpIfNeeded() {
+        if (csvStore == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return;
+        File file = csvStore.getFile();
+        io.execute(() -> CsvStorage.publishForMtp(MainActivity.this, file, null));
     }
 
     private boolean needsCsvWritePermission() {
@@ -4924,8 +4959,20 @@ public class MainActivity extends AppCompatActivity {
                 toast("Tabulka je prázdná");
                 return;
             }
-            Uri uri = FileProvider.getUriForFile(this,
-                    getPackageName() + ".fileprovider", f);
+            Uri uri;
+            if (f.isFile()) {
+                uri = FileProvider.getUriForFile(this,
+                        getPackageName() + ".fileprovider", f);
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                uri = CsvStorage.getMediaStoreUri(this);
+                if (uri == null) {
+                    toast("Soubor CSV není dostupný na disku");
+                    return;
+                }
+            } else {
+                toast("Export selhal: soubor nenalezen");
+                return;
+            }
             Intent share = new Intent(Intent.ACTION_SEND);
             share.setType("text/csv");
             share.putExtra(Intent.EXTRA_STREAM, uri);

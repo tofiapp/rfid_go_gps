@@ -6,6 +6,9 @@
     <string name="btn_delete_last_csv">Vymazat poslední záznam</string>
     <string name="csv_reloaded_toast">CSV načteno ze souboru na disku</string>
     <string name="csv_path_hint">Z PC (USB): %1$s</string>
+    <string name="storage_access_title">Viditelnost CSV na počítači</string>
+    <string name="storage_access_message">Aby se soubor rfid_go_gps_output.csv zobrazil v Průzkumníku Windows při připojení USB, povolte u aplikace „Přístup ke všem souborům“ (Stažené soubory / Download).</string>
+    <string name="storage_access_open">Otevřít nastavení</string>
     <string name="btn_import_csv">Načíst CSV</string>
     <string name="btn_delete_short">Smazat</string>
     <string name="lock_code_value">008020</string>
