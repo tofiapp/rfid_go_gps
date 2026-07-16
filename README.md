@@ -108,7 +108,7 @@ Nad spodním panelem se zobrazuje náhled **posledních 5 řádků** a box **pos
 
 Soubor: **`Documents/RFID Go GPS/rfid_go_gps_output.csv`** – stejná složka jako databáze DZS.
 
-**Nahrání z PC přes USB:** V Průzkumníku Windows otevřete čtečku → vnitřní úložiště → **Documents** → **RFID Go GPS** a soubory tam zkopírujte nebo přepište (`DZS_PASPORT_TPI.sqlite`, `rfid_go_gps_output.csv`). Stará cesta `Android/data/.../files/` z PC nezapisovatelná je. Po nahrání vraťte se do aplikace nebo otevřete panel Pokročilé. Alternativa: tlačítko **Načíst CSV** v aplikaci.
+**Nahrání z PC přes USB:** V Průzkumníku Windows otevřete čtečku → vnitřní úložiště → **Documents** → **RFID Go GPS** a soubory tam zkopírujte nebo přepište (`DZS_PASPORT_TPI.sqlite`, `rfid_go_gps_output.csv`). Stará cesta `Android/data/.../files/` z PC nezapisovatelná je. Po nahrání vraťte se do aplikace nebo otevřete panel Pokročilé. Alternativa: tlačítko **Načíst CSV** v aplikaci. Pokud Windows hlásí, že soubor nelze přepsat, zkuste aplikaci minimalizovat (uvolní zámek) nebo ji ukončit – od verze 3.115 aplikace při přechodu do pozadí zámek uvolňuje automaticky.
 
 Aplikace při startu **automaticky načte** existující CSV a podle něj určí dokončené čipy a obnoví `ID_RFID`. Starší formáty CSV (včetně sloupce `rok` a bez GPS) jsou zpětně kompatibilní.
 

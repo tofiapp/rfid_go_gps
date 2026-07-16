@@ -23,6 +23,10 @@ import java.io.OutputStream;
 /**
  * Výstupní CSV ve složce {@link RfidPublicStorage#relativeWorkDir()} –
  * společně s DZS databází, zapisovatelné z PC přes USB (MTP).
+ *
+ * Zápis vždy preferuje přímý soubor na disku (ne MediaStore ContentResolver).
+ * MediaStore záznam blokuje přepis souboru z Průzkumníku Windows – proto se po
+ * vytvoření souboru na disku z MediaStore maže a dál se používá jen cesta File.
  */
 public final class CsvStorage {
 
@@ -42,12 +46,29 @@ public final class CsvStorage {
 
     public static void importFromInputStream(Context context, InputStream in) throws IOException {
         File dest = resolveFile(context);
+        releaseMediaStoreEntry(context);
         try (OutputStream out = openOutputStream(context, dest)) {
             byte[] buf = new byte[8192];
             int n;
             while ((n = in.read(buf)) > 0) {
                 out.write(buf, 0, n);
             }
+        }
+    }
+
+    /**
+     * Uvolní MediaStore zámek nad CSV – volat při přechodu do pozadí,
+     * aby šel soubor z PC přes USB (MTP) přepsat i při běžící aplikaci.
+     */
+    public static void releaseMediaStoreEntry(Context context) {
+        if (context == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return;
+        Uri uri = findInMediaStore(context);
+        if (uri == null) return;
+        try {
+            context.getContentResolver().delete(uri, null, null);
+            Log.d(TAG, "MediaStore záznam CSV uvolněn pro MTP");
+        } catch (Exception e) {
+            Log.w(TAG, "MediaStore záznam CSV nelze smazat", e);
         }
     }
 
@@ -70,6 +91,10 @@ public final class CsvStorage {
 
     static OutputStream openOutputStream(Context context, File file) throws IOException {
         ensureParentExists(file);
+        if (canWriteDirect(file)) {
+            releaseMediaStoreEntry(context);
+            return new FileOutputStream(file, false);
+        }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             return new FileOutputStream(file, false);
         }
@@ -82,10 +107,12 @@ public final class CsvStorage {
     }
 
     static FileMeta queryFileMeta(Context context, File file) {
-        long size = file.isFile() ? file.length() : -1;
-        long mtime = file.isFile() ? file.lastModified() : 0;
-        if (size >= 0 && mtime > 0) {
-            return new FileMeta(size, mtime);
+        if (file.isFile()) {
+            long size = file.length();
+            long mtime = file.lastModified();
+            if (size >= 0 && mtime > 0) {
+                return new FileMeta(size, mtime);
+            }
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             FileMeta fromStore = queryMediaStoreMeta(context);
@@ -107,6 +134,22 @@ public final class CsvStorage {
         }
     }
 
+    private static boolean canWriteDirect(File file) {
+        File parent = file.getParentFile();
+        if (parent != null && !parent.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            parent.mkdirs();
+        }
+        if (file.isFile()) {
+            return file.canWrite();
+        }
+        try {
+            return file.createNewFile() && file.canWrite();
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
     private static void migrateLegacyIfNeeded(Context context) {
         File target = RfidPublicStorage.csvFile();
         if (target.isFile()) return;
@@ -121,6 +164,7 @@ public final class CsvStorage {
             try {
                 ensureParentExists(target);
                 copyFile(source, target);
+                releaseMediaStoreEntry(context);
                 Log.i(TAG, "CSV migrováno do " + target.getAbsolutePath());
                 return;
             } catch (IOException e) {
@@ -194,11 +238,11 @@ public final class CsvStorage {
     }
 
     private static Uri findOrCreateMediaStoreUri(Context context, File file) throws IOException {
-        Uri existing = findInMediaStore(context);
-        if (existing != null) return existing;
-        if (file.isFile() && file.canRead()) {
+        if (file.isFile() && file.canWrite()) {
             return null;
         }
+        Uri existing = findInMediaStore(context);
+        if (existing != null) return existing;
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null;
         ContentValues values = new ContentValues();
         values.put(MediaStore.MediaColumns.DISPLAY_NAME, FILE_NAME);

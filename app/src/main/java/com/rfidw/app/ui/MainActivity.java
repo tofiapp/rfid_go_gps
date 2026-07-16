@@ -2391,6 +2391,12 @@ public class MainActivity extends AppCompatActivity {
         ensureGpsForTuduLookup();
     }
 
+    @Override
+    protected void onPause() {
+        CsvStorage.releaseMediaStoreEntry(this);
+        super.onPause();
+    }
+
     private void onWorkflowFailed(int failedStep) {
         workflowRunning = false;
         chainWorkflow = false;

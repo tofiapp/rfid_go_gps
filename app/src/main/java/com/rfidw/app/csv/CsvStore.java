@@ -204,12 +204,18 @@ public class CsvStore {
             return false;
         }
         if (size != lastSyncedSize) {
+            if (appContext != null) {
+                CsvStorage.releaseMediaStoreEntry(appContext);
+            }
             load();
             return true;
         }
         if (mtime != lastSyncedMtime) {
             String hash = computeContentHash();
             if (!hash.equals(lastSyncedHash)) {
+                if (appContext != null) {
+                    CsvStorage.releaseMediaStoreEntry(appContext);
+                }
                 load();
                 return true;
             }
@@ -412,21 +418,10 @@ public class CsvStore {
 
     private void save() {
         try {
-            if (appContext != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                saveDirect();
-            } else {
-                saveViaTempFile();
-            }
+            saveViaTempFile();
             touchSyncedState();
         } catch (Exception e) {
             throw new RuntimeException("Nepodařilo se uložit CSV: " + e.getMessage(), e);
-        }
-    }
-
-    private void saveDirect() throws java.io.IOException {
-        try (OutputStream out = openOutputStream();
-             Writer w = new OutputStreamWriter(out, StandardCharsets.UTF_8)) {
-            writeAllRows(w);
         }
     }
 
@@ -434,8 +429,8 @@ public class CsvStore {
         File parent = file.getParentFile();
         if (parent != null && !parent.exists()) parent.mkdirs();
         File tmp = new File(parent, file.getName() + ".tmp");
-        try (java.io.FileOutputStream fos = new java.io.FileOutputStream(tmp, false);
-             Writer w = new OutputStreamWriter(fos, StandardCharsets.UTF_8)) {
+        try (OutputStream out = openOutputStream(tmp);
+             Writer w = new OutputStreamWriter(out, StandardCharsets.UTF_8)) {
             writeAllRows(w);
         }
         if (file.exists() && !file.delete()) {
@@ -443,6 +438,9 @@ public class CsvStore {
         }
         if (!tmp.renameTo(file)) {
             throw new RuntimeException("Nepodařilo se dokončit zápis CSV");
+        }
+        if (appContext != null) {
+            CsvStorage.releaseMediaStoreEntry(appContext);
         }
     }
 
@@ -463,10 +461,14 @@ public class CsvStore {
     }
 
     private OutputStream openOutputStream() throws java.io.IOException {
+        return openOutputStream(file);
+    }
+
+    private OutputStream openOutputStream(File target) throws java.io.IOException {
         if (appContext != null) {
-            return CsvStorage.openOutputStream(appContext, file);
+            return CsvStorage.openOutputStream(appContext, target);
         }
-        return new java.io.FileOutputStream(file, false);
+        return new java.io.FileOutputStream(target, false);
     }
 
     private boolean fileExistsOnDisk() {
