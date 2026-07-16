@@ -2640,7 +2640,8 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * Načte CSV z disku, pokud byl soubor změněn zvenku (USB, správce souborů).
-     * Aplikace jinak drží data jen v paměti a při dalším zápisu přepíše nahraný soubor.
+     * Detekce podle velikosti a obsahu – ne jen času úpravy (soubor z PC má často starší mtime).
+     * Před zápisem nového řádku se soubor znovu načte, aby nahraná verze nebyla přepsána.
      */
     private void reloadCsvFromDiskIfChanged(boolean showToast) {
         if (csvStore == null) return;
@@ -4455,7 +4456,8 @@ public class MainActivity extends AppCompatActivity {
         refreshCsvTable();
         io.execute(() -> {
             try {
-                csvStore.persist();
+                csvStore.upsertAndPersist(row);
+                ui.post(this::refreshCsvTable);
             } catch (Exception e) {
                 ui.post(() -> toast("CSV uložení: " + e.getMessage()));
             }

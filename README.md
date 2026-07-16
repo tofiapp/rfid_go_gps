@@ -108,6 +108,8 @@ Nad spodním panelem se zobrazuje náhled **posledních 5 řádků** a box **pos
 
 Soubor: `Android/data/com.rfidw.app.gps/files/rfid_go_gps_output.csv`.
 
+**Nahrání z PC (USB):** Soubor lze nahradit stejným názvem – aplikace při návratu do popředí nebo otevření panelu Pokročilé detekuje změnu podle velikosti a obsahu (ne jen data úpravy). Před každým novým zápisem řádku se CSV z disku znovu načte, aby se nepřepsala nahraná verze.
+
 Aplikace při startu **automaticky načte** existující CSV a podle něj určí dokončené čipy a obnoví `ID_RFID`. Starší formáty CSV (včetně sloupce `rok` a bez GPS) jsou zpětně kompatibilní.
 
 ### 4. GPS poloha čtečky
