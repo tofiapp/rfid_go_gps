@@ -58,7 +58,7 @@
     <string name="gps_unavailable_toast">GPS nedostupná — tag uložen bez souřadnic</string>
     <string name="btn_pick_db">Vybrat databázi SQLite (.db)</string>
     <string name="db_none">Žádná databáze</string>
-    <string name="db_fresh_install_hint">Po přeinstalaci uložte DZS_PASPORT_TPI.sqlite do složky Stažené soubory – aplikace ji načte automaticky.</string>
+    <string name="db_fresh_install_hint">Po přeinstalaci uložte DZS_PASPORT_TPI.sqlite do složky Documents/RFID Go GPS – aplikace ji načte automaticky.</string>
     <string name="db_auto_loading">Načítám DZS_PASPORT_TPI.sqlite…</string>
     <string name="db_loading_phase">Načítám: %1$s</string>
     <string name="db_loading_progress">%1$s · %2$d %%</string>

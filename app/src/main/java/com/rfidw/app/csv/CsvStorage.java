@@ -11,6 +11,8 @@ import android.os.Environment;
 import android.provider.MediaStore;
 import android.util.Log;
 
+import com.rfidw.app.storage.RfidPublicStorage;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -19,35 +21,25 @@ import java.io.InputStream;
 import java.io.OutputStream;
 
 /**
- * Umístění výstupního CSV – veřejná složka Stažené soubory (Download),
- * aby šel soubor nahrát / přepsat z PC přes USB (MTP).
- *
- * Stará cesta {@code Android/data/.../files/} je z MTP zapisovatelná jen výjimečně.
+ * Výstupní CSV ve složce {@link RfidPublicStorage#relativeWorkDir()} –
+ * společně s DZS databází, zapisovatelné z PC přes USB (MTP).
  */
 public final class CsvStorage {
 
     private static final String TAG = "CsvStorage";
-    public static final String FILE_NAME = "rfid_go_gps_output.csv";
+    public static final String FILE_NAME = RfidPublicStorage.CSV_FILE_NAME;
 
     private CsvStorage() {}
 
-    /** Cílový soubor ve složce Download (přístupné z Průzkumníka při USB). */
     public static File resolveFile(Context context) {
         migrateLegacyIfNeeded(context);
-        File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-        if (dir != null && !dir.exists()) {
-            //noinspection ResultOfMethodCallIgnored
-            dir.mkdirs();
-        }
-        return new File(dir, FILE_NAME);
+        return RfidPublicStorage.csvFile();
     }
 
-    /** Krátká cesta pro UI – kam kopírovat z PC. */
     public static String displayPath() {
-        return Environment.DIRECTORY_DOWNLOADS + "/" + FILE_NAME;
+        return RfidPublicStorage.relativeWorkDir() + "/" + FILE_NAME;
     }
 
-    /** Zkopíruje obsah (např. z výběru souboru) do cílového CSV ve Stažených. */
     public static void importFromInputStream(Context context, InputStream in) throws IOException {
         File dest = resolveFile(context);
         try (OutputStream out = openOutputStream(context, dest)) {
@@ -116,22 +108,24 @@ public final class CsvStorage {
     }
 
     private static void migrateLegacyIfNeeded(Context context) {
-        File legacy = new File(context.getExternalFilesDir(null), FILE_NAME);
-        if (!legacy.isFile()) return;
-        File target = new File(
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-                FILE_NAME);
-        if (target.isFile() && target.length() >= legacy.length()) {
-            //noinspection ResultOfMethodCallIgnored
-            legacy.delete();
-            return;
-        }
-        try {
-            ensureParentExists(target);
-            copyFile(legacy, target);
-            Log.i(TAG, "CSV migrováno do Download: " + target.getAbsolutePath());
-        } catch (IOException e) {
-            Log.w(TAG, "Migrace CSV do Download selhala", e);
+        File target = RfidPublicStorage.csvFile();
+        if (target.isFile()) return;
+
+        File[] sources = {
+                new File(context.getExternalFilesDir(null), FILE_NAME),
+                new File(Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_DOWNLOADS), FILE_NAME)
+        };
+        for (File source : sources) {
+            if (!source.isFile()) continue;
+            try {
+                ensureParentExists(target);
+                copyFile(source, target);
+                Log.i(TAG, "CSV migrováno do " + target.getAbsolutePath());
+                return;
+            } catch (IOException e) {
+                Log.w(TAG, "Migrace CSV z " + source + " selhala", e);
+            }
         }
     }
 
@@ -154,18 +148,21 @@ public final class CsvStorage {
         }
     }
 
+    private static Uri filesCollection() {
+        return MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL);
+    }
+
     private static Uri findInMediaStore(Context context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null;
         ContentResolver resolver = context.getContentResolver();
-        Uri collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI;
-        String[] projection = {MediaStore.Downloads._ID};
-        String selection = MediaStore.Downloads.DISPLAY_NAME + " = ?";
-        String[] args = {FILE_NAME};
-        try (Cursor c = resolver.query(collection, projection, selection, args,
-                MediaStore.Downloads.DATE_MODIFIED + " DESC")) {
+        String[] projection = {MediaStore.MediaColumns._ID};
+        String selection = MediaStore.MediaColumns.RELATIVE_PATH + " = ? AND "
+                + MediaStore.MediaColumns.DISPLAY_NAME + " = ?";
+        String[] args = {RfidPublicStorage.mediaStoreRelativePath(), FILE_NAME};
+        try (Cursor c = resolver.query(filesCollection(), projection, selection, args,
+                MediaStore.MediaColumns.DATE_MODIFIED + " DESC")) {
             if (c != null && c.moveToFirst()) {
-                long id = c.getLong(0);
-                return ContentUris.withAppendedId(collection, id);
+                return ContentUris.withAppendedId(filesCollection(), c.getLong(0));
             }
         } catch (Exception e) {
             Log.w(TAG, "MediaStore dotaz na CSV selhal", e);
@@ -176,14 +173,15 @@ public final class CsvStorage {
     private static FileMeta queryMediaStoreMeta(Context context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null;
         ContentResolver resolver = context.getContentResolver();
-        Uri collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI;
         String[] projection = {
-                MediaStore.Downloads.SIZE,
-                MediaStore.Downloads.DATE_MODIFIED
+                MediaStore.MediaColumns.SIZE,
+                MediaStore.MediaColumns.DATE_MODIFIED
         };
-        String selection = MediaStore.Downloads.DISPLAY_NAME + " = ?";
-        try (Cursor c = resolver.query(collection, projection, selection,
-                new String[]{FILE_NAME}, MediaStore.Downloads.DATE_MODIFIED + " DESC")) {
+        String selection = MediaStore.MediaColumns.RELATIVE_PATH + " = ? AND "
+                + MediaStore.MediaColumns.DISPLAY_NAME + " = ?";
+        try (Cursor c = resolver.query(filesCollection(), projection, selection,
+                new String[]{RfidPublicStorage.mediaStoreRelativePath(), FILE_NAME},
+                MediaStore.MediaColumns.DATE_MODIFIED + " DESC")) {
             if (c != null && c.moveToFirst()) {
                 long size = c.isNull(0) ? -1 : c.getLong(0);
                 long modified = c.isNull(1) ? 0 : c.getLong(1) * 1000L;
@@ -203,11 +201,10 @@ public final class CsvStorage {
         }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null;
         ContentValues values = new ContentValues();
-        values.put(MediaStore.Downloads.DISPLAY_NAME, FILE_NAME);
-        values.put(MediaStore.Downloads.MIME_TYPE, "text/csv");
-        values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/");
-        Uri created = context.getContentResolver().insert(
-                MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+        values.put(MediaStore.MediaColumns.DISPLAY_NAME, FILE_NAME);
+        values.put(MediaStore.MediaColumns.MIME_TYPE, "text/csv");
+        values.put(MediaStore.MediaColumns.RELATIVE_PATH, RfidPublicStorage.mediaStoreRelativePath());
+        Uri created = context.getContentResolver().insert(filesCollection(), values);
         if (created == null) {
             throw new IOException("MediaStore: nelze vytvořit " + FILE_NAME);
         }

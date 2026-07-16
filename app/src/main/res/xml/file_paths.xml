@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <external-path name="download" path="Download/" />
+    <external-path name="documents_rfid" path="Documents/RFID Go GPS/" />
     <external-files-path name="exports" path="." />
     <files-path name="internal" path="." />
 </paths>

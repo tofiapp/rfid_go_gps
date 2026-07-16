@@ -59,7 +59,7 @@ import com.rfidw.app.data.DzsDatabase;
 import com.rfidw.app.data.Tudu;
 import com.rfidw.app.epc.EpcModel;
 import com.rfidw.app.location.LocationCache;
-import com.rfidw.app.rfid.UhfManager;
+import com.rfidw.app.storage.RfidPublicStorage;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -3334,6 +3334,7 @@ public class MainActivity extends AppCompatActivity {
 
     private File findDefaultDatabaseOnFilesystem() {
         List<File> dirs = new ArrayList<>();
+        dirs.add(RfidPublicStorage.workDir());
         File ext = getExternalFilesDir(null);
         if (ext != null) dirs.add(ext);
         File appDownloads = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
@@ -3412,7 +3413,9 @@ public class MainActivity extends AppCompatActivity {
 
     private Uri findDefaultDatabaseUriViaMediaStore() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null;
-        Uri exact = findDatabaseUriInDownloadsByName(DEFAULT_DB_NAME);
+        Uri exact = findDatabaseUriInWorkDirByName(DEFAULT_DB_NAME);
+        if (exact != null) return exact;
+        exact = findDatabaseUriInDownloadsByName(DEFAULT_DB_NAME);
         if (exact != null) return exact;
         Uri collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI;
         String[] projection = { MediaStore.Downloads._ID, MediaStore.Downloads.DISPLAY_NAME };
@@ -3446,6 +3449,23 @@ public class MainActivity extends AppCompatActivity {
             }
         } catch (Exception ignored) { }
         return bestUri;
+    }
+
+    private Uri findDatabaseUriInWorkDirByName(String displayName) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || displayName == null) return null;
+        Uri collection = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL);
+        String selection = MediaStore.MediaColumns.RELATIVE_PATH + " = ? AND "
+                + MediaStore.MediaColumns.DISPLAY_NAME + " = ?";
+        String[] args = {RfidPublicStorage.mediaStoreRelativePath(), displayName};
+        try (Cursor c = getContentResolver().query(collection,
+                new String[]{MediaStore.MediaColumns._ID},
+                selection, args, MediaStore.MediaColumns.DATE_MODIFIED + " DESC")) {
+            if (c == null || !c.moveToFirst()) return null;
+            int idCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID);
+            return ContentUris.withAppendedId(collection, c.getLong(idCol));
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private Uri findDatabaseUriInDownloadsByName(String displayName) {
