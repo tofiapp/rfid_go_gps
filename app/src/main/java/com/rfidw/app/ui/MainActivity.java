@@ -4901,12 +4901,9 @@ public class MainActivity extends AppCompatActivity {
         io.execute(() -> {
             try {
                 File dest = CsvStorage.resolveFile(this);
-                try (InputStream in = getContentResolver().openInputStream(uri);
-                     java.io.OutputStream out = CsvStorage.openOutputStream(this, dest)) {
+                try (InputStream in = getContentResolver().openInputStream(uri)) {
                     if (in == null) throw new Exception("Soubor nelze otevřít");
-                    byte[] buf = new byte[8192];
-                    int n;
-                    while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                    CsvStorage.importFromInputStream(this, in);
                 }
                 CsvStore loaded = new CsvStore(MainActivity.this, dest);
                 ui.post(() -> {

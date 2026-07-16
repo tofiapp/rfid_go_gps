@@ -47,6 +47,18 @@ public final class CsvStorage {
         return Environment.DIRECTORY_DOWNLOADS + "/" + FILE_NAME;
     }
 
+    /** Zkopíruje obsah (např. z výběru souboru) do cílového CSV ve Stažených. */
+    public static void importFromInputStream(Context context, InputStream in) throws IOException {
+        File dest = resolveFile(context);
+        try (OutputStream out = openOutputStream(context, dest)) {
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                out.write(buf, 0, n);
+            }
+        }
+    }
+
     static InputStream openInputStream(Context context, File file) throws IOException {
         if (file.isFile() && file.canRead()) {
             return new FileInputStream(file);
