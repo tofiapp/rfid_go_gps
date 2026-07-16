@@ -4920,7 +4920,7 @@ public class MainActivity extends AppCompatActivity {
         }
         try {
             File f = csvStore.getFile();
-            if (!f.exists() || csvStore.size() == 0) {
+            if (!CsvStorage.isPresent(this, f) || csvStore.size() == 0) {
                 toast("Tabulka je prázdná");
                 return;
             }

@@ -179,7 +179,7 @@ public class CsvStore {
      */
     public synchronized boolean reloadIfChanged() {
         if (file == null || appContext == null) return false;
-        if (!file.isFile()) {
+        if (!CsvStorage.isPresent(appContext, file)) {
             if (rows.isEmpty()) {
                 lastSyncedHash = "";
                 return false;
@@ -199,7 +199,7 @@ public class CsvStore {
         rows.clear();
         castsByVyhybkaRo.clear();
         if (file == null || appContext == null) return;
-        if (!file.isFile()) {
+        if (!CsvStorage.isPresent(appContext, file)) {
             lastSyncedHash = "";
             return;
         }
@@ -417,7 +417,7 @@ public class CsvStore {
     }
 
     private String computeFileHash() {
-        if (file == null || !file.isFile() || appContext == null) return "";
+        if (file == null || appContext == null || !CsvStorage.isPresent(appContext, file)) return "";
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] buf = new byte[8192];
