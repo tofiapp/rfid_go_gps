@@ -409,6 +409,7 @@ public class MainActivity extends AppCompatActivity {
                 } else if (expanded) {
                     workflowContent.setVisibility(View.VISIBLE);
                     workflowContent.setAlpha(1f);
+                    reloadCsvFromDiskIfChanged(true);
                 }
                 updateWorkflowSheetOverlay(bottomSheet, expanded);
             }
@@ -2375,6 +2376,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        reloadCsvFromDiskIfChanged(false);
         ensureGpsForTuduLookup();
     }
 
@@ -2634,6 +2636,29 @@ public class MainActivity extends AppCompatActivity {
                 ui.post(() -> toast("CSV uložení: " + e.getMessage()));
             }
         });
+    }
+
+    /**
+     * Načte CSV z disku, pokud byl soubor změněn zvenku (USB, správce souborů).
+     * Aplikace jinak drží data jen v paměti a při dalším zápisu přepíše nahraný soubor.
+     */
+    private void reloadCsvFromDiskIfChanged(boolean showToast) {
+        if (csvStore == null) return;
+        io.execute(() -> {
+            boolean changed = csvStore.reloadIfChanged();
+            if (!changed) return;
+            ui.post(() -> applyReloadedCsvState(showToast));
+        });
+    }
+
+    private void applyReloadedCsvState(boolean showToast) {
+        refreshCsvTable();
+        if (csvStore.size() > 0) {
+            restoreStateFromLoadedCsv();
+        }
+        if (showToast) {
+            toast(getString(R.string.csv_reloaded_toast));
+        }
     }
 
     private void refreshCsvTable() {
@@ -4376,9 +4401,7 @@ public class MainActivity extends AppCompatActivity {
                 return false;
             }
             CsvStore.Row row = buildCsvRow(epc24, tid, branch);
-            csvStore.upsert(row);
-            persistCsvAsync();
-            refreshCsvTable();
+            persistCsvRowAsync(row);
             return true;
         } catch (Exception e) {
             toast("CSV: " + e.getMessage());
@@ -4418,14 +4441,25 @@ public class MainActivity extends AppCompatActivity {
                     longitude,
                     accuracyM,
                     gpsTime);
-            csvStore.upsert(row);
-            persistCsvAsync();
-            refreshCsvTable();
+            persistCsvRowAsync(row);
             return true;
         } catch (Exception e) {
             toast("CSV: " + e.getMessage());
             return false;
         }
+    }
+
+    private void persistCsvRowAsync(CsvStore.Row row) {
+        if (csvStore == null) return;
+        csvStore.upsert(row);
+        refreshCsvTable();
+        io.execute(() -> {
+            try {
+                csvStore.persist();
+            } catch (Exception e) {
+                ui.post(() -> toast("CSV uložení: " + e.getMessage()));
+            }
+        });
     }
 
     /** Sestaví řádek CSV z provozního stavu – nezávisle na rozložení šablony EPC. */
