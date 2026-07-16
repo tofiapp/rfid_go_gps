@@ -106,9 +106,9 @@ Při zápisu stejného `ID_RFID` se daný řádek **přepíše**.
 Tabulku lze **sdílet / exportovat** nebo **vymazat poslední záznam** (obnoví se předchozí stav šablony a výběru).
 Nad spodním panelem se zobrazuje náhled **posledních 5 řádků** a box **poslední záznam** na hlavní obrazovce.
 
-Soubor: `Android/data/com.rfidw.app.gps/files/rfid_go_gps_output.csv`.
+Soubor: **`Download/rfid_go_gps_output.csv`** (složka Stažené soubory na čtečce).
 
-**Nahrání z PC (USB):** Soubor lze nahradit stejným názvem – aplikace při návratu do popředí nebo otevření panelu Pokročilé detekuje změnu podle velikosti a obsahu (ne jen data úpravy). Před každým novým zápisem řádku se CSV z disku znovu načte, aby se nepřepsala nahraná verze.
+**Nahrání z PC přes USB:** V Průzkumníku Windows otevřete čtečku → vnitřní úložiště → **Download** (Stažené soubory) a soubor `rfid_go_gps_output.csv` tam zkopírujte nebo přepište. Stará cesta `Android/data/.../files/` z PC **nezapisovatelná** je – proto CSV nyní leží ve Stažených (stejně jako databáze DZS). Po nahrání vraťte se do aplikace nebo otevřete panel Pokročilé. Alternativa: tlačítko **Načíst CSV** v aplikaci.
 
 Aplikace při startu **automaticky načte** existující CSV a podle něj určí dokončené čipy a obnoví `ID_RFID`. Starší formáty CSV (včetně sloupce `rok` a bez GPS) jsou zpětně kompatibilní.
 

@@ -53,6 +53,7 @@ import com.google.android.material.button.MaterialButtonToggleGroup;
 
 import com.rfidw.app.R;
 import com.rfidw.app.csv.CsvRecordBuilder;
+import com.rfidw.app.csv.CsvStorage;
 import com.rfidw.app.csv.CsvStore;
 import com.rfidw.app.data.DzsDatabase;
 import com.rfidw.app.data.Tudu;
@@ -85,6 +86,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
     private static final int REQUEST_LOCATION_PERMISSION = 1001;
     private static final int REQUEST_STORAGE_PERMISSION = 1002;
+    private static final int REQUEST_CSV_STORAGE_PERMISSION = 1003;
     private static final String DEFAULT_DB_NAME = "DZS_PASPORT_TPI.sqlite";
 
     /** Výsledek automatického vyhledání DB ve Stažených / úložišti. */
@@ -178,6 +180,7 @@ public class MainActivity extends AppCompatActivity {
     private SharedPreferences prefs;
 
     private boolean pendingAutoLoadAfterStorage;
+    private boolean pendingCsvInit;
     private boolean step1Done, step2Done, step3Done, step2Failed;
     private boolean workflowRunning, chainWorkflow, scanDoneAwaitingConfirm, lastRecordUnlocked;
     /** CSV obnoveno dřív než zdrojový soubor – posun na další čip/výhybku až po načtení TUDU. */
@@ -2361,6 +2364,13 @@ public class MainActivity extends AppCompatActivity {
             }
             return;
         }
+        if (requestCode == REQUEST_CSV_STORAGE_PERMISSION) {
+            if (pendingCsvInit) {
+                pendingCsvInit = false;
+                initCsvStoreAsync();
+            }
+            return;
+        }
         if (requestCode != REQUEST_STORAGE_PERMISSION) return;
         if (!pendingAutoLoadAfterStorage) return;
         pendingAutoLoadAfterStorage = false;
@@ -2537,8 +2547,7 @@ public class MainActivity extends AppCompatActivity {
     // ---------- CSV ----------
 
     private void setupCsv() {
-        File out = new File(getExternalFilesDir(null), "rfid_go_gps_output.csv");
-        tvCsvPath.setText(out.getAbsolutePath());
+        tvCsvPath.setText(getString(R.string.csv_path_hint, CsvStorage.displayPath()));
 
         csvAdapter = new CsvAdapter();
         RecyclerView rv = findViewById(R.id.rvCsv);
@@ -2546,8 +2555,27 @@ public class MainActivity extends AppCompatActivity {
         rv.setItemAnimator(null);
         rv.setAdapter(csvAdapter);
 
+        if (needsCsvWritePermission()) {
+            pendingCsvInit = true;
+            ActivityCompat.requestPermissions(
+                    this,
+                    new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                    REQUEST_CSV_STORAGE_PERMISSION);
+            return;
+        }
+        initCsvStoreAsync();
+    }
+
+    private boolean needsCsvWritePermission() {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                && ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void initCsvStoreAsync() {
+        File out = CsvStorage.resolveFile(this);
         io.execute(() -> {
-            CsvStore loaded = new CsvStore(out);
+            CsvStore loaded = new CsvStore(MainActivity.this, out);
             ui.post(() -> {
                 csvStore = loaded;
                 refreshCsvTable();
@@ -2683,6 +2711,7 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.btnWritePwd).setOnClickListener(v -> doWritePassword());
         findViewById(R.id.btnLock).setOnClickListener(v -> doLock());
         findViewById(R.id.btnExportCsv).setOnClickListener(v -> exportCsv());
+        findViewById(R.id.btnImportCsv).setOnClickListener(v -> pickCsvFile());
         findViewById(R.id.btnClearCsv).setOnClickListener(v -> showDeleteConfirmDialog());
         findViewById(R.id.btnDeleteLastRecord).setOnClickListener(v -> showDeleteConfirmDialog());
         findViewById(R.id.btnScanDoneContinue).setOnClickListener(v -> onScanDoneContinue());
@@ -3161,6 +3190,16 @@ public class MainActivity extends AppCompatActivity {
                         if (result.getResultCode() == RESULT_OK && result.getData() != null) {
                             Uri uri = result.getData().getData();
                             if (uri != null) loadSource(uri);
+                        }
+                    });
+
+    private final androidx.activity.result.ActivityResultLauncher<Intent> csvPicker =
+            registerForActivityResult(
+                    new androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(),
+                    result -> {
+                        if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                            Uri uri = result.getData().getData();
+                            if (uri != null) importCsvFromUri(uri);
                         }
                     });
 
@@ -4848,6 +4887,36 @@ public class MainActivity extends AppCompatActivity {
     private Set<Integer> getWrittenCastsForVyhybka(String tuduCode, Tudu.Vyhybka v) {
         if (csvStore == null) return Collections.emptySet();
         return csvStore.getWrittenCasts(tuduCode, v.cislo);
+    }
+
+    private void pickCsvFile() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("text/*");
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        csvPicker.launch(i);
+    }
+
+    private void importCsvFromUri(Uri uri) {
+        io.execute(() -> {
+            try {
+                File dest = CsvStorage.resolveFile(this);
+                try (InputStream in = getContentResolver().openInputStream(uri);
+                     java.io.OutputStream out = CsvStorage.openOutputStream(this, dest)) {
+                    if (in == null) throw new Exception("Soubor nelze otevřít");
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                }
+                CsvStore loaded = new CsvStore(MainActivity.this, dest);
+                ui.post(() -> {
+                    csvStore = loaded;
+                    applyReloadedCsvState(true);
+                });
+            } catch (Exception e) {
+                ui.post(() -> toast("Import CSV: " + e.getMessage()));
+            }
+        });
     }
 
     // ---------- export CSV ----------
