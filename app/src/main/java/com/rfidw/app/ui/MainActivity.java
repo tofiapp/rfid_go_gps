@@ -660,7 +660,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showTuduBoundaryForm() {
-        expandCard1Body();
         View dialogView = getLayoutInflater().inflate(R.layout.dialog_tudu_boundary, null);
         com.google.android.material.textfield.TextInputEditText etTudu =
                 dialogView.findViewById(R.id.etBoundaryTudu);
@@ -710,6 +709,8 @@ public class MainActivity extends AppCompatActivity {
 
     private void applyTuduBoundaryForm(String tudu, String vyhybkaLabel, String kmExt) {
         tuduBoundaryMode = true;
+        gpsTuduLocked = true;
+        gpsVyhybkaLocked = true;
         tuduBoundaryVyhybkaLabel = vyhybkaLabel;
         tuduBoundaryKmExt = kmExt != null ? kmExt : "";
         epc.tudu = tudu;
@@ -1263,6 +1264,7 @@ public class MainActivity extends AppCompatActivity {
             toast(getString(R.string.tudu_picker_no_gps));
             return;
         }
+        exitTuduBoundaryMode();
         gpsTuduLocked = false;
         gpsVyhybkaLocked = false;
         gpsLookupNoMatch = false;
@@ -3745,7 +3747,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void scheduleGpsTuduLookup() {
-        if (!gpsAutoSelection || dzsDatabase == null || locationCache == null || gpsLookupInFlight) {
+        if (!gpsAutoSelection || dzsDatabase == null || locationCache == null || gpsLookupInFlight
+                || tuduBoundaryMode) {
             return;
         }
         if (!dzsDatabase.isProximityIndexed()) {
@@ -3756,7 +3759,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void scheduleGpsTuduLookupNow() {
-        if (!gpsAutoSelection || dzsDatabase == null || locationCache == null || gpsLookupInFlight) {
+        if (!gpsAutoSelection || dzsDatabase == null || locationCache == null || gpsLookupInFlight
+                || tuduBoundaryMode) {
             return;
         }
         if (gpsTuduLocked || gpsVyhybkaLocked) {

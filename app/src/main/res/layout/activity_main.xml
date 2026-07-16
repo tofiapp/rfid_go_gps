@@ -49,16 +49,32 @@
                         android:textStyle="bold"/>
 
                     <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnTuduBoundary"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:minHeight="32dp"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        android:text="@string/tudu_boundary_btn"
+                        android:textColor="@color/primary"
+                        android:textSize="11sp"
+                        app:backgroundTint="@android:color/transparent"
+                        app:strokeColor="@color/primary"
+                        app:strokeWidth="1dp"/>
+
+                    <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnGpsReloadLocation"
                         style="@style/Widget.Material3.Button.OutlinedButton"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:minHeight="36dp"
-                        android:paddingStart="10dp"
-                        android:paddingEnd="10dp"
+                        android:minHeight="32dp"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
                         android:text="@string/gps_reload_location"
                         android:textColor="@color/primary"
-                        android:textSize="12sp"
+                        android:textSize="11sp"
                         android:visibility="gone"
                         app:backgroundTint="@android:color/transparent"
                         app:strokeColor="@color/primary"
@@ -247,17 +263,6 @@
                         android:text="@string/tudu_mode_gps_hint"
                         android:textColor="@color/text_muted"
                         android:textSize="11sp"/>
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnTuduBoundary"
-                        style="@style/Widget.Material3.Button.OutlinedButton"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginBottom="8dp"
-                        android:text="@string/tudu_boundary_btn"
-                        android:textColor="@color/primary"
-                        app:strokeColor="@color/primary"
-                        app:strokeWidth="1dp"/>
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnPickSource"
