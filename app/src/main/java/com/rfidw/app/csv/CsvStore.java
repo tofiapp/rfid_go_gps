@@ -2,11 +2,15 @@ package com.rfidw.app.csv;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.FileReader;
+import java.io.InputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.Locale;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -63,8 +67,10 @@ public class CsvStore {
     private final Map<String, Row> rows = new LinkedHashMap<>();
     /** TUDU|výhybka|RO_ID → množina zapsaných částí */
     private final Map<String, Set<Integer>> castsByVyhybkaRo = new HashMap<>();
-    /** Čas poslední synchronizace s diskem (load/save) – pro detekci externího přepisu. */
+    /** Otisk souboru po poslední synchronizaci – detekce externího přepisu i se starším časem (USB z PC). */
     private long lastSyncedMtime;
+    private long lastSyncedSize = -1;
+    private String lastSyncedHash = "";
 
     public CsvStore(File file) {
         this.file = file;
@@ -103,6 +109,7 @@ public class CsvStore {
 
     /** Upsert a okamžitý zápis na disk v jedné synchronizované operaci. */
     public synchronized void upsertAndPersist(Row row) {
+        reloadIfChanged();
         upsert(row);
         save();
     }
@@ -174,18 +181,33 @@ public class CsvStore {
         if (file == null) return false;
         if (!file.exists()) {
             if (rows.isEmpty()) {
-                lastSyncedMtime = 0;
+                touchSyncedState();
                 return false;
             }
             rows.clear();
             castsByVyhybkaRo.clear();
-            lastSyncedMtime = 0;
+            touchSyncedState();
             return true;
         }
         long mtime = file.lastModified();
-        if (mtime <= lastSyncedMtime) return false;
-        load();
-        return true;
+        long size = file.length();
+        if (mtime == lastSyncedMtime && size == lastSyncedSize) {
+            return false;
+        }
+        if (size != lastSyncedSize) {
+            load();
+            return true;
+        }
+        if (mtime != lastSyncedMtime) {
+            String hash = computeContentHash(file);
+            if (!hash.equals(lastSyncedHash)) {
+                load();
+                return true;
+            }
+            lastSyncedMtime = mtime;
+            return false;
+        }
+        return false;
     }
 
     private void load() {
@@ -219,7 +241,7 @@ public class CsvStore {
             rows.clear();
             castsByVyhybkaRo.clear();
         }
-        touchSyncedMtime();
+        touchSyncedState();
     }
 
     private static Row parseDataRow(String[] c, CsvFormat format) {
@@ -375,8 +397,9 @@ public class CsvStore {
         try {
             File parent = file.getParentFile();
             if (parent != null && !parent.exists()) parent.mkdirs();
+            File tmp = new File(parent, file.getName() + ".tmp");
             try (Writer w = new OutputStreamWriter(
-                    new FileOutputStream(file, false), StandardCharsets.UTF_8)) {
+                    new FileOutputStream(tmp, false), StandardCharsets.UTF_8)) {
                 w.write(join(HEADER));
                 w.write("\n");
                 for (Row r : rows.values()) {
@@ -384,14 +407,50 @@ public class CsvStore {
                     w.write("\n");
                 }
             }
-            touchSyncedMtime();
+            if (file.exists() && !file.delete()) {
+                throw new RuntimeException("Nepodařilo se nahradit CSV (soubor je zablokovaný?)");
+            }
+            if (!tmp.renameTo(file)) {
+                throw new RuntimeException("Nepodařilo se dokončit zápis CSV");
+            }
+            touchSyncedState();
         } catch (Exception e) {
             throw new RuntimeException("Nepodařilo se uložit CSV: " + e.getMessage(), e);
         }
     }
 
-    private void touchSyncedMtime() {
-        lastSyncedMtime = file != null && file.exists() ? file.lastModified() : 0;
+    private void touchSyncedState() {
+        if (file == null || !file.exists()) {
+            lastSyncedMtime = 0;
+            lastSyncedSize = -1;
+            lastSyncedHash = "";
+            return;
+        }
+        lastSyncedMtime = file.lastModified();
+        lastSyncedSize = file.length();
+        lastSyncedHash = computeContentHash(file);
+    }
+
+    private static String computeContentHash(File target) {
+        if (target == null || !target.isFile()) return "";
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buf = new byte[8192];
+            try (InputStream in = new FileInputStream(target)) {
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    digest.update(buf, 0, n);
+                }
+            }
+            byte[] hash = digest.digest();
+            StringBuilder sb = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                sb.append(String.format(Locale.ROOT, "%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     private static String vyhybkaRoKey(String tuduCode, int vyhybkaCislo, String roId) {
