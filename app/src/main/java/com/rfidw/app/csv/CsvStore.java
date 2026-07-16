@@ -177,7 +177,7 @@ public class CsvStore {
 
     /**
      * Znovu načte soubor z disku, pokud byl od poslední synchronizace změněn zvenku
-     * (např. nahrání přes USB do Documents/RFID Go GPS/rfid_go_gps_output.csv).
+     * (např. nahrání přes USB do Download/rfid_go_gps_output.csv).
      *
      * @return true pokud došlo ke změně obsahu v paměti
      */
