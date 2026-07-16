@@ -60,8 +60,6 @@ import com.rfidw.app.data.Tudu;
 import com.rfidw.app.epc.EpcModel;
 import com.rfidw.app.location.LocationCache;
 import com.rfidw.app.rfid.UhfManager;
-import com.rfidw.app.storage.DbStorage;
-import com.rfidw.app.storage.RfidPublicStorage;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -3224,11 +3222,6 @@ public class MainActivity extends AppCompatActivity {
             ui.post(this::requestStoragePermissionIfNeeded);
         }
         io.execute(() -> {
-            File publicDb = DbStorage.resolveFile(this);
-            if (publicDb.isFile() && publicDb.canRead()) {
-                loadDatabaseFromPath(publicDb.getAbsolutePath(), DEFAULT_DB_NAME, false);
-                return;
-            }
             String savedPath = prefs.getString(PREF_DB_SOURCE_PATH, null);
             if (savedPath != null) {
                 File saved = new File(savedPath);
@@ -3341,17 +3334,19 @@ public class MainActivity extends AppCompatActivity {
 
     private File findDefaultDatabaseOnFilesystem() {
         List<File> dirs = new ArrayList<>();
-        dirs.add(RfidPublicStorage.workDir());
-        if (canReadSharedStorage()) {
-            File pubDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-            if (pubDownloads != null) dirs.add(pubDownloads);
-            dirs.add(RfidPublicStorage.legacyDocumentsWorkDir());
-        }
         File ext = getExternalFilesDir(null);
         if (ext != null) dirs.add(ext);
         File appDownloads = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
         if (appDownloads != null) dirs.add(appDownloads);
         dirs.add(getFilesDir());
+        if (canReadSharedStorage()) {
+            File pubDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+            if (pubDownloads != null) dirs.add(pubDownloads);
+            File root = Environment.getExternalStorageDirectory();
+            if (root != null) dirs.add(root);
+            dirs.add(new File("/storage/emulated/0"));
+            dirs.add(new File("/storage/emulated/0/Download"));
+        }
         File best = null;
         int bestScore = 0;
         for (File dir : dirs) {
@@ -3379,9 +3374,7 @@ public class MainActivity extends AppCompatActivity {
         try {
             String displayName = queryName(uri);
             File local = copyUriToCache(uri, "dzs_auto_source.db", false);
-            File canonical = DbStorage.ensureCanonicalCopy(this, local);
-            File effective = canonical != null ? canonical : local;
-            return new AutoDiscoveredDb(effective, uri, displayName);
+            return new AutoDiscoveredDb(local, uri, displayName);
         } catch (Exception ignored) {
             return null;
         }
@@ -3419,11 +3412,7 @@ public class MainActivity extends AppCompatActivity {
 
     private Uri findDefaultDatabaseUriViaMediaStore() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null;
-        Uri exact = findDatabaseUriInWorkDirByName(DEFAULT_DB_NAME);
-        if (exact != null) return exact;
-        exact = findDatabaseUriInDownloadsByName(DEFAULT_DB_NAME);
-        if (exact != null) return exact;
-        exact = findDatabaseUriInLegacyDocumentsByName(DEFAULT_DB_NAME);
+        Uri exact = findDatabaseUriInDownloadsByName(DEFAULT_DB_NAME);
         if (exact != null) return exact;
         Uri collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI;
         String[] projection = { MediaStore.Downloads._ID, MediaStore.Downloads.DISPLAY_NAME };
@@ -3457,40 +3446,6 @@ public class MainActivity extends AppCompatActivity {
             }
         } catch (Exception ignored) { }
         return bestUri;
-    }
-
-    private Uri findDatabaseUriInWorkDirByName(String displayName) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || displayName == null) return null;
-        Uri collection = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL);
-        String selection = MediaStore.MediaColumns.RELATIVE_PATH + " = ? AND "
-                + MediaStore.MediaColumns.DISPLAY_NAME + " = ?";
-        String[] args = {RfidPublicStorage.mediaStoreRelativePath(), displayName};
-        try (Cursor c = getContentResolver().query(collection,
-                new String[]{MediaStore.MediaColumns._ID},
-                selection, args, MediaStore.MediaColumns.DATE_MODIFIED + " DESC")) {
-            if (c == null || !c.moveToFirst()) return null;
-            int idCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID);
-            return ContentUris.withAppendedId(collection, c.getLong(idCol));
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    private Uri findDatabaseUriInLegacyDocumentsByName(String displayName) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || displayName == null) return null;
-        Uri collection = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL);
-        String selection = MediaStore.MediaColumns.RELATIVE_PATH + " = ? AND "
-                + MediaStore.MediaColumns.DISPLAY_NAME + " = ?";
-        String[] args = {RfidPublicStorage.legacyDocumentsRelativeWorkDir() + "/", displayName};
-        try (Cursor c = getContentResolver().query(collection,
-                new String[]{MediaStore.MediaColumns._ID},
-                selection, args, MediaStore.MediaColumns.DATE_MODIFIED + " DESC")) {
-            if (c == null || !c.moveToFirst()) return null;
-            int idCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID);
-            return ContentUris.withAppendedId(collection, c.getLong(idCol));
-        } catch (Exception ignored) {
-            return null;
-        }
     }
 
     private Uri findDatabaseUriInDownloadsByName(String displayName) {
@@ -3550,10 +3505,6 @@ public class MainActivity extends AppCompatActivity {
 
     private void loadDatabaseFromPath(String path, String displayName, boolean showErrorToast, Uri sourceUri) {
         final long loadId = ++dbLoadGeneration;
-        File sourceFile = new File(path);
-        File canonical = DbStorage.ensureCanonicalCopy(this, sourceFile);
-        final String effectivePath = canonical != null ? canonical.getAbsolutePath() : path;
-        final Uri effectiveUri = canonical != null ? null : sourceUri;
         runOnUiThreadIfAlive(loadId, () -> {
             beginCard1DbLoad(displayName);
             hideWorkflowDbIndexCard();
@@ -3611,7 +3562,7 @@ public class MainActivity extends AppCompatActivity {
                     initLon = snap.longitude;
                 }
             }
-            DzsDatabase opened = DzsDatabase.open(effectivePath, getDzsStorageDir(), progress, initLat, initLon);
+            DzsDatabase opened = DzsDatabase.open(path, getDzsStorageDir(), progress, initLat, initLon);
             if (loadId != dbLoadGeneration) {
                 opened.close();
                 return;
@@ -3643,7 +3594,7 @@ public class MainActivity extends AppCompatActivity {
                         ? getString(R.string.db_loaded_gps, displayName, 0)
                         : getString(R.string.db_loaded_manual, displayName, 0));
                 pendingAutoLoadAfterStorage = false;
-                persistDbSource(effectivePath, displayName, effectiveUri);
+                persistDbSource(path, displayName, sourceUri);
                 endCard1DbLoad();
                 collapseCard1Body();
                 scrollToCard1();
