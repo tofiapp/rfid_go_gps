@@ -59,6 +59,7 @@ import com.rfidw.app.data.DzsDatabase;
 import com.rfidw.app.data.Tudu;
 import com.rfidw.app.epc.EpcModel;
 import com.rfidw.app.location.LocationCache;
+import com.rfidw.app.rfid.UhfManager;
 import com.rfidw.app.storage.RfidPublicStorage;
 
 import java.io.File;
