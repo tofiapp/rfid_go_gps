@@ -376,9 +376,8 @@ public class CsvStore {
         try {
             File parent = file.getParentFile();
             if (parent != null && !parent.exists()) parent.mkdirs();
-            File tmp = new File(parent, file.getName() + ".tmp");
             try (Writer w = new OutputStreamWriter(
-                    new FileOutputStream(tmp, false), StandardCharsets.UTF_8)) {
+                    new FileOutputStream(file, false), StandardCharsets.UTF_8)) {
                 w.write(join(HEADER));
                 w.write("\n");
                 for (Row r : rows.values()) {
@@ -386,15 +385,7 @@ public class CsvStore {
                     w.write("\n");
                 }
             }
-            if (file.exists() && !file.delete()) {
-                throw new RuntimeException("Nepodařilo se přepsat CSV (soubor je používán jiným procesem)");
-            }
-            if (!tmp.renameTo(file)) {
-                throw new RuntimeException("Nepodařilo se dokončit zápis CSV");
-            }
             touchSyncedMtime();
-        } catch (RuntimeException e) {
-            throw e;
         } catch (Exception e) {
             throw new RuntimeException("Nepodařilo se uložit CSV: " + e.getMessage(), e);
         }
