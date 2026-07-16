@@ -2666,11 +2666,6 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    /**
-     * Načte CSV z disku, pokud byl soubor změněn zvenku (USB, správce souborů).
-     * Detekce podle velikosti a obsahu – ne jen času úpravy (soubor z PC má často starší mtime).
-     * Před zápisem nového řádku se soubor znovu načte, aby nahraná verze nebyla přepsána.
-     */
     private void reloadCsvFromDiskIfChanged(boolean showToast) {
         if (csvStore == null) return;
         io.execute(() -> {
@@ -2688,6 +2683,20 @@ public class MainActivity extends AppCompatActivity {
         if (showToast) {
             toast(getString(R.string.csv_reloaded_toast));
         }
+    }
+
+    private void persistCsvRowAsync(CsvStore.Row row) {
+        if (csvStore == null) return;
+        csvStore.upsert(row);
+        refreshCsvTable();
+        io.execute(() -> {
+            try {
+                csvStore.upsertAndPersist(row);
+                ui.post(this::refreshCsvTable);
+            } catch (Exception e) {
+                ui.post(() -> toast("CSV uložení: " + e.getMessage()));
+            }
+        });
     }
 
     private void refreshCsvTable() {
@@ -4489,20 +4498,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void persistCsvRowAsync(CsvStore.Row row) {
-        if (csvStore == null) return;
-        csvStore.upsert(row);
-        refreshCsvTable();
-        io.execute(() -> {
-            try {
-                csvStore.upsertAndPersist(row);
-                ui.post(this::refreshCsvTable);
-            } catch (Exception e) {
-                ui.post(() -> toast("CSV uložení: " + e.getMessage()));
-            }
-        });
-    }
-
     /** Sestaví řádek CSV z provozního stavu – nezávisle na rozložení šablony EPC. */
     private CsvStore.Row buildCsvRow(String epc24, String tid, Tudu.Vyhybka.RoBranch branch) {
         LocationCache.Snapshot gps = locationCache != null
@@ -4903,7 +4898,7 @@ public class MainActivity extends AppCompatActivity {
                 File dest = CsvStorage.resolveFile(this);
                 try (InputStream in = getContentResolver().openInputStream(uri)) {
                     if (in == null) throw new Exception("Soubor nelze otevřít");
-                    CsvStorage.importFromInputStream(this, in);
+                    CsvStorage.copyTo(this, in);
                 }
                 CsvStore loaded = new CsvStore(MainActivity.this, dest);
                 ui.post(() -> {
