@@ -2393,7 +2393,16 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onPause() {
-        CsvStorage.releaseMediaStoreEntry(this);
+        if (csvStore != null) {
+            io.execute(() -> {
+                try {
+                    csvStore.persist();
+                    CsvStorage.mirrorWorkingToPublic(MainActivity.this);
+                } catch (Exception ignored) {
+                }
+            });
+        }
+        CsvStorage.deleteLegacyMediaStoreEntry(this);
         super.onPause();
     }
 
@@ -2580,7 +2589,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void initCsvStoreAsync() {
-        File out = CsvStorage.resolveFile(this);
+        CsvStorage.deleteLegacyMediaStoreEntry(this);
+        File out = CsvStorage.resolveWorkingFile(this);
         io.execute(() -> {
             CsvStore loaded = new CsvStore(MainActivity.this, out);
             ui.post(() -> {
@@ -4927,7 +4937,7 @@ public class MainActivity extends AppCompatActivity {
     private void importCsvFromUri(Uri uri) {
         io.execute(() -> {
             try {
-                File dest = CsvStorage.resolveFile(this);
+                File dest = CsvStorage.resolveWorkingFile(this);
                 try (InputStream in = getContentResolver().openInputStream(uri)) {
                     if (in == null) throw new Exception("Soubor nelze otevřít");
                     CsvStorage.importFromInputStream(this, in);

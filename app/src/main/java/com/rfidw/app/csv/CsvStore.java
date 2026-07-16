@@ -5,14 +5,10 @@ import android.content.Context;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.util.Locale;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -70,10 +66,6 @@ public class CsvStore {
     private final Map<String, Row> rows = new LinkedHashMap<>();
     /** TUDU|výhybka|RO_ID → množina zapsaných částí */
     private final Map<String, Set<Integer>> castsByVyhybkaRo = new HashMap<>();
-    /** Otisk souboru po poslední synchronizaci – detekce externího přepisu i se starším časem (USB z PC). */
-    private long lastSyncedMtime;
-    private long lastSyncedSize = -1;
-    private String lastSyncedHash = "";
 
     public CsvStore(Context context, File file) {
         this.appContext = context != null ? context.getApplicationContext() : null;
@@ -183,44 +175,14 @@ public class CsvStore {
      */
     public synchronized boolean reloadIfChanged() {
         if (file == null) return false;
-        if (!fileExistsOnDisk()) {
-            if (rows.isEmpty()) {
-                touchSyncedState();
-                return false;
-            }
-            rows.clear();
-            castsByVyhybkaRo.clear();
-            touchSyncedState();
-            return true;
-        }
-        CsvStorage.FileMeta meta = currentFileMeta();
-        if (meta == null) {
-            touchSyncedState();
-            return false;
-        }
-        long mtime = meta.mtime;
-        long size = meta.size;
-        if (mtime == lastSyncedMtime && size == lastSyncedSize) {
-            return false;
-        }
-        if (size != lastSyncedSize) {
-            if (appContext != null) {
-                CsvStorage.releaseMediaStoreEntry(appContext);
-            }
-            load();
-            return true;
-        }
-        if (mtime != lastSyncedMtime) {
-            String hash = computeContentHash();
-            if (!hash.equals(lastSyncedHash)) {
-                if (appContext != null) {
-                    CsvStorage.releaseMediaStoreEntry(appContext);
+        if (appContext != null) {
+            try {
+                if (CsvStorage.pullFromPublicIfChanged(appContext)) {
+                    load();
+                    return true;
                 }
-                load();
-                return true;
+            } catch (Exception ignored) {
             }
-            lastSyncedMtime = mtime;
-            return false;
         }
         return false;
     }
@@ -229,18 +191,13 @@ public class CsvStore {
         rows.clear();
         castsByVyhybkaRo.clear();
         if (file == null || (!file.exists() && appContext == null)) {
-            lastSyncedMtime = 0;
             return;
         }
-        if (file != null && !file.exists() && appContext != null) {
-            CsvStorage.FileMeta meta = CsvStorage.queryFileMeta(appContext, file);
-            if (meta == null) {
-                lastSyncedMtime = 0;
-                return;
-            }
+        if (!file.exists()) {
+            return;
         }
         try (BufferedReader br = new BufferedReader(new InputStreamReader(
-                openInputStream(), StandardCharsets.UTF_8))) {
+                new FileInputStream(file), StandardCharsets.UTF_8))) {
             String line;
             boolean first = true;
             CsvFormat format = CsvFormat.CURRENT;
@@ -264,7 +221,6 @@ public class CsvStore {
             rows.clear();
             castsByVyhybkaRo.clear();
         }
-        touchSyncedState();
     }
 
     private static Row parseDataRow(String[] c, CsvFormat format) {
@@ -419,7 +375,6 @@ public class CsvStore {
     private void save() {
         try {
             saveViaTempFile();
-            touchSyncedState();
         } catch (Exception e) {
             throw new RuntimeException("Nepodařilo se uložit CSV: " + e.getMessage(), e);
         }
@@ -429,8 +384,8 @@ public class CsvStore {
         File parent = file.getParentFile();
         if (parent != null && !parent.exists()) parent.mkdirs();
         File tmp = new File(parent, file.getName() + ".tmp");
-        try (OutputStream out = openOutputStream(tmp);
-             Writer w = new OutputStreamWriter(out, StandardCharsets.UTF_8)) {
+        try (Writer w = new OutputStreamWriter(
+                new java.io.FileOutputStream(tmp, false), StandardCharsets.UTF_8)) {
             writeAllRows(w);
         }
         if (file.exists() && !file.delete()) {
@@ -438,9 +393,6 @@ public class CsvStore {
         }
         if (!tmp.renameTo(file)) {
             throw new RuntimeException("Nepodařilo se dokončit zápis CSV");
-        }
-        if (appContext != null) {
-            CsvStorage.releaseMediaStoreEntry(appContext);
         }
     }
 
@@ -452,79 +404,6 @@ public class CsvStore {
             w.write("\n");
         }
     }
-
-    private InputStream openInputStream() throws java.io.IOException {
-        if (appContext != null) {
-            return CsvStorage.openInputStream(appContext, file);
-        }
-        return new FileInputStream(file);
-    }
-
-    private OutputStream openOutputStream() throws java.io.IOException {
-        return openOutputStream(file);
-    }
-
-    private OutputStream openOutputStream(File target) throws java.io.IOException {
-        if (appContext != null) {
-            return CsvStorage.openOutputStream(appContext, target);
-        }
-        return new java.io.FileOutputStream(target, false);
-    }
-
-    private boolean fileExistsOnDisk() {
-        if (file != null && file.isFile()) return true;
-        if (appContext != null) {
-            CsvStorage.FileMeta meta = CsvStorage.queryFileMeta(appContext, file);
-            return meta != null && meta.size >= 0;
-        }
-        return file != null && file.exists();
-    }
-
-    private CsvStorage.FileMeta currentFileMeta() {
-        if (appContext != null) {
-            CsvStorage.FileMeta meta = CsvStorage.queryFileMeta(appContext, file);
-            if (meta != null) return meta;
-        }
-        if (file != null && file.isFile()) {
-            return new CsvStorage.FileMeta(file.length(), file.lastModified());
-        }
-        return null;
-    }
-
-    private void touchSyncedState() {
-        CsvStorage.FileMeta meta = currentFileMeta();
-        if (meta == null) {
-            lastSyncedMtime = 0;
-            lastSyncedSize = -1;
-            lastSyncedHash = "";
-            return;
-        }
-        lastSyncedMtime = meta.mtime;
-        lastSyncedSize = meta.size;
-        lastSyncedHash = computeContentHash();
-    }
-
-    private String computeContentHash() {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] buf = new byte[8192];
-            try (InputStream in = openInputStream()) {
-                int n;
-                while ((n = in.read(buf)) > 0) {
-                    digest.update(buf, 0, n);
-                }
-            }
-            byte[] hash = digest.digest();
-            StringBuilder sb = new StringBuilder(hash.length * 2);
-            for (byte b : hash) {
-                sb.append(String.format(Locale.ROOT, "%02x", b));
-            }
-            return sb.toString();
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
     private static String vyhybkaRoKey(String tuduCode, int vyhybkaCislo, String roId) {
         String ro = roId != null ? roId.trim() : "";
         return tuduCode + "\0" + vyhybkaCislo + "\0" + ro;
