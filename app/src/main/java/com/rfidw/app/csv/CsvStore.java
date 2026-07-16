@@ -1,11 +1,13 @@
 package com.rfidw.app.csv;
 
+import android.content.Context;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.FileReader;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
@@ -63,6 +65,7 @@ public class CsvStore {
         }
     }
 
+    private final Context appContext;
     private final File file;
     private final Map<String, Row> rows = new LinkedHashMap<>();
     /** TUDU|výhybka|RO_ID → množina zapsaných částí */
@@ -72,7 +75,8 @@ public class CsvStore {
     private long lastSyncedSize = -1;
     private String lastSyncedHash = "";
 
-    public CsvStore(File file) {
+    public CsvStore(Context context, File file) {
+        this.appContext = context != null ? context.getApplicationContext() : null;
         this.file = file;
         load();
     }
@@ -173,13 +177,13 @@ public class CsvStore {
 
     /**
      * Znovu načte soubor z disku, pokud byl od poslední synchronizace změněn zvenku
-     * (např. nahrání přes USB do Android/data/.../files/).
+     * (např. nahrání přes USB do Documents/RFID Go GPS/rfid_go_gps_output.csv).
      *
      * @return true pokud došlo ke změně obsahu v paměti
      */
     public synchronized boolean reloadIfChanged() {
         if (file == null) return false;
-        if (!file.exists()) {
+        if (!fileExistsOnDisk()) {
             if (rows.isEmpty()) {
                 touchSyncedState();
                 return false;
@@ -189,8 +193,13 @@ public class CsvStore {
             touchSyncedState();
             return true;
         }
-        long mtime = file.lastModified();
-        long size = file.length();
+        CsvStorage.FileMeta meta = currentFileMeta();
+        if (meta == null) {
+            touchSyncedState();
+            return false;
+        }
+        long mtime = meta.mtime;
+        long size = meta.size;
         if (mtime == lastSyncedMtime && size == lastSyncedSize) {
             return false;
         }
@@ -199,7 +208,7 @@ public class CsvStore {
             return true;
         }
         if (mtime != lastSyncedMtime) {
-            String hash = computeContentHash(file);
+            String hash = computeContentHash();
             if (!hash.equals(lastSyncedHash)) {
                 load();
                 return true;
@@ -213,11 +222,19 @@ public class CsvStore {
     private void load() {
         rows.clear();
         castsByVyhybkaRo.clear();
-        if (file == null || !file.exists()) {
+        if (file == null || (!file.exists() && appContext == null)) {
             lastSyncedMtime = 0;
             return;
         }
-        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
+        if (file != null && !file.exists() && appContext != null) {
+            CsvStorage.FileMeta meta = CsvStorage.queryFileMeta(appContext, file);
+            if (meta == null) {
+                lastSyncedMtime = 0;
+                return;
+            }
+        }
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(
+                openInputStream(), StandardCharsets.UTF_8))) {
             String line;
             boolean first = true;
             CsvFormat format = CsvFormat.CURRENT;
@@ -395,23 +412,10 @@ public class CsvStore {
 
     private void save() {
         try {
-            File parent = file.getParentFile();
-            if (parent != null && !parent.exists()) parent.mkdirs();
-            File tmp = new File(parent, file.getName() + ".tmp");
-            try (Writer w = new OutputStreamWriter(
-                    new FileOutputStream(tmp, false), StandardCharsets.UTF_8)) {
-                w.write(join(HEADER));
-                w.write("\n");
-                for (Row r : rows.values()) {
-                    w.write(join(r.toArray()));
-                    w.write("\n");
-                }
-            }
-            if (file.exists() && !file.delete()) {
-                throw new RuntimeException("Nepodařilo se nahradit CSV (soubor je zablokovaný?)");
-            }
-            if (!tmp.renameTo(file)) {
-                throw new RuntimeException("Nepodařilo se dokončit zápis CSV");
+            if (appContext != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                saveDirect();
+            } else {
+                saveViaTempFile();
             }
             touchSyncedState();
         } catch (Exception e) {
@@ -419,24 +423,90 @@ public class CsvStore {
         }
     }
 
+    private void saveDirect() throws java.io.IOException {
+        try (OutputStream out = openOutputStream();
+             Writer w = new OutputStreamWriter(out, StandardCharsets.UTF_8)) {
+            writeAllRows(w);
+        }
+    }
+
+    private void saveViaTempFile() throws java.io.IOException {
+        File parent = file.getParentFile();
+        if (parent != null && !parent.exists()) parent.mkdirs();
+        File tmp = new File(parent, file.getName() + ".tmp");
+        try (java.io.FileOutputStream fos = new java.io.FileOutputStream(tmp, false);
+             Writer w = new OutputStreamWriter(fos, StandardCharsets.UTF_8)) {
+            writeAllRows(w);
+        }
+        if (file.exists() && !file.delete()) {
+            throw new RuntimeException("Nepodařilo se nahradit CSV (soubor je zablokovaný?)");
+        }
+        if (!tmp.renameTo(file)) {
+            throw new RuntimeException("Nepodařilo se dokončit zápis CSV");
+        }
+    }
+
+    private void writeAllRows(Writer w) throws java.io.IOException {
+        w.write(join(HEADER));
+        w.write("\n");
+        for (Row r : rows.values()) {
+            w.write(join(r.toArray()));
+            w.write("\n");
+        }
+    }
+
+    private InputStream openInputStream() throws java.io.IOException {
+        if (appContext != null) {
+            return CsvStorage.openInputStream(appContext, file);
+        }
+        return new FileInputStream(file);
+    }
+
+    private OutputStream openOutputStream() throws java.io.IOException {
+        if (appContext != null) {
+            return CsvStorage.openOutputStream(appContext, file);
+        }
+        return new java.io.FileOutputStream(file, false);
+    }
+
+    private boolean fileExistsOnDisk() {
+        if (file != null && file.isFile()) return true;
+        if (appContext != null) {
+            CsvStorage.FileMeta meta = CsvStorage.queryFileMeta(appContext, file);
+            return meta != null && meta.size >= 0;
+        }
+        return file != null && file.exists();
+    }
+
+    private CsvStorage.FileMeta currentFileMeta() {
+        if (appContext != null) {
+            CsvStorage.FileMeta meta = CsvStorage.queryFileMeta(appContext, file);
+            if (meta != null) return meta;
+        }
+        if (file != null && file.isFile()) {
+            return new CsvStorage.FileMeta(file.length(), file.lastModified());
+        }
+        return null;
+    }
+
     private void touchSyncedState() {
-        if (file == null || !file.exists()) {
+        CsvStorage.FileMeta meta = currentFileMeta();
+        if (meta == null) {
             lastSyncedMtime = 0;
             lastSyncedSize = -1;
             lastSyncedHash = "";
             return;
         }
-        lastSyncedMtime = file.lastModified();
-        lastSyncedSize = file.length();
-        lastSyncedHash = computeContentHash(file);
+        lastSyncedMtime = meta.mtime;
+        lastSyncedSize = meta.size;
+        lastSyncedHash = computeContentHash();
     }
 
-    private static String computeContentHash(File target) {
-        if (target == null || !target.isFile()) return "";
+    private String computeContentHash() {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] buf = new byte[8192];
-            try (InputStream in = new FileInputStream(target)) {
+            try (InputStream in = openInputStream()) {
                 int n;
                 while ((n = in.read(buf)) > 0) {
                     digest.update(buf, 0, n);

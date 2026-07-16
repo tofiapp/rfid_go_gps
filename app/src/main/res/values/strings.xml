@@ -5,6 +5,8 @@
     <string name="btn_lock">ZAMKNOUT</string>
     <string name="btn_delete_last_csv">Vymazat poslední záznam</string>
     <string name="csv_reloaded_toast">CSV načteno ze souboru na disku</string>
+    <string name="csv_path_hint">Z PC (USB): %1$s</string>
+    <string name="btn_import_csv">Načíst CSV</string>
     <string name="btn_delete_short">Smazat</string>
     <string name="lock_code_value">008020</string>
     <string name="workflow_sheet_title">Pokročilé</string>
@@ -56,7 +58,7 @@
     <string name="gps_unavailable_toast">GPS nedostupná — tag uložen bez souřadnic</string>
     <string name="btn_pick_db">Vybrat databázi SQLite (.db)</string>
     <string name="db_none">Žádná databáze</string>
-    <string name="db_fresh_install_hint">Po přeinstalaci uložte DZS_PASPORT_TPI.sqlite do složky Stažené soubory – aplikace ji načte automaticky.</string>
+    <string name="db_fresh_install_hint">Po přeinstalaci uložte DZS_PASPORT_TPI.sqlite do složky Documents/RFID Go GPS – aplikace ji načte automaticky.</string>
     <string name="db_auto_loading">Načítám DZS_PASPORT_TPI.sqlite…</string>
     <string name="db_loading_phase">Načítám: %1$s</string>
     <string name="db_loading_progress">%1$s · %2$d %%</string>
