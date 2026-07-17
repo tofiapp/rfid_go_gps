@@ -567,19 +567,24 @@
 
             <FrameLayout
                 android:id="@+id/topBarStatusArea"
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:minWidth="@dimen/top_bar_status_min_width"
                 app:layout_constraintBottom_toBottomOf="parent"
                 app:layout_constraintEnd_toEndOf="parent"
-                app:layout_constraintTop_toTopOf="parent">
+                app:layout_constraintStart_toEndOf="@id/powerPresetGroup"
+                app:layout_constraintTop_toTopOf="parent"
+                app:layout_constraintWidth_max="@dimen/top_bar_status_max_width"
+                app:layout_constraintHorizontal_bias="1">
 
                 <TextView
                     android:id="@+id/tvReaderStatus"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_gravity="end|center_vertical"
+                    android:ellipsize="end"
                     android:gravity="end"
+                    android:maxLines="2"
                     android:text="…"
                     android:textColor="@color/text_muted"
                     android:textSize="13sp"/>

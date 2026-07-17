@@ -2,6 +2,7 @@
 <resources>
     <!-- 4 kolečka workflow v horním řádku (10dp + 3×6dp mezera). -->
     <dimen name="top_bar_status_min_width">58dp</dimen>
+    <dimen name="top_bar_status_max_width">148dp</dimen>
     <!-- Stejná šířka obou větví, aby se při výběru neměnila velikost skupiny. -->
     <dimen name="cast_branch_button_min_width">88dp</dimen>
 </resources>
