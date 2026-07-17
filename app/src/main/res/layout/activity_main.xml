@@ -1012,30 +1012,14 @@
                     android:textSize="18sp"
                     android:textStyle="bold"/>
 
-                <ImageButton
-                    android:id="@+id/btnKontrolaClose"
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:layout_alignParentEnd="true"
-                    android:layout_centerVertical="true"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="@string/kontrola_btn"
-                    android:padding="8dp"
-                    android:src="@android:drawable/ic_menu_close_clear_cancel"
-                    app:tint="@color/text_muted"/>
-            </RelativeLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:gravity="center_horizontal"
-                android:orientation="horizontal">
-
                 <com.google.android.material.button.MaterialButtonToggleGroup
                     android:id="@+id/kontrolaPowerPresetGroup"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:layout_centerVertical="true"
+                    android:layout_marginStart="12dp"
+                    android:layout_toEndOf="@id/tvKontrolaTitle"
+                    android:layout_toStartOf="@id/btnKontrolaClose"
                     app:singleSelection="true"
                     app:selectionRequired="false">
 
@@ -1075,7 +1059,19 @@
                         app:strokeColor="@color/power_preset_stroke"
                         app:strokeWidth="1dp"/>
                 </com.google.android.material.button.MaterialButtonToggleGroup>
-            </LinearLayout>
+
+                <ImageButton
+                    android:id="@+id/btnKontrolaClose"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_alignParentEnd="true"
+                    android:layout_centerVertical="true"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/kontrola_btn"
+                    android:padding="8dp"
+                    android:src="@android:drawable/ic_menu_close_clear_cancel"
+                    app:tint="@color/text_muted"/>
+            </RelativeLayout>
 
             <TextView
                 android:id="@+id/tvKontrolaHeader"
