@@ -30,12 +30,7 @@ import java.util.zip.GZIPOutputStream;
 final class DzsIndexCache {
 
     private static final int MAGIC = 0x445A5349; // "DZSI"
-    private static final int VERSION = 21;
-    /** Cache indexu okolí GPS (bbox ±0,04° ~4 km). */
     private static final int PROXIMITY_VERSION = 21;
-    private static final int VERSION_LEGACY_V16 = 16;
-    private static final int VERSION_LEGACY_V14 = 14;
-    private static final int VERSION_LEGACY_V13 = 13;
     private static final int HASH_HEX_LEN = 64;
     /** {@link RoEntry#castMin} / {@link RoEntry#castMax} pokud sloupec v DB chybí. */
     static final int CAST_UNSPECIFIED = -1;
@@ -144,13 +139,20 @@ final class DzsIndexCache {
         }
     }
 
-    static boolean hasProximityCache(String contentHash, File cacheDir,
-                                     double latitude, double longitude) {
-        if (contentHash == null || contentHash.isEmpty() || cacheDir == null) return false;
-        return proximityCacheFileFor(contentHash, cacheDir, latitude, longitude).isFile();
+    /** Smaže zastaralé soubory plné indexace ({@code dzs_*.idx}), už se nepoužívají. */
+    static void deleteObsoleteFullIndexCaches(File cacheDir) {
+        if (cacheDir == null || !cacheDir.isDirectory()) return;
+        File[] files = cacheDir.listFiles();
+        if (files == null) return;
+        for (File file : files) {
+            String name = file.getName();
+            if (name.startsWith("dzs_") && name.endsWith(".idx")) {
+                file.delete();
+            }
+        }
     }
 
-  /**
+    /**
      * Načte cache okolí GPS, pokud sedí otisk DB a střed cache je blízko požadované polohy.
      *
      * @param maxCenterDistM maximální vzdálenost středů (m); typicky {@code PROXIMITY_RELOAD_MOVE_KM * 1000}
@@ -214,117 +216,6 @@ final class DzsIndexCache {
             return false;
         }
         return true;
-    }
-
-    static LoadedIndex tryLoad(File dbFile, String contentHash, File cacheDir) {
-        if (dbFile == null || !dbFile.isFile() || contentHash == null || contentHash.isEmpty()) {
-            return null;
-        }
-        if (cacheDir == null) return null;
-
-        File cacheFile = cacheFileFor(contentHash, cacheDir);
-        if (!cacheFile.isFile()) return null;
-        return readIndex(dbFile.length(), contentHash, cacheFile);
-    }
-
-    @FunctionalInterface
-    interface SaveProgressListener {
-        void onWritten(int written, int total);
-    }
-
-    static boolean save(File dbFile, String contentHash, File cacheDir,
-                     Map<String, List<RoEntry>> roByPairKey,
-                     VyhybkaGpsStore vyhybkaGpsStore,
-                     SaveProgressListener progress) {
-        if (dbFile == null || cacheDir == null || !dbFile.isFile()) return false;
-        if (contentHash == null || contentHash.length() != HASH_HEX_LEN) return false;
-        if (!cacheDir.exists() && !cacheDir.mkdirs()) return false;
-        File cacheFile = cacheFileFor(contentHash, cacheDir);
-        File tmp = new File(cacheDir, cacheFile.getName() + ".tmp");
-        try (DataOutputStream out = new DataOutputStream(new GZIPOutputStream(new FileOutputStream(tmp)))) {
-            out.writeInt(MAGIC);
-            out.writeInt(VERSION);
-            out.writeLong(dbFile.length());
-            out.writeUTF(contentHash);
-            int roCount = 0;
-            for (List<RoEntry> entries : roByPairKey.values()) {
-                roCount += entries.size();
-            }
-            out.writeInt(roCount);
-            int written = 0;
-            for (Map.Entry<String, List<RoEntry>> e : roByPairKey.entrySet()) {
-                for (RoEntry ro : e.getValue()) {
-                    out.writeUTF(e.getKey());
-                    out.writeUTF(ro.tudu);
-                    out.writeInt(ro.vyhybka);
-                    out.writeUTF(ro.iob);
-                    out.writeUTF(ro.roId);
-                    out.writeInt(ro.castMin);
-                    out.writeInt(ro.castMax);
-                    out.writeUTF(ro.poloha);
-                    out.writeUTF(ro.kmExtChip1);
-                    out.writeUTF(ro.kmExtOther);
-                    written++;
-                    if (progress != null && (written % 10_000 == 0 || written == roCount)) {
-                        progress.onWritten(written, roCount);
-                    }
-                }
-            }
-            writeVyhybkaGpsStore(out, vyhybkaGpsStore, true);
-            out.flush();
-        } catch (Exception ignored) {
-            tmp.delete();
-            return false;
-        }
-        if (!tmp.renameTo(cacheFile)) {
-            tmp.delete();
-            return false;
-        }
-        return true;
-    }
-
-    private static LoadedIndex readIndex(long dbSize, String contentHash, File indexFile) {
-        if (indexFile == null || !indexFile.isFile()) return null;
-        try (DataInputStream in = new DataInputStream(new GZIPInputStream(new FileInputStream(indexFile)))) {
-            if (in.readInt() != MAGIC) return null;
-            int version = in.readInt();
-            if (version != VERSION) {
-                return null;
-            }
-            long cachedSize = in.readLong();
-            String cachedHash = in.readUTF();
-            if (cachedSize != dbSize || !contentHash.equals(cachedHash)) {
-                return null;
-            }
-            int roCount = in.readInt();
-            Map<String, List<RoEntry>> ro = new HashMap<>(Math.max(roCount / 2, 16));
-            boolean hasRoId = false;
-            for (int i = 0; i < roCount; i++) {
-                String pairKey = in.readUTF();
-                String tudu = in.readUTF();
-                int vyhybka = in.readInt();
-                String iob = in.readUTF();
-                String roId = in.readUTF();
-                int castMin = in.readInt();
-                int castMax = in.readInt();
-                String poloha = in.readUTF();
-                String kmExtChip1 = in.readUTF();
-                String kmExtOther = in.readUTF();
-                if (roId == null || roId.isEmpty()) continue;
-                hasRoId = true;
-                RoEntry entry = new RoEntry(tudu, vyhybka, iob, roId, castMin, castMax, poloha,
-                        kmExtChip1, kmExtOther);
-                ro.computeIfAbsent(pairKey, k -> new ArrayList<>()).add(entry);
-            }
-            if (!hasRoId) return null;
-
-            VyhybkaGpsStore vyhybkaGpsStore = readVyhybkaGpsStore(in, true);
-            return new LoadedIndex(ro, vyhybkaGpsStore);
-        } catch (OutOfMemoryError e) {
-            throw e;
-        } catch (Exception ignored) {
-            return null;
-        }
     }
 
     private static void writeVyhybkaGpsStore(DataOutputStream out, VyhybkaGpsStore store,
@@ -427,11 +318,6 @@ final class DzsIndexCache {
         return 2 * r * Math.asin(Math.sqrt(a));
     }
 
-    private static File cacheFileFor(String contentHash, File cacheDir) {
-        return new File(cacheDir, "dzs_" + contentHash + ".idx");
-    }
-
-    /** Buňka ~0,01° (~1 km) pro název souboru cache okolí. */
     private static File proximityCacheFileFor(String contentHash, File cacheDir,
                                               double latitude, double longitude) {
         int latCell = (int) Math.round(latitude * 100.0);

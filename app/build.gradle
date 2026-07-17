@@ -69,13 +69,6 @@ android {
         }
     }
 
-    // POI 3.12 ships duplicate license files
-    packagingOptions {
-        resources {
-            excludes += ['META-INF/DEPENDENCIES', 'META-INF/LICENSE', 'META-INF/NOTICE',
-                         'META-INF/LICENSE.txt', 'META-INF/NOTICE.txt']
-        }
-    }
 }
 
 dependencies {
@@ -87,10 +80,4 @@ dependencies {
 
     // Chainway / RSCJA device SDK (handheld UHF reader for C5)
     implementation files('libs/DeviceAPI_ver20251103_release.aar')
-
-    // Optional Excel libraries (provided by user, kept for future .xlsx export)
-    implementation files('libs/poi-3_12-android-a.jar')
-    implementation files('libs/poi-ooxml-schemas-3_12-20150511-a.jar')
-    implementation files('libs/jxl.jar')
-    implementation files('libs/xUtils-2_5_5.jar')
 }
