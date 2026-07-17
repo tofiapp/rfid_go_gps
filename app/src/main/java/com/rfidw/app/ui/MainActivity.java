@@ -37,6 +37,8 @@ import android.view.ViewTreeObserver;
 import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
@@ -5372,63 +5374,51 @@ public class MainActivity extends AppCompatActivity {
         tvKontrolaHeader.setText(getString(R.string.kontrola_chip_header, cast));
         kontrolaCellsContainer.removeAllViews();
 
-        Tudu.Vyhybka vyhybka = findVyhybkaForRow(matched);
-        kontrolaCellsContainer.addView(buildKontrolaChipDetail(matched, vyhybka));
+        HorizontalScrollView scroll = new HorizontalScrollView(this);
+        scroll.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        scroll.setFillViewport(true);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setLayoutParams(new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT));
+
+        addKontrolaFieldCell(row, "ID_RFID", matched.idRfid, false);
+        addKontrolaFieldCell(row, "EPC", matched.epc, true);
+        addKontrolaFieldCell(row, "TID", matched.tid, true);
+        addKontrolaFieldCell(row, "TUDU", matched.tudu, false);
+        addKontrolaFieldCell(row, "POZICE", matched.cast, false);
+        addKontrolaFieldCell(row, "POLOHA", matched.poloha, false);
+        addKontrolaFieldCell(row, "RO_ID_1", matched.roId1, false);
+        addKontrolaFieldCell(row, "RO_ID_2", matched.roId2, false);
+        addKontrolaFieldCell(row, "KM_EXT", matched.kmExt, false);
+
+        scroll.addView(row);
+        kontrolaCellsContainer.addView(scroll);
         tvKontrolaStatus.setVisibility(View.GONE);
     }
 
-    private View buildKontrolaChipDetail(CsvStore.Row row, Tudu.Vyhybka vyhybka) {
-        View cell = getLayoutInflater().inflate(R.layout.item_kontrola_cell, kontrolaCellsContainer, false);
-        TextView title = cell.findViewById(R.id.tvKontrolaCellTitle);
-        TextView detail = cell.findViewById(R.id.tvKontrolaCellDetail);
-
-        int cast = parseInt(row.cast, 0);
-        title.setText(getString(R.string.kontrola_chip_header, cast));
-        detail.setText(buildKontrolaFieldLines(row, vyhybka));
-        return cell;
-    }
-
-    private String buildKontrolaFieldLines(CsvStore.Row row, Tudu.Vyhybka vyhybka) {
-        int cast = parseInt(row.cast, 0);
-        String empty = getString(R.string.kontrola_empty_value);
-        StringBuilder lines = new StringBuilder();
-        appendKontrolaField(lines, getString(R.string.kontrola_field_chlivecky),
-                kontrolaCastPartName(cast, vyhybka));
-        appendKontrolaField(lines, "ID_RFID", row.idRfid);
-        appendKontrolaField(lines, "EPC", row.epc);
-        appendKontrolaField(lines, "TID", row.tid);
-        appendKontrolaField(lines, "TUDU", row.tudu);
-        appendKontrolaField(lines, "POZICE", row.cast);
-        appendKontrolaField(lines, "POLOHA", row.poloha);
-        appendKontrolaField(lines, "RO_ID_1", row.roId1);
-        appendKontrolaField(lines, "RO_ID_2", row.roId2);
-        appendKontrolaField(lines, "KM_EXT", row.kmExt);
-        if (lines.length() > 0 && lines.charAt(lines.length() - 1) == '\n') {
-            lines.setLength(lines.length() - 1);
+    private void addKontrolaFieldCell(LinearLayout row, String label, String value, boolean monospace) {
+        View cell = getLayoutInflater().inflate(R.layout.item_kontrola_field, row, false);
+        TextView labelView = cell.findViewById(R.id.tvKontrolaFieldLabel);
+        TextView valueView = cell.findViewById(R.id.tvKontrolaFieldValue);
+        labelView.setText(label);
+        valueView.setText(kontrolaDisplayValue(value));
+        if (monospace) {
+            valueView.setTypeface(Typeface.MONOSPACE);
+            valueView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f);
         }
-        return lines.length() == 0 ? empty : lines.toString();
+        row.addView(cell);
     }
 
-    private void appendKontrolaField(StringBuilder lines, String label, String value) {
-        String display = value != null && !value.trim().isEmpty()
+    private String kontrolaDisplayValue(String value) {
+        return value != null && !value.trim().isEmpty()
                 ? value.trim()
                 : getString(R.string.kontrola_empty_value);
-        lines.append(getString(R.string.kontrola_field_line, label, display)).append('\n');
-    }
-
-    private String kontrolaCastPartName(int cast, Tudu.Vyhybka vyhybka) {
-        if (isTuduBoundaryCast(cast)) {
-            return getString(R.string.cast_part_5);
-        }
-        if (vyhybka != null && isFourPartVyhybka(vyhybka)) {
-            return vyhybka.castFourPartLabel(cast);
-        }
-        switch (cast) {
-            case 1: return getString(R.string.cast_part_1);
-            case 2: return getString(R.string.cast_part_2);
-            case 3: return getString(R.string.cast_part_3);
-            default: return String.valueOf(cast);
-        }
     }
 
     @Override
