@@ -32,12 +32,12 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:background="@drawable/tudu_boundary_step_badge"
+                    android:background="@drawable/tudu_boundary_chip_badge"
                     android:gravity="center"
                     android:minWidth="24dp"
                     android:minHeight="24dp"
                     android:text="5"
-                    android:textColor="#FFFFFF"
+                    android:textColor="@android:color/white"
                     android:textSize="12sp"
                     android:textStyle="bold"/>
 
@@ -60,7 +60,7 @@
                 android:layout_marginStart="34dp"
                 android:layout_marginTop="2dp"
                 android:ellipsize="end"
-                android:maxLines="1"
+                android:maxLines="2"
                 android:text="@string/tudu_boundary_subtitle"
                 android:textColor="@color/text_muted"
                 android:textSize="11sp"/>
@@ -69,7 +69,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:background="@drawable/tudu_boundary_step_bg"
+                android:background="@drawable/summary_bg"
                 android:orientation="vertical"
                 android:padding="@dimen/tudu_boundary_step_padding">
 
@@ -85,7 +85,7 @@
                         android:background="@drawable/tudu_boundary_step_badge"
                         android:gravity="center"
                         android:text="1"
-                        android:textColor="#FFFFFF"
+                        android:textColor="@android:color/white"
                         android:textSize="11sp"
                         android:textStyle="bold"/>
 
@@ -101,26 +101,33 @@
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnPickNearbyTudu"
-                    style="@style/Widget.Material3.Button.TonalButton"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
                     android:minHeight="36dp"
                     android:text="@string/tudu_boundary_pick_nearby"
+                    android:textColor="@color/accent"
                     android:textSize="12sp"
+                    app:backgroundTint="@color/accent_container"
                     app:icon="@android:drawable/ic_menu_mylocation"
                     app:iconGravity="textStart"
-                    app:iconPadding="6dp"/>
+                    app:iconPadding="6dp"
+                    app:iconTint="@color/accent"
+                    app:strokeColor="@color/accent"
+                    app:strokeWidth="1dp"/>
 
                 <com.google.android.material.textfield.TextInputLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
+                    android:hint="@string/tudu_boundary_tudu_hint"
                     app:boxBackgroundMode="outline"
-                    app:boxCornerRadiusBottomEnd="8dp"
-                    app:boxCornerRadiusBottomStart="8dp"
-                    app:boxCornerRadiusTopEnd="8dp"
-                    app:boxCornerRadiusTopStart="8dp">
+                    app:boxCornerRadiusBottomEnd="10dp"
+                    app:boxCornerRadiusBottomStart="10dp"
+                    app:boxCornerRadiusTopEnd="10dp"
+                    app:boxCornerRadiusTopStart="10dp"
+                    app:boxStrokeColor="@color/primary">
 
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/etBoundaryTudu"
@@ -136,7 +143,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:background="@drawable/tudu_boundary_step_bg"
+                android:background="@drawable/summary_bg"
                 android:orientation="vertical"
                 android:padding="@dimen/tudu_boundary_step_padding">
 
@@ -152,7 +159,7 @@
                         android:background="@drawable/tudu_boundary_step_badge"
                         android:gravity="center"
                         android:text="2"
-                        android:textColor="#FFFFFF"
+                        android:textColor="@android:color/white"
                         android:textSize="11sp"
                         android:textStyle="bold"/>
 
@@ -172,10 +179,11 @@
                     android:layout_marginTop="8dp"
                     android:hint="@string/tudu_boundary_vyhybka_hint"
                     app:boxBackgroundMode="outline"
-                    app:boxCornerRadiusBottomEnd="8dp"
-                    app:boxCornerRadiusBottomStart="8dp"
-                    app:boxCornerRadiusTopEnd="8dp"
-                    app:boxCornerRadiusTopStart="8dp">
+                    app:boxCornerRadiusBottomEnd="10dp"
+                    app:boxCornerRadiusBottomStart="10dp"
+                    app:boxCornerRadiusTopEnd="10dp"
+                    app:boxCornerRadiusTopStart="10dp"
+                    app:boxStrokeColor="@color/primary">
 
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/etBoundaryVyhybka"
@@ -191,7 +199,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:background="@drawable/tudu_boundary_step_bg"
+                android:background="@drawable/summary_bg"
                 android:orientation="vertical"
                 android:padding="@dimen/tudu_boundary_step_padding">
 
@@ -207,7 +215,7 @@
                         android:background="@drawable/tudu_boundary_step_badge"
                         android:gravity="center"
                         android:text="3"
-                        android:textColor="#FFFFFF"
+                        android:textColor="@android:color/white"
                         android:textSize="11sp"
                         android:textStyle="bold"/>
 
@@ -229,10 +237,11 @@
                     android:layout_marginTop="8dp"
                     android:hint="@string/tudu_boundary_km_ext_hint"
                     app:boxBackgroundMode="outline"
-                    app:boxCornerRadiusBottomEnd="8dp"
-                    app:boxCornerRadiusBottomStart="8dp"
-                    app:boxCornerRadiusTopEnd="8dp"
-                    app:boxCornerRadiusTopStart="8dp">
+                    app:boxCornerRadiusBottomEnd="10dp"
+                    app:boxCornerRadiusBottomStart="10dp"
+                    app:boxCornerRadiusTopEnd="10dp"
+                    app:boxCornerRadiusTopStart="10dp"
+                    app:boxStrokeColor="@color/primary">
 
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/etBoundaryKmExt"
@@ -250,17 +259,17 @@
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
-        android:background="#E0E0E0"/>
+        android:background="#E2E6EB"/>
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="end"
         android:orientation="horizontal"
-        android:paddingStart="12dp"
+        android:paddingStart="14dp"
         android:paddingTop="8dp"
-        android:paddingEnd="12dp"
-        android:paddingBottom="12dp">
+        android:paddingEnd="14dp"
+        android:paddingBottom="14dp">
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnBoundaryCancel"
@@ -273,7 +282,7 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnBoundaryApply"
-            style="@style/Widget.Material3.Button"
+            style="@style/Widget.RfidGo.Button"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
