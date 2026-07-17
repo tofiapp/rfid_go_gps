@@ -216,8 +216,12 @@ public class MainActivity extends AppCompatActivity {
             dbIndexProgressBar;
     private NestedScrollView mainScroll;
     private LinearLayout kontrolaCellsContainer;
-    private TextView tvSummaryVyhybkaLabel, tvKontrolaPrompt, tvKontrolaStatus, tvKontrolaHeader;
+    private View kontrolaMatchNav;
+    private TextView tvSummaryVyhybkaLabel, tvKontrolaPrompt, tvKontrolaStatus, tvKontrolaHeader,
+            tvKontrolaMatchIndex;
     private boolean kontrolaActive, kontrolaReading;
+    private List<CsvStore.Row> kontrolaMatchRows = Collections.emptyList();
+    private int kontrolaMatchIndex;
     private OnBackPressedCallback backPressedCallback;
     private BottomSheetBehavior<View> workflowBehavior;
     private EditText etAccessPwd, etPower, etPwdAccess, etPwdNew, etLockAccessPwd;
@@ -354,6 +358,8 @@ public class MainActivity extends AppCompatActivity {
         tvKontrolaPrompt = findViewById(R.id.tvKontrolaPrompt);
         tvKontrolaStatus = findViewById(R.id.tvKontrolaStatus);
         tvKontrolaHeader = findViewById(R.id.tvKontrolaHeader);
+        kontrolaMatchNav = findViewById(R.id.kontrolaMatchNav);
+        tvKontrolaMatchIndex = findViewById(R.id.tvKontrolaMatchIndex);
         mainScroll = findViewById(R.id.mainScroll);
         card1 = findViewById(R.id.card1);
         topBar = findViewById(R.id.topBar);
@@ -674,10 +680,15 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void exitTuduBoundaryMode() {
+        boolean wasBoundary = tuduBoundaryMode;
         tuduBoundaryMode = false;
         tuduBoundaryVyhybkaLabel = "";
         tuduBoundaryKmExt = "";
         clearTuduBoundaryObjektLabels();
+        if (wasBoundary) {
+            gpsTuduLocked = false;
+            gpsVyhybkaLocked = false;
+        }
     }
 
     private void clearTuduBoundaryObjektLabels() {
@@ -1836,14 +1847,24 @@ public class MainActivity extends AppCompatActivity {
             powerPresetInKoleji = null;
             powerPresetGroup.clearChecked();
             powerPresetGroup.setSelectionRequired(false);
-        } else if (powerPresetInKoleji != null) {
-            int checkedId = powerPresetInKoleji
-                    ? R.id.btnPowerPresetKoleji
-                    : R.id.btnPowerPresetRuce;
-            if (powerPresetGroup.getCheckedButtonId() != checkedId) {
-                powerPresetGroup.check(checkedId);
+        } else {
+            if (powerPresetInKoleji == null) {
+                int checkedId = powerPresetGroup.getCheckedButtonId();
+                if (checkedId == R.id.btnPowerPresetKoleji) {
+                    powerPresetInKoleji = true;
+                } else if (checkedId == R.id.btnPowerPresetRuce) {
+                    powerPresetInKoleji = false;
+                }
             }
-            powerPresetGroup.setSelectionRequired(true);
+            if (powerPresetInKoleji != null) {
+                int checkedId = powerPresetInKoleji
+                        ? R.id.btnPowerPresetKoleji
+                        : R.id.btnPowerPresetRuce;
+                if (powerPresetGroup.getCheckedButtonId() != checkedId) {
+                    powerPresetGroup.check(checkedId);
+                }
+                powerPresetGroup.setSelectionRequired(true);
+            }
         }
     }
 
@@ -2260,7 +2281,7 @@ public class MainActivity extends AppCompatActivity {
                 updateStepIndicators();
                 return;
             }
-            setActionStatus(getString(R.string.tudu_boundary_active), COLOR_STATUS_READY);
+            updateWorkflowStepIndicatorsVisibility();
             updateStepIndicators();
             return;
         }
@@ -2781,12 +2802,18 @@ public class MainActivity extends AppCompatActivity {
             }
             rowVyhybka.reconcileCastRangeFromBranches();
         }
+        if (currentVyhybka == null && rowVyhybka != null) {
+            currentVyhybka = rowVyhybka;
+        }
         if (currentVyhybka != null && currentTudu != null) {
             ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
             currentVyhybka.reconcileCastRangeFromBranches();
         }
         updateSummary1();
         updateLastRecordPreview();
+        if (!workflowRunning) {
+            updateStep1();
+        }
     }
 
     private void persistCsvAsync() {
@@ -2863,6 +2890,8 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.btnDeleteConfirmNo).setOnClickListener(v -> onDeleteConfirmNo());
         findViewById(R.id.btnKontrola).setOnClickListener(v -> showKontrolaOverlay());
         findViewById(R.id.btnKontrolaClose).setOnClickListener(v -> hideKontrolaOverlay());
+        findViewById(R.id.btnKontrolaMatchPrev).setOnClickListener(v -> showPreviousKontrolaMatch());
+        findViewById(R.id.btnKontrolaMatchNext).setOnClickListener(v -> showNextKontrolaMatch());
     }
 
     private void setupCastBranchSelection() {
@@ -4254,6 +4283,13 @@ public class MainActivity extends AppCompatActivity {
         updateSummary1();
         resetTagWorkflow();
         resyncCastRangeFromPersistedState();
+        if (!tuduBoundaryMode && gpsAutoSelection && dzsDatabase != null) {
+            forceNextGpsLookup = true;
+            lastGpsLookupLat = null;
+            lastGpsLookupLon = null;
+            lastGpsLookupTimeMs = 0;
+            ensureGpsForTuduLookup();
+        }
     }
 
     private void applyRowToEpc(CsvStore.Row row) {
@@ -4268,18 +4304,17 @@ public class MainActivity extends AppCompatActivity {
         }
         exitTuduBoundaryMode();
 
-        currentTudu = null;
+        currentTudu = row.tudu != null && !row.tudu.isEmpty()
+                ? resolveTuduForUdu(Tudu.uduCode(row.tudu))
+                : null;
         currentVyhybka = null;
-        for (int i = 0; i < tuduList.size(); i++) {
-            if (!tuduList.get(i).code.equals(row.tudu)) continue;
-            currentTudu = tuduList.get(i);
+        if (currentTudu != null) {
             for (Tudu.Vyhybka v : currentTudu.vyhybky) {
                 if (v.cislo == epc.vyhybka) {
                     currentVyhybka = v;
                     break;
                 }
             }
-            break;
         }
         if (currentTudu != null && currentVyhybka != null) {
             currentVyhybka.ensureCastAtLeast(epc.cast);
@@ -5223,10 +5258,13 @@ public class MainActivity extends AppCompatActivity {
 
     private void resetKontrolaDisplay() {
         if (tvKontrolaPrompt == null) return;
+        kontrolaMatchRows = Collections.emptyList();
+        kontrolaMatchIndex = 0;
         tvKontrolaPrompt.setVisibility(View.VISIBLE);
         tvKontrolaPrompt.setText(R.string.kontrola_scan_prompt);
         tvKontrolaStatus.setVisibility(View.GONE);
         tvKontrolaHeader.setVisibility(View.GONE);
+        if (kontrolaMatchNav != null) kontrolaMatchNav.setVisibility(View.GONE);
         kontrolaCellsContainer.removeAllViews();
     }
 
@@ -5240,6 +5278,8 @@ public class MainActivity extends AppCompatActivity {
         kontrolaReading = true;
         tvKontrolaPrompt.setText(R.string.kontrola_reading);
         tvKontrolaStatus.setVisibility(View.GONE);
+        tvKontrolaHeader.setVisibility(View.GONE);
+        if (kontrolaMatchNav != null) kontrolaMatchNav.setVisibility(View.GONE);
         kontrolaCellsContainer.removeAllViews();
         io.execute(() -> {
             UHFTAGInfo info = uhf.readSingle();
@@ -5262,8 +5302,8 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         csvStore.reloadIfChanged();
-        CsvStore.Row matched = csvStore.findRowByTag(epcHex, tidHex);
-        if (matched == null) {
+        List<CsvStore.Row> matches = csvStore.findAllRowsByTag(epcHex, tidHex);
+        if (matches.isEmpty()) {
             tvKontrolaPrompt.setText(R.string.kontrola_not_in_csv);
             tvKontrolaStatus.setVisibility(View.VISIBLE);
             StringBuilder detail = new StringBuilder();
@@ -5275,7 +5315,44 @@ public class MainActivity extends AppCompatActivity {
             tvKontrolaStatus.setText(detail.toString());
             return;
         }
+        kontrolaMatchRows = matches;
+        kontrolaMatchIndex = 0;
+        showKontrolaMatchPage();
+    }
+
+    private void showKontrolaMatchPage() {
+        if (kontrolaMatchRows.isEmpty()) return;
+        CsvStore.Row matched = kontrolaMatchRows.get(kontrolaMatchIndex);
+        updateKontrolaMatchNav();
         displayKontrolaResults(matched);
+    }
+
+    private void updateKontrolaMatchNav() {
+        if (kontrolaMatchNav == null || tvKontrolaMatchIndex == null) return;
+        int count = kontrolaMatchRows.size();
+        if (count <= 1) {
+            kontrolaMatchNav.setVisibility(View.GONE);
+            return;
+        }
+        kontrolaMatchNav.setVisibility(View.VISIBLE);
+        tvKontrolaMatchIndex.setText(
+                getString(R.string.kontrola_match_index, kontrolaMatchIndex + 1, count));
+        View prev = findViewById(R.id.btnKontrolaMatchPrev);
+        View next = findViewById(R.id.btnKontrolaMatchNext);
+        if (prev != null) prev.setEnabled(kontrolaMatchIndex > 0);
+        if (next != null) next.setEnabled(kontrolaMatchIndex < count - 1);
+    }
+
+    private void showPreviousKontrolaMatch() {
+        if (kontrolaMatchIndex <= 0) return;
+        kontrolaMatchIndex--;
+        showKontrolaMatchPage();
+    }
+
+    private void showNextKontrolaMatch() {
+        if (kontrolaMatchIndex >= kontrolaMatchRows.size() - 1) return;
+        kontrolaMatchIndex++;
+        showKontrolaMatchPage();
     }
 
     private void displayKontrolaResults(CsvStore.Row matched) {
