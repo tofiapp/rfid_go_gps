@@ -255,6 +255,7 @@ public class MainActivity extends AppCompatActivity {
     private enum CastPartType { NONE, JAZYK, HLAVNI, VEDLEJSI }
     private int lastChip1WriteCount = 1;
     private Boolean powerPresetInKoleji;
+    private Boolean kontrolaPowerPresetInKoleji;
     private boolean showGpsStatus;
     private boolean gpsUnavailableToastShown;
     private int lastTopBarHeight = -1;
@@ -1846,39 +1847,40 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updatePowerPresetUi() {
-        if (powerPresetInKoleji == null) {
-            if (powerPresetGroup != null) {
-                int checkedId = powerPresetGroup.getCheckedButtonId();
-                if (checkedId == R.id.btnPowerPresetKoleji) {
-                    powerPresetInKoleji = true;
-                } else if (checkedId == R.id.btnPowerPresetRuce) {
-                    powerPresetInKoleji = false;
-                }
-            }
-            if (powerPresetInKoleji == null && kontrolaPowerPresetGroup != null) {
-                int checkedId = kontrolaPowerPresetGroup.getCheckedButtonId();
-                if (checkedId == R.id.btnKontrolaPowerPresetKoleji) {
-                    powerPresetInKoleji = true;
-                } else if (checkedId == R.id.btnKontrolaPowerPresetRuce) {
-                    powerPresetInKoleji = false;
-                }
+        if (powerPresetInKoleji == null && powerPresetGroup != null) {
+            int checkedId = powerPresetGroup.getCheckedButtonId();
+            if (checkedId == R.id.btnPowerPresetKoleji) {
+                powerPresetInKoleji = true;
+            } else if (checkedId == R.id.btnPowerPresetRuce) {
+                powerPresetInKoleji = false;
             }
         }
-        boolean enabled = (step1Done && !gpsLookupInFlight) || kontrolaActive;
-        boolean showPresets = kontrolaActive || step1Done || !gpsAutoSelection || tuduBoundaryMode;
-        syncPowerPresetToggleGroup(powerPresetGroup, showPresets, enabled);
-        syncPowerPresetToggleGroup(kontrolaPowerPresetGroup, kontrolaActive, enabled || kontrolaActive);
+        if (kontrolaPowerPresetInKoleji == null && kontrolaPowerPresetGroup != null) {
+            int checkedId = kontrolaPowerPresetGroup.getCheckedButtonId();
+            if (checkedId == R.id.btnKontrolaPowerPresetKoleji) {
+                kontrolaPowerPresetInKoleji = true;
+            } else if (checkedId == R.id.btnKontrolaPowerPresetRuce) {
+                kontrolaPowerPresetInKoleji = false;
+            }
+        }
+        boolean classicEnabled = step1Done && !gpsLookupInFlight;
+        boolean showClassicPresets = !kontrolaActive
+                && (step1Done || !gpsAutoSelection || tuduBoundaryMode);
+        syncPowerPresetToggleGroup(powerPresetGroup, powerPresetInKoleji,
+                showClassicPresets, classicEnabled, true);
+        syncPowerPresetToggleGroup(kontrolaPowerPresetGroup, kontrolaPowerPresetInKoleji,
+                kontrolaActive, kontrolaActive, false);
     }
 
     private void syncPowerPresetToggleGroup(MaterialButtonToggleGroup group,
-            boolean visible, boolean enabled) {
+            Boolean presetInKoleji, boolean visible, boolean enabled, boolean clearWhenDisabled) {
         if (group == null) return;
         group.setVisibility(visible ? View.VISIBLE : View.GONE);
         group.setEnabled(enabled);
         for (int i = 0; i < group.getChildCount(); i++) {
             group.getChildAt(i).setEnabled(enabled);
         }
-        if (!enabled && !kontrolaActive) {
+        if (!enabled && clearWhenDisabled) {
             if (group == powerPresetGroup) {
                 powerPresetInKoleji = null;
             }
@@ -1886,8 +1888,8 @@ public class MainActivity extends AppCompatActivity {
             group.setSelectionRequired(false);
             return;
         }
-        if (powerPresetInKoleji != null) {
-            int checkedId = resolvePowerPresetButtonId(group, powerPresetInKoleji);
+        if (presetInKoleji != null) {
+            int checkedId = resolvePowerPresetButtonId(group, presetInKoleji);
             if (checkedId != View.NO_ID && group.getCheckedButtonId() != checkedId) {
                 group.check(checkedId);
             }
@@ -1900,6 +1902,10 @@ public class MainActivity extends AppCompatActivity {
             return inKoleji ? R.id.btnKontrolaPowerPresetKoleji : R.id.btnKontrolaPowerPresetRuce;
         }
         return inKoleji ? R.id.btnPowerPresetKoleji : R.id.btnPowerPresetRuce;
+    }
+
+    private Boolean activePowerPresetInKoleji() {
+        return kontrolaActive ? kontrolaPowerPresetInKoleji : powerPresetInKoleji;
     }
 
     private void updateSummary1() {
@@ -2922,12 +2928,12 @@ public class MainActivity extends AppCompatActivity {
 
         powerPresetGroup.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
             if (!isChecked) return;
-            onPowerPresetSelected(checkedId == R.id.btnPowerPresetKoleji);
+            onClassicPowerPresetSelected(checkedId == R.id.btnPowerPresetKoleji);
         });
         if (kontrolaPowerPresetGroup != null) {
             kontrolaPowerPresetGroup.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
                 if (!isChecked) return;
-                onPowerPresetSelected(checkedId == R.id.btnKontrolaPowerPresetKoleji);
+                onKontrolaPowerPresetSelected(checkedId == R.id.btnKontrolaPowerPresetKoleji);
             });
         }
         findViewById(R.id.btnApplyPower).setOnClickListener(v -> applyPower());
@@ -4467,7 +4473,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean isPowerPresetSelected() {
-        return powerPresetInKoleji != null;
+        return activePowerPresetInKoleji() != null;
     }
 
     private boolean requirePowerPreset() {
@@ -4476,9 +4482,19 @@ public class MainActivity extends AppCompatActivity {
         return false;
     }
 
-    private void onPowerPresetSelected(boolean inKoleji) {
-        if (!step1Done && !kontrolaActive) return;
+    private void onClassicPowerPresetSelected(boolean inKoleji) {
+        if (!step1Done || kontrolaActive) return;
         powerPresetInKoleji = inKoleji;
+        applySelectedPowerPreset(inKoleji);
+    }
+
+    private void onKontrolaPowerPresetSelected(boolean inKoleji) {
+        if (!kontrolaActive) return;
+        kontrolaPowerPresetInKoleji = inKoleji;
+        applySelectedPowerPreset(inKoleji);
+    }
+
+    private void applySelectedPowerPreset(boolean inKoleji) {
         int power = inKoleji ? POWER_PRESET_KOLEJI_DBM : POWER_PRESET_RUCE_DBM;
         etPower.setText(String.valueOf(power));
         updatePowerPresetUi();
@@ -5259,7 +5275,9 @@ public class MainActivity extends AppCompatActivity {
     private void initReaderAsync() {
         if (!isPowerPresetSelected()) return;
         setActionStatus("inicializuji…", COLOR_STATUS_BUSY);
-        final int power = powerPresetInKoleji ? POWER_PRESET_KOLEJI_DBM : POWER_PRESET_RUCE_DBM;
+        Boolean presetInKoleji = activePowerPresetInKoleji();
+        if (presetInKoleji == null) return;
+        final int power = presetInKoleji ? POWER_PRESET_KOLEJI_DBM : POWER_PRESET_RUCE_DBM;
         io.execute(() -> {
             boolean ok = uhf.init(this);
             ui.post(() -> {
@@ -5495,14 +5513,14 @@ public class MainActivity extends AppCompatActivity {
         addKontrolaFieldCell(kontrolaCellsContainer, "EPC", matched.epc, true, true);
         addKontrolaFieldCell(kontrolaCellsContainer, "TID", matched.tid, true, true);
         addKontrolaFieldPair(kontrolaCellsContainer,
-                "TUDU", matched.tudu,
-                "OBJEKT", matched.vyhybka);
+                "TUDU", matched.tudu, false,
+                "OBJEKT", matched.vyhybka, true);
         addKontrolaFieldPair(kontrolaCellsContainer,
-                "POZICE", matched.cast,
-                "POLOHA", matched.poloha);
+                "POZICE", matched.cast, false,
+                "POLOHA", matched.poloha, false);
         addKontrolaFieldPair(kontrolaCellsContainer,
-                "RO_ID_1", matched.roId1,
-                "RO_ID_2", matched.roId2);
+                "RO_ID_1", matched.roId1, false,
+                "RO_ID_2", matched.roId2, false);
         addKontrolaFieldCell(kontrolaCellsContainer, "KM_EXT", matched.kmExt, false, false);
 
         tvKontrolaStatus.setVisibility(View.GONE);
@@ -5516,13 +5534,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void addKontrolaFieldPair(LinearLayout container,
-            String leftLabel, String leftValue,
-            String rightLabel, String rightValue) {
+            String leftLabel, String leftValue, boolean leftHighlight,
+            String rightLabel, String rightValue, boolean rightHighlight) {
         View row = getLayoutInflater().inflate(R.layout.item_kontrola_field_pair, container, false);
         configureKontrolaFieldCell(row.findViewById(R.id.kontrolaFieldLeft),
-                leftLabel, leftValue, false, false);
+                leftLabel, leftValue, false, leftHighlight);
         configureKontrolaFieldCell(row.findViewById(R.id.kontrolaFieldRight),
-                rightLabel, rightValue, false, false);
+                rightLabel, rightValue, false, rightHighlight);
         container.addView(row);
     }
 
