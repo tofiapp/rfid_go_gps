@@ -972,7 +972,7 @@
         android:id="@+id/kontrolaOverlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#E6000000"
+        android:background="#99000000"
         android:clickable="true"
         android:elevation="60dp"
         android:focusable="true"
@@ -994,6 +994,7 @@
                 android:layout_height="wrap_content">
 
                 <TextView
+                    android:id="@+id/tvKontrolaTitle"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_alignParentStart="true"
@@ -1002,6 +1003,54 @@
                     android:textColor="@color/primary_dark"
                     android:textSize="18sp"
                     android:textStyle="bold"/>
+
+                <com.google.android.material.button.MaterialButtonToggleGroup
+                    android:id="@+id/kontrolaPowerPresetGroup"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_centerVertical="true"
+                    android:layout_marginStart="12dp"
+                    android:layout_toEndOf="@id/tvKontrolaTitle"
+                    android:layout_toStartOf="@id/btnKontrolaClose"
+                    app:singleSelection="true"
+                    app:selectionRequired="false">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnKontrolaPowerPresetKoleji"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="none"
+                        android:minWidth="@dimen/power_preset_button_min_width"
+                        android:minHeight="34dp"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        android:singleLine="true"
+                        android:text="@string/power_preset_koleji"
+                        android:textColor="@color/power_preset_text_color"
+                        android:textSize="11sp"
+                        app:backgroundTint="@color/power_preset_background_tint"
+                        app:strokeColor="@color/power_preset_stroke"
+                        app:strokeWidth="1dp"/>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnKontrolaPowerPresetRuce"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="none"
+                        android:minWidth="@dimen/power_preset_button_min_width"
+                        android:minHeight="34dp"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        android:singleLine="true"
+                        android:text="@string/power_preset_ruce"
+                        android:textColor="@color/power_preset_text_color"
+                        android:textSize="11sp"
+                        app:backgroundTint="@color/power_preset_background_tint"
+                        app:strokeColor="@color/power_preset_stroke"
+                        app:strokeWidth="1dp"/>
+                </com.google.android.material.button.MaterialButtonToggleGroup>
 
                 <ImageButton
                     android:id="@+id/btnKontrolaClose"

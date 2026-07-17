@@ -231,7 +231,7 @@ public class MainActivity extends AppCompatActivity {
     private View btnPickTestLocation;
     private TextView tvGpsTestModeHint;
     private boolean gpsTestMode;
-    private MaterialButtonToggleGroup powerPresetGroup;
+    private MaterialButtonToggleGroup powerPresetGroup, kontrolaPowerPresetGroup;
     private MaterialButtonToggleGroup tuduModeGroup;
     private MaterialButtonToggleGroup castBranchGroup;
     private MaterialButton btnCastJazyk, btnCastHlavni, btnCastVedlejsi;
@@ -375,6 +375,7 @@ public class MainActivity extends AppCompatActivity {
         btnPickTestLocation = findViewById(R.id.btnPickTestLocation);
         tvGpsTestModeHint = findViewById(R.id.tvGpsTestModeHint);
         powerPresetGroup = findViewById(R.id.powerPresetGroup);
+        kontrolaPowerPresetGroup = findViewById(R.id.kontrolaPowerPresetGroup);
         tuduModeGroup = findViewById(R.id.tuduModeGroup);
         btnGpsReloadLocation = findViewById(R.id.btnGpsReloadLocation);
         tvTuduModeHint = findViewById(R.id.tvTuduModeHint);
@@ -1845,19 +1846,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updatePowerPresetUi() {
-        boolean enabled = step1Done && !gpsLookupInFlight;
-        boolean showPresets = step1Done || !gpsAutoSelection || tuduBoundaryMode;
-        powerPresetGroup.setVisibility(showPresets ? View.VISIBLE : View.GONE);
-        powerPresetGroup.setEnabled(enabled);
-        for (int i = 0; i < powerPresetGroup.getChildCount(); i++) {
-            powerPresetGroup.getChildAt(i).setEnabled(enabled);
-        }
-        if (!step1Done) {
-            powerPresetInKoleji = null;
-            powerPresetGroup.clearChecked();
-            powerPresetGroup.setSelectionRequired(false);
-        } else {
-            if (powerPresetInKoleji == null) {
+        if (powerPresetInKoleji == null) {
+            if (powerPresetGroup != null) {
                 int checkedId = powerPresetGroup.getCheckedButtonId();
                 if (checkedId == R.id.btnPowerPresetKoleji) {
                     powerPresetInKoleji = true;
@@ -1865,16 +1855,51 @@ public class MainActivity extends AppCompatActivity {
                     powerPresetInKoleji = false;
                 }
             }
-            if (powerPresetInKoleji != null) {
-                int checkedId = powerPresetInKoleji
-                        ? R.id.btnPowerPresetKoleji
-                        : R.id.btnPowerPresetRuce;
-                if (powerPresetGroup.getCheckedButtonId() != checkedId) {
-                    powerPresetGroup.check(checkedId);
+            if (powerPresetInKoleji == null && kontrolaPowerPresetGroup != null) {
+                int checkedId = kontrolaPowerPresetGroup.getCheckedButtonId();
+                if (checkedId == R.id.btnKontrolaPowerPresetKoleji) {
+                    powerPresetInKoleji = true;
+                } else if (checkedId == R.id.btnKontrolaPowerPresetRuce) {
+                    powerPresetInKoleji = false;
                 }
-                powerPresetGroup.setSelectionRequired(true);
             }
         }
+        boolean enabled = (step1Done && !gpsLookupInFlight) || kontrolaActive;
+        boolean showPresets = kontrolaActive || step1Done || !gpsAutoSelection || tuduBoundaryMode;
+        syncPowerPresetToggleGroup(powerPresetGroup, showPresets, enabled);
+        syncPowerPresetToggleGroup(kontrolaPowerPresetGroup, kontrolaActive, enabled || kontrolaActive);
+    }
+
+    private void syncPowerPresetToggleGroup(MaterialButtonToggleGroup group,
+            boolean visible, boolean enabled) {
+        if (group == null) return;
+        group.setVisibility(visible ? View.VISIBLE : View.GONE);
+        group.setEnabled(enabled);
+        for (int i = 0; i < group.getChildCount(); i++) {
+            group.getChildAt(i).setEnabled(enabled);
+        }
+        if (!enabled && !kontrolaActive) {
+            if (group == powerPresetGroup) {
+                powerPresetInKoleji = null;
+            }
+            group.clearChecked();
+            group.setSelectionRequired(false);
+            return;
+        }
+        if (powerPresetInKoleji != null) {
+            int checkedId = resolvePowerPresetButtonId(group, powerPresetInKoleji);
+            if (checkedId != View.NO_ID && group.getCheckedButtonId() != checkedId) {
+                group.check(checkedId);
+            }
+            group.setSelectionRequired(true);
+        }
+    }
+
+    private int resolvePowerPresetButtonId(MaterialButtonToggleGroup group, boolean inKoleji) {
+        if (group == kontrolaPowerPresetGroup) {
+            return inKoleji ? R.id.btnKontrolaPowerPresetKoleji : R.id.btnKontrolaPowerPresetRuce;
+        }
+        return inKoleji ? R.id.btnPowerPresetKoleji : R.id.btnPowerPresetRuce;
     }
 
     private void updateSummary1() {
@@ -2769,10 +2794,8 @@ public class MainActivity extends AppCompatActivity {
         syncCurrentVyhybka();
         if (tuduBoundaryMode) {
             lastCastHintCast = -1;
-        } else if (currentVyhybka != null) {
-            advanceCastAndVyhybka();
         } else {
-            pendingAdvanceFromCsv = true;
+            advanceEpcCastAfterCsvRestore();
         }
         refreshTemplate();
         updateStep1();
@@ -2825,6 +2848,13 @@ public class MainActivity extends AppCompatActivity {
         if (currentVyhybka != null && currentTudu != null) {
             ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
             currentVyhybka.reconcileCastRangeFromBranches();
+        }
+        if (currentTudu != null && currentVyhybka != null && !tuduBoundaryMode
+                && isCastWrittenInCsv(currentTudu.code, currentVyhybka, epc.cast)) {
+            int nextCast = firstMissingCast(currentTudu.code, currentVyhybka);
+            if (nextCast <= currentVyhybka.resolvedCastMax()) {
+                epc.cast = nextCast;
+            }
         }
         updateSummary1();
         updateLastRecordPreview();
@@ -2894,6 +2924,12 @@ public class MainActivity extends AppCompatActivity {
             if (!isChecked) return;
             onPowerPresetSelected(checkedId == R.id.btnPowerPresetKoleji);
         });
+        if (kontrolaPowerPresetGroup != null) {
+            kontrolaPowerPresetGroup.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
+                if (!isChecked) return;
+                onPowerPresetSelected(checkedId == R.id.btnKontrolaPowerPresetKoleji);
+            });
+        }
         findViewById(R.id.btnApplyPower).setOnClickListener(v -> applyPower());
         findViewById(R.id.btnWrite).setOnClickListener(v -> doWrite());
         findViewById(R.id.btnWritePwd).setOnClickListener(v -> doWritePassword());
@@ -4015,6 +4051,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void applyGpsMatch(DzsDatabase.GpsMatch match) {
+        boolean advanceFromCsv = pendingAdvanceFromCsv;
         pendingAdvanceFromCsv = false;
         exitTuduBoundaryMode();
         boolean uduChanged = epc.tudu == null || epc.tudu.isEmpty()
@@ -4052,7 +4089,8 @@ public class MainActivity extends AppCompatActivity {
             resetCastBranchSelection();
         }
         if (uduChanged || vyhybkaChanged || epc.cast <= 0
-                || epc.cast < v.resolvedCastMin() || epc.cast > v.resolvedCastMax()) {
+                || epc.cast < v.resolvedCastMin() || epc.cast > v.resolvedCastMax()
+                || advanceFromCsv || isCastWrittenInCsv(tudu.code, v, epc.cast)) {
             epc.cast = firstMissingCast(tudu.code, v);
         }
         refreshTemplate();
@@ -4211,12 +4249,11 @@ public class MainActivity extends AppCompatActivity {
         if (pendingAdvanceFromCsv) {
             pendingAdvanceFromCsv = false;
             syncCurrentVyhybka();
-            if (currentVyhybka != null) {
-                advanceCastAndVyhybka();
-            } else {
+            if (currentVyhybka == null) {
                 selectFirstAvailableVyhybka(t);
                 return;
             }
+            advanceEpcCastAfterCsvRestore();
             refreshTemplate();
             updateStep1();
             updateSummary1();
@@ -4440,11 +4477,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void onPowerPresetSelected(boolean inKoleji) {
-        if (!step1Done) return;
+        if (!step1Done && !kontrolaActive) return;
         powerPresetInKoleji = inKoleji;
         int power = inKoleji ? POWER_PRESET_KOLEJI_DBM : POWER_PRESET_RUCE_DBM;
         etPower.setText(String.valueOf(power));
-        powerPresetGroup.setSelectionRequired(true);
+        updatePowerPresetUi();
         updateStepIndicators();
         if (!uhf.isReady()) {
             initReaderAsync();
@@ -4912,6 +4949,29 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /** Po obnově z CSV nastaví další čip k zápisu podle chybějících záznamů. */
+    private void advanceEpcCastAfterCsvRestore() {
+        if (tuduBoundaryMode) return;
+        syncCurrentVyhybka();
+        if (currentTudu == null || currentVyhybka == null) {
+            pendingAdvanceFromCsv = true;
+            return;
+        }
+        pendingAdvanceFromCsv = false;
+        lastCastHintCast = -1;
+        resetCastBranchSelection();
+        int nextCast = firstMissingCast(currentTudu.code, currentVyhybka);
+        if (nextCast > currentVyhybka.resolvedCastMax()) {
+            advanceToNextVyhybka();
+        } else {
+            epc.cast = nextCast;
+        }
+    }
+
+    private boolean isCastWrittenInCsv(String tuduCode, Tudu.Vyhybka v, int cast) {
+        return cast > 0 && getWrittenCastsForVyhybka(tuduCode, v).contains(cast);
+    }
+
     private void syncCurrentVyhybka() {
         if (currentVyhybka != null || currentTudu == null || epc.vyhybka <= 0) return;
         int idx = findVyhybkaIndex(epc.vyhybka);
@@ -5293,6 +5353,7 @@ public class MainActivity extends AppCompatActivity {
         kontrolaReading = false;
         resetKontrolaDisplay();
         kontrolaOverlay.setVisibility(View.VISIBLE);
+        updatePowerPresetUi();
         if (backPressedCallback != null) {
             backPressedCallback.setEnabled(true);
         }
@@ -5307,6 +5368,7 @@ public class MainActivity extends AppCompatActivity {
         kontrolaReading = false;
         kontrolaOverlay.setVisibility(View.GONE);
         resetKontrolaDisplay();
+        updatePowerPresetUi();
         if (backPressedCallback != null) {
             backPressedCallback.setEnabled(
                     deleteConfirmDialog.getVisibility() == View.VISIBLE || scanDoneAwaitingConfirm);
@@ -5432,7 +5494,9 @@ public class MainActivity extends AppCompatActivity {
 
         addKontrolaFieldCell(kontrolaCellsContainer, "EPC", matched.epc, true, true);
         addKontrolaFieldCell(kontrolaCellsContainer, "TID", matched.tid, true, true);
-        addKontrolaFieldCell(kontrolaCellsContainer, "TUDU", matched.tudu, false, false);
+        addKontrolaFieldPair(kontrolaCellsContainer,
+                "TUDU", matched.tudu,
+                "OBJEKT", matched.vyhybka);
         addKontrolaFieldPair(kontrolaCellsContainer,
                 "POZICE", matched.cast,
                 "POLOHA", matched.poloha);
@@ -5447,10 +5511,6 @@ public class MainActivity extends AppCompatActivity {
     private void addKontrolaFieldCell(LinearLayout container, String label, String value,
             boolean monospace, boolean tagHighlight) {
         View cell = getLayoutInflater().inflate(R.layout.item_kontrola_field, container, false);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        cell.setLayoutParams(lp);
         configureKontrolaFieldCell(cell, label, value, monospace, tagHighlight);
         container.addView(cell);
     }
