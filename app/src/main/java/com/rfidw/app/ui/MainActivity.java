@@ -1304,7 +1304,7 @@ public class MainActivity extends AppCompatActivity {
         listView.setOnItemClickListener((parent, v, position, id) -> {
             VyhybkaPickerPreparedItem prepared = filteredItems.get(position);
             if (prepared.complete) {
-                toast("výhybka je již zapsaná v CSV");
+                toast("Výhybka je již zapsaná v CSV");
                 return;
             }
             if (gpsAutoSelection) {
@@ -1666,11 +1666,11 @@ public class MainActivity extends AppCompatActivity {
                     return new AlternatingStatus(
                             getString(R.string.epc_retry_status), COLOR_STATUS_ERROR);
                 case WF_STEP_CSV:
-                    return new AlternatingStatus("chyba CSV", COLOR_STATUS_ERROR);
+                    return new AlternatingStatus("Chyba CSV", COLOR_STATUS_ERROR);
                 case WF_STEP_PWD:
-                    return new AlternatingStatus("chyba hesla", COLOR_STATUS_ERROR);
+                    return new AlternatingStatus("Chyba hesla", COLOR_STATUS_ERROR);
                 case WF_STEP_LOCK:
-                    return new AlternatingStatus("chyba zamčení", COLOR_STATUS_ERROR);
+                    return new AlternatingStatus("Chyba zamčení", COLOR_STATUS_ERROR);
                 default:
                     break;
             }
@@ -5312,7 +5312,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void initReaderAsync() {
         if (!isPowerPresetSelected()) return;
-        setActionStatus("inicializuji…", COLOR_STATUS_BUSY);
+        setActionStatus("Inicializuji…", COLOR_STATUS_BUSY);
         Boolean presetInKoleji = activePowerPresetInKoleji();
         if (presetInKoleji == null) return;
         final int power = presetInKoleji ? POWER_PRESET_KOLEJI_DBM : POWER_PRESET_RUCE_DBM;
@@ -5323,7 +5323,7 @@ public class MainActivity extends AppCompatActivity {
                     setActionStatusReady();
                     applyPowerValue(power, false);
                 } else {
-                    setActionStatus("nedostupná", COLOR_STATUS_ERROR);
+                    setActionStatus("Nedostupná", COLOR_STATUS_ERROR);
                 }
             });
         });
