@@ -12,24 +12,16 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textColor="@color/primary_dark"
-        android:textSize="13sp"
-        android:textStyle="bold"/>
-
-    <TextView
-        android:id="@+id/tvKontrolaCellValue"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:textColor="@color/primary_dark"
-        android:textSize="15sp"
+        android:textSize="14sp"
         android:textStyle="bold"/>
 
     <TextView
         android:id="@+id/tvKontrolaCellDetail"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
-        android:textColor="@color/text_muted"
-        android:textSize="11sp"/>
+        android:layout_marginTop="8dp"
+        android:lineSpacingExtra="2dp"
+        android:textColor="@color/primary_dark"
+        android:textSize="13sp"/>
 
 </LinearLayout>

@@ -127,6 +127,10 @@
     <string name="kontrola_match_prev">předchozí záznam</string>
     <string name="kontrola_match_next">další záznam</string>
     <string name="kontrola_cell_detail">KM_EXT %1$s · POLOHA %2$s</string>
+    <string name="kontrola_field_chlivecky">chlívečky</string>
+    <string name="kontrola_field_line">%1$s: %2$s</string>
+    <string name="kontrola_chip_header">čip %1$d</string>
+    <string name="kontrola_empty_value">—</string>
     <string name="summary_vyhybka_label">výhybka</string>
     <string name="summary_objekt_label">objekt</string>
     <string name="objekt_picker_prefix">objekt\u00A0</string>
