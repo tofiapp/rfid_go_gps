@@ -439,7 +439,7 @@ public class Tudu {
 
         @Override
         public String toString() {
-            return "výhybka " + displayLabel() + " (čipy " + castMin + "-" + castMax + ")";
+            return "Výhybka " + displayLabel() + " (čipy " + castMin + "-" + castMax + ")";
         }
     }
 }
