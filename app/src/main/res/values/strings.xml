@@ -103,9 +103,10 @@
     <string name="epc_tid_mode_valid">✓ Režim TID → EPC (nové EPC = TID tagu při zápisu)</string>
     <string name="tudu_boundary_btn">hranice TUDU</string>
     <string name="tudu_boundary_title">Hranice TUDU</string>
-    <string name="tudu_boundary_step_tudu">1. TUDU</string>
-    <string name="tudu_boundary_step_vyhybka">2. Kolej (VYHYBKA)</string>
-    <string name="tudu_boundary_step_km_ext">3. KM_EXT (volitelné)</string>
+    <string name="tudu_boundary_subtitle">Zápis čipu 5 – hranice úseku TUDU</string>
+    <string name="tudu_boundary_step_tudu">TUDU</string>
+    <string name="tudu_boundary_step_vyhybka">Kolej (VYHYBKA)</string>
+    <string name="tudu_boundary_step_km_ext">KM_EXT (volitelné)</string>
     <string name="tudu_boundary_pick_nearby">Vybrat TUDU z okolí</string>
     <string name="tudu_boundary_tudu_hint">TUDU (ručně)</string>
     <string name="tudu_boundary_vyhybka_hint">Kolej / výhybka</string>
