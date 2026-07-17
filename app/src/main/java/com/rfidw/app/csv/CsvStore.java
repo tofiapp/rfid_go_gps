@@ -25,17 +25,17 @@ import java.util.Set;
  * Výstupní tabulka .CSV.
  *
  * Sloupce:
- *   ID_RFID ; EPC ; TID ; TUDU ; VYHYBKA ; CIP ; POLOHA ; RO_ID_1 ; RO_ID_2 ;
- *   KM_EXT ; LAT ; LON ; ACCURACY_M ; GPS_TIME
+ *   ID_RFID ; EPC ; TID ; TUDU ; OBJEKT ; POZICE ; POLOHA ; RO_ID_1 ; RO_ID_2 ;
+ *   KM_EXT ; LAT ; LON ; ACCURACY_M ; GPS DATE
  *
  * Klíčem je ID_RFID – při zápisu stejného ID_RFID se daný řádek přepíše.
  */
 public class CsvStore {
 
     public static final String[] HEADER = {
-            "ID_RFID", "EPC", "TID", "TUDU", "VYHYBKA", "CIP", "POLOHA",
+            "ID_RFID", "EPC", "TID", "TUDU", "OBJEKT", "POZICE", "POLOHA",
             "RO_ID_1", "RO_ID_2", "KM_EXT",
-            "LAT", "LON", "ACCURACY_M", "GPS_TIME"
+            "LAT", "LON", "ACCURACY_M", "GPS DATE"
     };
     private static final String SEP = ";";
 

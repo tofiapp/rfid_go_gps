@@ -264,9 +264,9 @@ public class LocationCache implements LocationListener {
         return String.valueOf(Math.round(accuracyM));
     }
 
-    public static String formatGpsTime(long gpsTimeMs) {
+    public static String formatGpsDate(long gpsTimeMs) {
         if (gpsTimeMs <= 0) return "";
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault());
         return sdf.format(new Date(gpsTimeMs));
     }
 

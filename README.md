@@ -91,8 +91,8 @@ Po každém zápisu EPC (lze vypnout zaškrtávátkem, výchozí zapnuto) se ulo
 | EPC | celých 24 hex znaků |
 | TID | přečtený z tagu |
 | TUDU | plný kód úseku |
-| VYHYBKA | číslo výhybky |
-| CIP | část výhybky (1–4) |
+| OBJEKT | číslo výhybky |
+| POZICE | část výhybky (1–4) |
 | POLOHA | kód polohy z DB (např. JA, JB) |
 | RO_ID_1 | první RO_ID větve |
 | RO_ID_2 | druhá RO_ID větve (pokud existuje) |
@@ -100,7 +100,7 @@ Po každém zápisu EPC (lze vypnout zaškrtávátkem, výchozí zapnuto) se ulo
 | LAT | GPS šířka čtečky |
 | LON | GPS délka čtečky |
 | ACCURACY_M | přesnost GPS v metrech |
-| GPS_TIME | čas měření (`yyyy-MM-dd HH:mm:ss`; v testovacím režimu prefix `TEST`) |
+| GPS DATE | datum měření (`yyyy-MM-dd`) |
 
 Při zápisu stejného `ID_RFID` se daný řádek **přepíše**.
 Tabulku lze **sdílet / exportovat** nebo **vymazat poslední záznam** (obnoví se předchozí stav šablony a výběru).
