@@ -680,7 +680,6 @@ public class MainActivity extends AppCompatActivity {
         }
 
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(getString(R.string.tudu_boundary_title))
                 .setView(dialogView)
                 .setPositiveButton("Použít", null)
                 .setNegativeButton("Zrušit", null)
