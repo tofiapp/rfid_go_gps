@@ -141,6 +141,61 @@ public class CsvStore {
         return null;
     }
 
+    /** Najde řádek podle EPC nebo TID načteného tagu. */
+    public synchronized Row findRowByTag(String epcHex, String tidHex) {
+        String normEpc = normalizeHex(epcHex);
+        String normTid = normalizeHex(tidHex);
+        if (!normEpc.isEmpty()) {
+            for (Row r : rows.values()) {
+                if (normEpc.equalsIgnoreCase(normalizeHex(r.epc))) return r;
+            }
+        }
+        if (!normTid.isEmpty()) {
+            for (Row r : rows.values()) {
+                if (normTid.equalsIgnoreCase(normalizeHex(r.tid))) return r;
+            }
+        }
+        return null;
+    }
+
+    /** Všechny řádky CSV pro daný TUDU a objekt (výhybku). */
+    public synchronized List<Row> findRowsForObject(String tuduCode, String objectLabel) {
+        if (tuduCode == null || tuduCode.isEmpty()) return Collections.emptyList();
+        String target = objectLabel != null ? objectLabel.trim() : "";
+        List<Row> result = new ArrayList<>();
+        for (Row r : rows.values()) {
+            if (!tuduCode.equals(r.tudu)) continue;
+            if (!objectLabelMatches(r.vyhybka, target)) continue;
+            result.add(r);
+        }
+        result.sort((a, b) -> Integer.compare(parseInt(a.cast, 0), parseInt(b.cast, 0)));
+        return result;
+    }
+
+    private static boolean objectLabelMatches(String rowLabel, String target) {
+        if (target.isEmpty()) {
+            return rowLabel == null || rowLabel.trim().isEmpty();
+        }
+        if (rowLabel == null) return false;
+        String trimmed = rowLabel.trim();
+        if (trimmed.equalsIgnoreCase(target)) return true;
+        int rowCislo = parseInt(trimmed, -1);
+        int targetCislo = parseInt(target, -2);
+        return rowCislo >= 0 && rowCislo == targetCislo;
+    }
+
+    private static String normalizeHex(String value) {
+        if (value == null) return "";
+        StringBuilder hex = new StringBuilder();
+        for (int i = 0; i < value.length(); i++) {
+            char c = Character.toUpperCase(value.charAt(i));
+            if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F')) {
+                hex.append(c);
+            }
+        }
+        return hex.toString();
+    }
+
     /** Souhrn částí výhybky napříč všemi RO_ID (zpětná kompatibilita). */
     public synchronized Set<Integer> getWrittenCasts(String tuduCode, int vyhybkaCislo) {
         Set<Integer> merged = new HashSet<>();

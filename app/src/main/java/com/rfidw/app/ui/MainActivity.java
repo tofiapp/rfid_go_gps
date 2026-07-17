@@ -15,6 +15,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.graphics.Typeface;
+import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.provider.DocumentsContract;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
@@ -35,10 +37,12 @@ import android.view.ViewTreeObserver;
 import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.OnBackPressedCallback;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
@@ -62,6 +66,7 @@ import com.rfidw.app.data.Tudu;
 import com.rfidw.app.epc.EpcModel;
 import com.rfidw.app.location.LocationCache;
 import com.rfidw.app.rfid.UhfManager;
+import com.rscja.deviceapi.entity.UHFTAGInfo;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -206,10 +211,14 @@ public class MainActivity extends AppCompatActivity {
     private final int[] wfStepStates = new int[4];
     private View summary1, colSummaryTudu, colSummaryVyhybka, castHintBox, scanDoneScrim,
             scanDoneDialog, deleteConfirmDialog, lastRecordBox, card1, topBar,
-            card1DbProgress, cardDbIndex;
+            card1DbProgress, cardDbIndex, kontrolaOverlay;
     private com.google.android.material.progressindicator.LinearProgressIndicator card1DbProgressBar,
             dbIndexProgressBar;
     private NestedScrollView mainScroll;
+    private LinearLayout kontrolaCellsContainer;
+    private TextView tvSummaryVyhybkaLabel, tvKontrolaPrompt, tvKontrolaStatus, tvKontrolaHeader;
+    private boolean kontrolaActive, kontrolaReading;
+    private OnBackPressedCallback backPressedCallback;
     private BottomSheetBehavior<View> workflowBehavior;
     private EditText etAccessPwd, etPower, etPwdAccess, etPwdNew, etLockAccessPwd;
     private CheckBox cbAutoCsv, cbGpsTestMode;
@@ -231,6 +240,8 @@ public class MainActivity extends AppCompatActivity {
     private int lastCastHintCast = -1;
     /** Režim manuálního zápisu hranice TUDU (čip 5). */
     private boolean tuduBoundaryMode;
+    /** Po „Použít“ v hranici TUDU zobrazovat „objekt“ místo „výhybka“. */
+    private boolean tuduBoundaryObjektLabels;
     private String tuduBoundaryVyhybkaLabel = "";
     private String tuduBoundaryKmExt = "";
 
@@ -269,6 +280,8 @@ public class MainActivity extends AppCompatActivity {
         setupTuduSelectionMode();
         setupGpsReloadLocation();
         setupGpsTestMode();
+        setupBackPressedHandler();
+        setupKontrola();
         tryAutoLoadDefaultDatabase();
 
         etPower.setText("");
@@ -335,6 +348,12 @@ public class MainActivity extends AppCompatActivity {
         lastRecordBox = findViewById(R.id.lastRecordBox);
         tvLastRecordVyhybka = findViewById(R.id.tvLastRecordVyhybka);
         tvLastRecordCast = findViewById(R.id.tvLastRecordCast);
+        tvSummaryVyhybkaLabel = findViewById(R.id.tvSummaryVyhybkaLabel);
+        kontrolaOverlay = findViewById(R.id.kontrolaOverlay);
+        kontrolaCellsContainer = findViewById(R.id.kontrolaCellsContainer);
+        tvKontrolaPrompt = findViewById(R.id.tvKontrolaPrompt);
+        tvKontrolaStatus = findViewById(R.id.tvKontrolaStatus);
+        tvKontrolaHeader = findViewById(R.id.tvKontrolaHeader);
         mainScroll = findViewById(R.id.mainScroll);
         card1 = findViewById(R.id.card1);
         topBar = findViewById(R.id.topBar);
@@ -461,7 +480,8 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean isOverlayDialogVisible() {
         return scanDoneDialog.getVisibility() == View.VISIBLE
-                || deleteConfirmDialog.getVisibility() == View.VISIBLE;
+                || deleteConfirmDialog.getVisibility() == View.VISIBLE
+                || kontrolaActive;
     }
 
     private void showOverlayScrimBehindTopBar() {
@@ -657,6 +677,31 @@ public class MainActivity extends AppCompatActivity {
         tuduBoundaryMode = false;
         tuduBoundaryVyhybkaLabel = "";
         tuduBoundaryKmExt = "";
+        clearTuduBoundaryObjektLabels();
+    }
+
+    private void clearTuduBoundaryObjektLabels() {
+        if (!tuduBoundaryObjektLabels) return;
+        tuduBoundaryObjektLabels = false;
+        updateSummaryVyhybkaLabel();
+    }
+
+    private void setTuduBoundaryObjektLabels() {
+        tuduBoundaryObjektLabels = true;
+        updateSummaryVyhybkaLabel();
+    }
+
+    private void updateSummaryVyhybkaLabel() {
+        if (tvSummaryVyhybkaLabel == null) return;
+        tvSummaryVyhybkaLabel.setText(getString(tuduBoundaryObjektLabels
+                ? R.string.summary_objekt_label
+                : R.string.summary_vyhybka_label));
+    }
+
+    private String getVyhybkaLabelPrefix() {
+        return getString(tuduBoundaryObjektLabels
+                ? R.string.objekt_picker_prefix
+                : R.string.vyhybka_picker_prefix);
     }
 
     private void showTuduBoundaryForm() {
@@ -704,10 +749,14 @@ public class MainActivity extends AppCompatActivity {
         }));
 
         dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        }
     }
 
     private void applyTuduBoundaryForm(String tudu, String vyhybkaLabel, String kmExt) {
         restoreTuduBoundaryFromRow(tudu, vyhybkaLabel, kmExt);
+        setTuduBoundaryObjektLabels();
         refreshTemplate();
         updateStep1();
         updateSummary1();
@@ -734,6 +783,7 @@ public class MainActivity extends AppCompatActivity {
         currentTudu = resolveTuduForUdu(Tudu.uduCode(tudu));
         currentVyhybka = null;
         resetCastBranchSelection();
+        setTuduBoundaryObjektLabels();
     }
 
     private void showNearbyFullTuduPickerForBoundary(
@@ -1157,14 +1207,24 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private CharSequence formatVyhybkaPickerTitle(int totalCount, int missingGpsCount) {
+        if (!tuduBoundaryObjektLabels) {
+            if (totalCount <= 0) {
+                return getString(R.string.vyhybka_picker_title);
+            }
+            if (missingGpsCount > 0) {
+                return getString(R.string.vyhybka_picker_title_total_missing_gps,
+                        totalCount, missingGpsCount);
+            }
+            return getString(R.string.vyhybka_picker_title_total, totalCount);
+        }
         if (totalCount <= 0) {
-            return getString(R.string.vyhybka_picker_title);
+            return getString(R.string.objekt_picker_title);
         }
         if (missingGpsCount > 0) {
-            return getString(R.string.vyhybka_picker_title_total_missing_gps,
+            return getString(R.string.objekt_picker_title_total_missing_gps,
                     totalCount, missingGpsCount);
         }
-        return getString(R.string.vyhybka_picker_title_total, totalCount);
+        return getString(R.string.objekt_picker_title_total, totalCount);
     }
 
     private void showVyhybkaPickerDialog(List<VyhybkaPickerPreparedItem> itemsSource,
@@ -1278,6 +1338,7 @@ public class MainActivity extends AppCompatActivity {
         exitTuduBoundaryMode();
         gpsTuduLocked = false;
         gpsVyhybkaLocked = false;
+        clearTuduBoundaryObjektLabels();
         gpsLookupNoMatch = false;
         forceNextGpsLookup = true;
         lastGpsLookupLat = null;
@@ -1787,6 +1848,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateSummary1() {
+        updateSummaryVyhybkaLabel();
         String tuduPreview = epc.tudu == null || epc.tudu.isEmpty()
                 ? "—" : Tudu.uduCode(epc.tudu);
         tvSummaryTudu.setText(tuduPreview);
@@ -1851,7 +1913,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        String vyhPrefix = getString(R.string.last_record_vyhybka_prefix);
+        String vyhPrefix = getVyhybkaLabelPrefix();
         String castPrefix = getString(R.string.last_record_cast_prefix);
         String vyhStr = last.vyhybka != null && !last.vyhybka.isEmpty()
                 ? last.vyhybka
@@ -2023,7 +2085,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showScanDoneNotification(int vyhybka, int cast) {
-        String vyhPrefix = getString(R.string.scan_done_vyhybka_prefix);
+        String vyhPrefix = getVyhybkaLabelPrefix();
         String castPrefix = getString(R.string.scan_done_cast_prefix);
         String vyhStr;
         if (tuduBoundaryMode && tuduBoundaryVyhybkaLabel != null && !tuduBoundaryVyhybkaLabel.isEmpty()) {
@@ -2059,6 +2121,9 @@ public class MainActivity extends AppCompatActivity {
         scanDoneAwaitingConfirm = false;
         hideScanDoneNotification(() -> {
             onTagCycleComplete();
+            if (tuduBoundaryMode) {
+                clearTuduBoundaryObjektLabels();
+            }
             lastRecordUnlocked = true;
             updateLastRecordPreview();
             step2Done = false;
@@ -2796,6 +2861,8 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.btnScanDoneRetry).setOnClickListener(v -> onScanDoneRetry());
         findViewById(R.id.btnDeleteConfirmYes).setOnClickListener(v -> onDeleteConfirmYes());
         findViewById(R.id.btnDeleteConfirmNo).setOnClickListener(v -> onDeleteConfirmNo());
+        findViewById(R.id.btnKontrola).setOnClickListener(v -> showKontrolaOverlay());
+        findViewById(R.id.btnKontrolaClose).setOnClickListener(v -> hideKontrolaOverlay());
     }
 
     private void setupCastBranchSelection() {
@@ -3253,6 +3320,7 @@ public class MainActivity extends AppCompatActivity {
         lastGpsLookupLon = null;
         lastGpsLookupTimeMs = 0;
         gpsLookupNoMatch = false;
+        clearTuduBoundaryObjektLabels();
         scheduleGpsTuduLookup();
         if (!workflowRunning) {
             setActionStatusReady();
@@ -4919,7 +4987,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private CharSequence formatVyhybkaPickerLabelCore(String tuduCode, Tudu.Vyhybka v) {
-        String prefix = getString(R.string.vyhybka_picker_prefix);
+        String prefix = getVyhybkaLabelPrefix();
         String cisloStr = v.displayLabel();
         if (!isVyhybkaPartialInCsv(tuduCode, v)) {
             SpannableString span = new SpannableString(prefix + cisloStr);
@@ -5054,6 +5122,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void runTriggerAction() {
+        if (kontrolaActive) {
+            runKontrolaRead();
+            return;
+        }
         if (workflowRunning || scanDoneAwaitingConfirm || deleteConfirmDialog.getVisibility() == View.VISIBLE) return;
         if (!requirePowerPreset()) return;
         if (epcTemplateMode && !epc.isValid()) {
@@ -5089,7 +5161,9 @@ public class MainActivity extends AppCompatActivity {
         if (event.getRepeatCount() == 0) {
             for (int k : TRIGGER_KEYS) {
                 if (k == keyCode) {
-                    if (scanDoneAwaitingConfirm) {
+                    if (kontrolaActive) {
+                        runKontrolaRead();
+                    } else if (scanDoneAwaitingConfirm) {
                         onScanDoneContinue();
                     } else if (deleteConfirmDialog.getVisibility() != View.VISIBLE) {
                         runTriggerAction();
@@ -5099,6 +5173,200 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         return super.onKeyDown(keyCode, event);
+    }
+
+    private void setupBackPressedHandler() {
+        backPressedCallback = new OnBackPressedCallback(false) {
+            @Override
+            public void handleOnBackPressed() {
+                if (kontrolaActive) {
+                    hideKontrolaOverlay();
+                } else if (deleteConfirmDialog.getVisibility() == View.VISIBLE) {
+                    onDeleteConfirmNo();
+                } else if (scanDoneAwaitingConfirm) {
+                    onScanDoneContinue();
+                }
+            }
+        };
+        getOnBackPressedDispatcher().addCallback(this, backPressedCallback);
+    }
+
+    private void setupKontrola() {
+        resetKontrolaDisplay();
+    }
+
+    private void showKontrolaOverlay() {
+        if (kontrolaActive) return;
+        kontrolaActive = true;
+        kontrolaReading = false;
+        resetKontrolaDisplay();
+        kontrolaOverlay.setVisibility(View.VISIBLE);
+        if (backPressedCallback != null) {
+            backPressedCallback.setEnabled(true);
+        }
+        if (!uhf.isReady()) {
+            initReaderAsync();
+        }
+    }
+
+    private void hideKontrolaOverlay() {
+        if (!kontrolaActive) return;
+        kontrolaActive = false;
+        kontrolaReading = false;
+        kontrolaOverlay.setVisibility(View.GONE);
+        resetKontrolaDisplay();
+        if (backPressedCallback != null) {
+            backPressedCallback.setEnabled(
+                    deleteConfirmDialog.getVisibility() == View.VISIBLE || scanDoneAwaitingConfirm);
+        }
+    }
+
+    private void resetKontrolaDisplay() {
+        if (tvKontrolaPrompt == null) return;
+        tvKontrolaPrompt.setVisibility(View.VISIBLE);
+        tvKontrolaPrompt.setText(R.string.kontrola_scan_prompt);
+        tvKontrolaStatus.setVisibility(View.GONE);
+        tvKontrolaHeader.setVisibility(View.GONE);
+        kontrolaCellsContainer.removeAllViews();
+    }
+
+    private void runKontrolaRead() {
+        if (!kontrolaActive || kontrolaReading) return;
+        if (!requirePowerPreset()) return;
+        if (!uhf.isReady()) {
+            toast("Čtečka není připravena");
+            return;
+        }
+        kontrolaReading = true;
+        tvKontrolaPrompt.setText(R.string.kontrola_reading);
+        tvKontrolaStatus.setVisibility(View.GONE);
+        kontrolaCellsContainer.removeAllViews();
+        io.execute(() -> {
+            UHFTAGInfo info = uhf.readSingle();
+            ui.post(() -> onKontrolaReadDone(info));
+        });
+    }
+
+    private void onKontrolaReadDone(UHFTAGInfo info) {
+        kontrolaReading = false;
+        if (!kontrolaActive) return;
+        if (info == null) {
+            tvKontrolaPrompt.setText(R.string.kontrola_no_tag);
+            tvKontrolaStatus.setVisibility(View.GONE);
+            return;
+        }
+        String epcHex = info.getEPC();
+        String tidHex = info.getTid();
+        if (csvStore == null) {
+            tvKontrolaPrompt.setText(R.string.kontrola_not_in_csv);
+            return;
+        }
+        csvStore.reloadIfChanged();
+        CsvStore.Row matched = csvStore.findRowByTag(epcHex, tidHex);
+        if (matched == null) {
+            tvKontrolaPrompt.setText(R.string.kontrola_not_in_csv);
+            tvKontrolaStatus.setVisibility(View.VISIBLE);
+            StringBuilder detail = new StringBuilder();
+            if (epcHex != null && !epcHex.isEmpty()) detail.append("EPC ").append(epcHex);
+            if (tidHex != null && !tidHex.isEmpty()) {
+                if (detail.length() > 0) detail.append("\n");
+                detail.append("TID ").append(tidHex);
+            }
+            tvKontrolaStatus.setText(detail.toString());
+            return;
+        }
+        displayKontrolaResults(matched);
+    }
+
+    private void displayKontrolaResults(CsvStore.Row matched) {
+        tvKontrolaPrompt.setVisibility(View.GONE);
+        tvKontrolaHeader.setVisibility(View.VISIBLE);
+        String objectLabel = matched.vyhybka != null ? matched.vyhybka : "";
+        tvKontrolaHeader.setText(getString(R.string.kontrola_header_format, matched.tudu, objectLabel));
+        kontrolaCellsContainer.removeAllViews();
+
+        List<CsvStore.Row> rows = csvStore.findRowsForObject(matched.tudu, objectLabel);
+        boolean boundary = isTuduBoundaryCast(parseInt(matched.cast, -1));
+        int maxCast = boundary ? CAST_TUDU_BOUNDARY : 3;
+        Tudu.Vyhybka vyhybka = findVyhybkaForRow(matched);
+        for (CsvStore.Row row : rows) {
+            int cast = parseInt(row.cast, -1);
+            if (isTuduBoundaryCast(cast)) {
+                boundary = true;
+                maxCast = CAST_TUDU_BOUNDARY;
+            }
+            if (cast > 0 && cast != CAST_TUDU_BOUNDARY && cast > maxCast) {
+                maxCast = cast;
+            }
+        }
+        if (vyhybka != null) {
+            maxCast = Math.max(maxCast, vyhybka.resolvedCastMax());
+        }
+
+        if (boundary) {
+            CsvStore.Row boundaryRow = findRowForCastInList(rows, CAST_TUDU_BOUNDARY);
+            kontrolaCellsContainer.addView(
+                    buildKontrolaCell(CAST_TUDU_BOUNDARY, boundaryRow, vyhybka));
+        }
+        int upper = boundary ? Math.min(maxCast, 4) : maxCast;
+        for (int cast = 1; cast <= upper; cast++) {
+            if (cast == CAST_TUDU_BOUNDARY) continue;
+            CsvStore.Row row = findRowForCastInList(rows, cast);
+            kontrolaCellsContainer.addView(buildKontrolaCell(cast, row, vyhybka));
+        }
+        tvKontrolaStatus.setVisibility(View.GONE);
+    }
+
+    private static CsvStore.Row findRowForCastInList(List<CsvStore.Row> rows, int cast) {
+        for (CsvStore.Row row : rows) {
+            if (parseInt(row.cast, -1) == cast) return row;
+        }
+        return null;
+    }
+
+    private View buildKontrolaCell(int cast, CsvStore.Row row, Tudu.Vyhybka vyhybka) {
+        View cell = getLayoutInflater().inflate(R.layout.item_kontrola_cell, kontrolaCellsContainer, false);
+        TextView title = cell.findViewById(R.id.tvKontrolaCellTitle);
+        TextView value = cell.findViewById(R.id.tvKontrolaCellValue);
+        TextView detail = cell.findViewById(R.id.tvKontrolaCellDetail);
+
+        String castName = kontrolaCastPartName(cast, vyhybka);
+        title.setText("čip " + cast + " · " + castName);
+        if (row == null) {
+            value.setText(getString(R.string.kontrola_empty_cell));
+            detail.setVisibility(View.GONE);
+        } else {
+            String obj = row.vyhybka != null && !row.vyhybka.isEmpty()
+                    ? row.vyhybka
+                    : String.valueOf(parseInt(row.vyhybka, 0));
+            value.setText(obj);
+            String kmExt = row.kmExt != null ? row.kmExt : "";
+            String poloha = row.poloha != null ? row.poloha : "";
+            if (kmExt.isEmpty() && poloha.isEmpty()) {
+                detail.setVisibility(View.GONE);
+            } else {
+                detail.setVisibility(View.VISIBLE);
+                detail.setText(getString(R.string.kontrola_cell_detail,
+                        kmExt.isEmpty() ? "—" : kmExt,
+                        poloha.isEmpty() ? "—" : poloha));
+            }
+        }
+        return cell;
+    }
+
+    private String kontrolaCastPartName(int cast, Tudu.Vyhybka vyhybka) {
+        if (isTuduBoundaryCast(cast)) {
+            return getString(R.string.cast_part_5);
+        }
+        if (vyhybka != null && isFourPartVyhybka(vyhybka)) {
+            return vyhybka.castFourPartLabel(cast);
+        }
+        switch (cast) {
+            case 1: return getString(R.string.cast_part_1);
+            case 2: return getString(R.string.cast_part_2);
+            case 3: return getString(R.string.cast_part_3);
+            default: return String.valueOf(cast);
+        }
     }
 
     @Override
