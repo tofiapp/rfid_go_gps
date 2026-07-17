@@ -708,21 +708,33 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void applyTuduBoundaryForm(String tudu, String vyhybkaLabel, String kmExt) {
+        restoreTuduBoundaryFromRow(tudu, vyhybkaLabel, kmExt);
+        refreshTemplate();
+        updateStep1();
+        updateSummary1();
+        toast(getString(R.string.tudu_boundary_active));
+    }
+
+    /** Obnoví režim hranice TUDU (čip 5) z CSV řádku nebo zadaných hodnot. */
+    private void restoreTuduBoundaryFromRow(CsvStore.Row row) {
+        restoreTuduBoundaryFromRow(
+                row.tudu,
+                row.vyhybka != null ? row.vyhybka : "",
+                row.kmExt != null ? row.kmExt : "");
+    }
+
+    private void restoreTuduBoundaryFromRow(String tudu, String vyhybkaLabel, String kmExt) {
         tuduBoundaryMode = true;
         gpsTuduLocked = true;
         gpsVyhybkaLocked = true;
-        tuduBoundaryVyhybkaLabel = vyhybkaLabel;
-        tuduBoundaryKmExt = kmExt != null ? kmExt : "";
+        tuduBoundaryVyhybkaLabel = vyhybkaLabel != null ? vyhybkaLabel.trim() : "";
+        tuduBoundaryKmExt = kmExt != null ? kmExt.trim() : "";
         epc.tudu = tudu;
         epc.cast = CAST_TUDU_BOUNDARY;
         epc.vyhybka = parseInt(vyhybkaLabel, 0);
         currentTudu = resolveTuduForUdu(Tudu.uduCode(tudu));
         currentVyhybka = null;
         resetCastBranchSelection();
-        refreshTemplate();
-        updateStep1();
-        updateSummary1();
-        toast(getString(R.string.tudu_boundary_active));
     }
 
     private void showNearbyFullTuduPickerForBoundary(
@@ -1754,6 +1766,8 @@ public class MainActivity extends AppCompatActivity {
 
     private void updatePowerPresetUi() {
         boolean enabled = step1Done && !gpsLookupInFlight;
+        boolean showPresets = step1Done || !gpsAutoSelection || tuduBoundaryMode;
+        powerPresetGroup.setVisibility(showPresets ? View.VISIBLE : View.GONE);
         powerPresetGroup.setEnabled(enabled);
         for (int i = 0; i < powerPresetGroup.getChildCount(); i++) {
             powerPresetGroup.getChildAt(i).setEnabled(enabled);
@@ -2169,6 +2183,23 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setActionStatusReady() {
+        if (tuduBoundaryMode) {
+            showGpsStatus = false;
+            tvGpsStatus.setVisibility(View.INVISIBLE);
+            if (!step1Done) {
+                setActionStatus(getString(R.string.tudu_select_status), COLOR_STATUS_WARNING);
+                updateStepIndicators();
+                return;
+            }
+            if (!isPowerPresetSelected()) {
+                setActionStatus(getString(R.string.power_preset_select_status), COLOR_STATUS_WARNING);
+                updateStepIndicators();
+                return;
+            }
+            setActionStatus(getString(R.string.tudu_boundary_active), COLOR_STATUS_READY);
+            updateStepIndicators();
+            return;
+        }
         if (!step1Done) {
             if (gpsAutoSelection) {
                 showGpsStatus = true;
@@ -2633,7 +2664,9 @@ public class MainActivity extends AppCompatActivity {
         epc.idRfid = Math.max(DEFAULT_ID_RFID, csvStore.getMaxIdRfid() + 1);
         prefs.edit().putLong("idRfid", epc.idRfid).apply();
         syncCurrentVyhybka();
-        if (currentVyhybka != null) {
+        if (tuduBoundaryMode) {
+            lastCastHintCast = -1;
+        } else if (currentVyhybka != null) {
             advanceCastAndVyhybka();
         } else {
             pendingAdvanceFromCsv = true;
@@ -2646,7 +2679,7 @@ public class MainActivity extends AppCompatActivity {
         lastRecordUnlocked = true;
         skipCsvTuduRestore = true;
         updateLastRecordPreview();
-        if (dzsDatabase != null && gpsAutoSelection) {
+        if (dzsDatabase != null && gpsAutoSelection && !gpsTuduLocked && !gpsVyhybkaLocked) {
             ensureGpsForTuduLookup();
         }
         resyncCastRangeFromPersistedState();
@@ -4128,7 +4161,11 @@ public class MainActivity extends AppCompatActivity {
     /** Po smazání posledního řádku nastaví další čip k zápisu podle zbývajícího CSV. */
     private void restoreStateAfterCsvRemoval() {
         if (csvStore == null || csvStore.size() == 0) {
+            exitTuduBoundaryMode();
             resetCastBranchSelection();
+            updateStep1();
+            updateSummary1();
+            resetTagWorkflow();
             return;
         }
         CsvStore.Row last = csvStore.getLastRow();
@@ -4137,14 +4174,19 @@ public class MainActivity extends AppCompatActivity {
         epc.idRfid = Math.max(DEFAULT_ID_RFID, csvStore.getMaxIdRfid() + 1);
         prefs.edit().putLong("idRfid", epc.idRfid).apply();
         syncCurrentVyhybka();
-        if (currentVyhybka != null) {
+        if (tuduBoundaryMode) {
+            lastCastHintCast = -1;
+        } else if (currentVyhybka != null) {
             lastCastHintCast = -1;
             advanceCastAndVyhybka();
+        } else {
+            pendingAdvanceFromCsv = true;
         }
         refreshTemplate();
         updateStep1();
         updateSummary1();
         resetTagWorkflow();
+        resyncCastRangeFromPersistedState();
     }
 
     private void applyRowToEpc(CsvStore.Row row) {
@@ -4152,6 +4194,12 @@ public class MainActivity extends AppCompatActivity {
         epc.vyhybka = parseInt(row.vyhybka, epc.vyhybka);
         epc.cast = parseInt(row.cast, epc.cast);
         epc.idRfid = parseLong(row.idRfid, epc.idRfid);
+
+        if (isTuduBoundaryCast(epc.cast)) {
+            restoreTuduBoundaryFromRow(row);
+            return;
+        }
+        exitTuduBoundaryMode();
 
         currentTudu = null;
         currentVyhybka = null;
