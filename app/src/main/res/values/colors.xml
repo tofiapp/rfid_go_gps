@@ -17,6 +17,6 @@
     <color name="last_record_stroke">#C5CEC5</color>
     <color name="epc_highlight">#7FE0FF</color>
     <color name="epc_highlight_label">#B3FFFFFF</color>
-    <color name="kontrola_tag_highlight">#004B71</color>
-    <color name="kontrola_tag_label">#5C6670</color>
+    <color name="kontrola_tag_highlight">@color/accent</color>
+    <color name="kontrola_tag_label">@color/text_muted</color>
 </resources>
