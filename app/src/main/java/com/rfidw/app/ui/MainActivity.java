@@ -5424,7 +5424,7 @@ public class MainActivity extends AppCompatActivity {
         int cast = parseInt(matched.cast, 0);
         String idRfid = matched.idRfid != null ? matched.idRfid.trim() : "";
         if (!idRfid.isEmpty()) {
-            tvKontrolaHeader.setText(idRfid);
+            tvKontrolaHeader.setText(getString(R.string.kontrola_id_rfid_header, idRfid));
         } else {
             tvKontrolaHeader.setText(getString(R.string.kontrola_chip_header, cast));
         }
@@ -5433,10 +5433,12 @@ public class MainActivity extends AppCompatActivity {
         addKontrolaFieldCell(kontrolaCellsContainer, "EPC", matched.epc, true, true);
         addKontrolaFieldCell(kontrolaCellsContainer, "TID", matched.tid, true, true);
         addKontrolaFieldCell(kontrolaCellsContainer, "TUDU", matched.tudu, false, false);
-        addKontrolaFieldCell(kontrolaCellsContainer, "POZICE", matched.cast, false, false);
-        addKontrolaFieldCell(kontrolaCellsContainer, "POLOHA", matched.poloha, false, false);
-        addKontrolaFieldCell(kontrolaCellsContainer, "RO_ID_1", matched.roId1, false, false);
-        addKontrolaFieldCell(kontrolaCellsContainer, "RO_ID_2", matched.roId2, false, false);
+        addKontrolaFieldPair(kontrolaCellsContainer,
+                "POZICE", matched.cast,
+                "POLOHA", matched.poloha);
+        addKontrolaFieldPair(kontrolaCellsContainer,
+                "RO_ID_1", matched.roId1,
+                "RO_ID_2", matched.roId2);
         addKontrolaFieldCell(kontrolaCellsContainer, "KM_EXT", matched.kmExt, false, false);
 
         tvKontrolaStatus.setVisibility(View.GONE);
@@ -5449,20 +5451,36 @@ public class MainActivity extends AppCompatActivity {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         cell.setLayoutParams(lp);
+        configureKontrolaFieldCell(cell, label, value, monospace, tagHighlight);
+        container.addView(cell);
+    }
+
+    private void addKontrolaFieldPair(LinearLayout container,
+            String leftLabel, String leftValue,
+            String rightLabel, String rightValue) {
+        View row = getLayoutInflater().inflate(R.layout.item_kontrola_field_pair, container, false);
+        configureKontrolaFieldCell(row.findViewById(R.id.kontrolaFieldLeft),
+                leftLabel, leftValue, false, false);
+        configureKontrolaFieldCell(row.findViewById(R.id.kontrolaFieldRight),
+                rightLabel, rightValue, false, false);
+        container.addView(row);
+    }
+
+    private void configureKontrolaFieldCell(View cell, String label, String value,
+            boolean monospace, boolean tagHighlight) {
         TextView labelView = cell.findViewById(R.id.tvKontrolaFieldLabel);
         TextView valueView = cell.findViewById(R.id.tvKontrolaFieldValue);
         labelView.setText(label);
         valueView.setText(kontrolaDisplayValue(value));
         if (tagHighlight) {
-            cell.setBackgroundResource(R.drawable.epc_bg);
-            labelView.setTextColor(ContextCompat.getColor(this, R.color.epc_highlight_label));
-            valueView.setTextColor(ContextCompat.getColor(this, R.color.epc_highlight));
+            cell.setBackgroundResource(R.drawable.kontrola_tag_bg);
+            labelView.setTextColor(ContextCompat.getColor(this, R.color.kontrola_tag_label));
+            valueView.setTextColor(ContextCompat.getColor(this, R.color.kontrola_tag_highlight));
         }
         if (monospace) {
             valueView.setTypeface(Typeface.MONOSPACE);
             valueView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
         }
-        container.addView(cell);
     }
 
     private String kontrolaDisplayValue(String value) {
