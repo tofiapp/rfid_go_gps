@@ -737,13 +737,14 @@ public class MainActivity extends AppCompatActivity {
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setView(dialogView)
-                .setPositiveButton("Použít", null)
-                .setNegativeButton("Zrušit", null)
                 .create();
 
         btnPickNearby.setOnClickListener(v -> showNearbyFullTuduPickerForBoundary(etTudu));
 
-        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+        View btnCancel = dialogView.findViewById(R.id.btnBoundaryCancel);
+        View btnApply = dialogView.findViewById(R.id.btnBoundaryApply);
+        btnCancel.setOnClickListener(v -> dialog.dismiss());
+        btnApply.setOnClickListener(v -> {
             String tudu = etTudu.getText() != null ? etTudu.getText().toString().trim() : "";
             String vyhybka = etVyhybka.getText() != null ? etVyhybka.getText().toString().trim() : "";
             String kmExt = etKmExt.getText() != null ? etKmExt.getText().toString().trim() : "";
@@ -757,7 +758,7 @@ public class MainActivity extends AppCompatActivity {
             }
             applyTuduBoundaryForm(tudu, vyhybka, kmExt);
             dialog.dismiss();
-        }));
+        });
 
         dialog.show();
         if (dialog.getWindow() != null) {
