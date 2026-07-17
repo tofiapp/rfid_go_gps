@@ -25,6 +25,7 @@
     <string name="cast_branch_hlavni">rovně</string>
     <string name="cast_branch_vedlejsi">odbočka</string>
     <string name="cast_branch_select">Vyberte jazyk, rovně nebo odbočka</string>
+    <string name="cast_branch_used_legend">Přeškrtnuté možnosti jsou již zapsané u jiného čipu</string>
     <string name="cast_branch_select_status">vyberte jazyk/rovně/odbočka</string>
     <string name="scan_done_title">Načetli jste</string>
     <string name="scan_done_vyhybka_prefix">výhybku\u00A0</string>
