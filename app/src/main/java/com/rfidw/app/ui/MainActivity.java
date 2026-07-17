@@ -4557,7 +4557,7 @@ public class MainActivity extends AppCompatActivity {
                 latitude = LocationCache.formatLatitude(gps.latitude);
                 longitude = LocationCache.formatLongitude(gps.longitude);
                 accuracyM = LocationCache.formatAccuracyM(gps.accuracyM);
-                gpsTime = LocationCache.formatGpsTime(gps.gpsTimeMs);
+                gpsTime = LocationCache.formatGpsDate(gps.gpsTimeMs);
             } else if (!gpsUnavailableToastShown) {
                 gpsUnavailableToastShown = true;
                 toast(getString(R.string.gps_unavailable_toast));
@@ -4597,7 +4597,7 @@ public class MainActivity extends AppCompatActivity {
             latitude = LocationCache.formatLatitude(gps.latitude);
             longitude = LocationCache.formatLongitude(gps.longitude);
             accuracyM = LocationCache.formatAccuracyM(gps.accuracyM);
-            gpsTime = LocationCache.formatGpsTime(gps.gpsTimeMs);
+            gpsTime = LocationCache.formatGpsDate(gps.gpsTimeMs);
         } else if (!gpsUnavailableToastShown) {
             gpsUnavailableToastShown = true;
             toast(getString(R.string.gps_unavailable_toast));
