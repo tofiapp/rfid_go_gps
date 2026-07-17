@@ -190,7 +190,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean pendingAutoLoadAfterStorage;
     private boolean pendingCsvInit;
     private boolean step1Done, step2Done, step3Done, step2Failed;
-    private boolean workflowRunning, chainWorkflow, scanDoneAwaitingConfirm, lastRecordUnlocked;
+    private boolean workflowRunning, chainWorkflow, scanDoneAwaitingConfirm;
     /** CSV obnoveno dřív než zdrojový soubor – posun na další čip/výhybku až po načtení TUDU. */
     private boolean pendingAdvanceFromCsv;
     /** Po obnově z CSV neobnovovat TUDU z posledního řádku – určit podle GPS. */
@@ -761,7 +761,11 @@ public class MainActivity extends AppCompatActivity {
 
         dialog.show();
         if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            android.view.Window window = dialog.getWindow();
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
+            int width = (int) (metrics.widthPixels * 0.94f);
+            window.setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
         }
     }
 
@@ -771,6 +775,7 @@ public class MainActivity extends AppCompatActivity {
         refreshTemplate();
         updateStep1();
         updateSummary1();
+        updateLastRecordPreview();
         toast(getString(R.string.tudu_boundary_active));
     }
 
@@ -1768,6 +1773,7 @@ public class MainActivity extends AppCompatActivity {
                 return false;
             }
             setWorkflowStepState(WF_STEP_CSV, WF_STATE_OK);
+            updateLastRecordPreview();
         } else {
             setWorkflowStepState(WF_STEP_CSV, WF_STATE_OK);
         }
@@ -1913,32 +1919,31 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateLastRecordPreview() {
-        if (!lastRecordUnlocked) {
-            lastRecordBox.setVisibility(View.GONE);
-            return;
-        }
         CsvStore.Row last = csvStore != null ? csvStore.getLastRow() : null;
         if (last == null) {
             lastRecordBox.setVisibility(View.GONE);
             return;
         }
 
-        int vyhybka = parseInt(last.vyhybka, 0);
         int cast = parseInt(last.cast, 0);
         if (cast <= 0) {
             lastRecordBox.setVisibility(View.GONE);
             return;
         }
-        if (!isTuduBoundaryCast(cast) && vyhybka <= 0) {
+        if (!isTuduBoundaryCast(cast) && !hasLastRecordObjekt(last)) {
             lastRecordBox.setVisibility(View.GONE);
             return;
         }
 
-        String vyhPrefix = getVyhybkaLabelPrefix();
+        boolean boundaryRow = isTuduBoundaryCast(cast);
+        String vyhPrefix = getString(boundaryRow || tuduBoundaryObjektLabels
+                ? R.string.objekt_picker_prefix
+                : R.string.vyhybka_picker_prefix);
         String castPrefix = getString(R.string.last_record_cast_prefix);
+        int vyhybkaNum = parseInt(last.vyhybka, 0);
         String vyhStr = last.vyhybka != null && !last.vyhybka.isEmpty()
                 ? last.vyhybka
-                : Tudu.Vyhybka.formatDisplay(vyhybka, "");
+                : Tudu.Vyhybka.formatDisplay(vyhybkaNum, "");
 
         SpannableString vyhSpan = new SpannableString(vyhPrefix + vyhStr);
         applyVyhybkaAccent(vyhSpan, vyhPrefix.length(), vyhSpan.length());
@@ -1947,7 +1952,7 @@ public class MainActivity extends AppCompatActivity {
         int total = castTotalForRow(last);
         String current = String.valueOf(cast);
         SpannableString castSpan;
-        if (isTuduBoundaryCast(cast)) {
+        if (boundaryRow) {
             castSpan = new SpannableString(castPrefix + current);
             applyCastAccent(castSpan, castPrefix.length(), castSpan.length());
         } else {
@@ -1963,6 +1968,12 @@ public class MainActivity extends AppCompatActivity {
         tvLastRecordCast.setText(castSpan);
 
         lastRecordBox.setVisibility(View.VISIBLE);
+    }
+
+    private static boolean hasLastRecordObjekt(CsvStore.Row row) {
+        if (row == null) return false;
+        if (row.vyhybka != null && !row.vyhybka.trim().isEmpty()) return true;
+        return parseInt(row.vyhybka, 0) > 0;
     }
 
     private int castCountFor(Tudu.Vyhybka v) {
@@ -2145,7 +2156,6 @@ public class MainActivity extends AppCompatActivity {
             if (tuduBoundaryMode) {
                 clearTuduBoundaryObjektLabels();
             }
-            lastRecordUnlocked = true;
             updateLastRecordPreview();
             step2Done = false;
             step2Failed = false;
@@ -2761,7 +2771,6 @@ public class MainActivity extends AppCompatActivity {
         updateSummary1();
         resetTagWorkflow();
 
-        lastRecordUnlocked = true;
         skipCsvTuduRestore = true;
         updateLastRecordPreview();
         if (dzsDatabase != null && gpsAutoSelection && !gpsTuduLocked && !gpsVyhybkaLocked) {
@@ -5358,77 +5367,52 @@ public class MainActivity extends AppCompatActivity {
     private void displayKontrolaResults(CsvStore.Row matched) {
         tvKontrolaPrompt.setVisibility(View.GONE);
         tvKontrolaHeader.setVisibility(View.VISIBLE);
-        String objectLabel = matched.vyhybka != null ? matched.vyhybka : "";
-        tvKontrolaHeader.setText(getString(R.string.kontrola_header_format, matched.tudu, objectLabel));
+        int cast = parseInt(matched.cast, 0);
+        tvKontrolaHeader.setText(getString(R.string.kontrola_chip_header, cast));
         kontrolaCellsContainer.removeAllViews();
 
-        List<CsvStore.Row> rows = csvStore.findRowsForObject(matched.tudu, objectLabel);
-        boolean boundary = isTuduBoundaryCast(parseInt(matched.cast, -1));
-        int maxCast = boundary ? CAST_TUDU_BOUNDARY : 3;
         Tudu.Vyhybka vyhybka = findVyhybkaForRow(matched);
-        for (CsvStore.Row row : rows) {
-            int cast = parseInt(row.cast, -1);
-            if (isTuduBoundaryCast(cast)) {
-                boundary = true;
-                maxCast = CAST_TUDU_BOUNDARY;
-            }
-            if (cast > 0 && cast != CAST_TUDU_BOUNDARY && cast > maxCast) {
-                maxCast = cast;
-            }
-        }
-        if (vyhybka != null) {
-            maxCast = Math.max(maxCast, vyhybka.resolvedCastMax());
-        }
-
-        if (boundary) {
-            CsvStore.Row boundaryRow = findRowForCastInList(rows, CAST_TUDU_BOUNDARY);
-            kontrolaCellsContainer.addView(
-                    buildKontrolaCell(CAST_TUDU_BOUNDARY, boundaryRow, vyhybka));
-        }
-        int upper = boundary ? Math.min(maxCast, 4) : maxCast;
-        for (int cast = 1; cast <= upper; cast++) {
-            if (cast == CAST_TUDU_BOUNDARY) continue;
-            CsvStore.Row row = findRowForCastInList(rows, cast);
-            kontrolaCellsContainer.addView(buildKontrolaCell(cast, row, vyhybka));
-        }
+        kontrolaCellsContainer.addView(buildKontrolaChipDetail(matched, vyhybka));
         tvKontrolaStatus.setVisibility(View.GONE);
     }
 
-    private static CsvStore.Row findRowForCastInList(List<CsvStore.Row> rows, int cast) {
-        for (CsvStore.Row row : rows) {
-            if (parseInt(row.cast, -1) == cast) return row;
-        }
-        return null;
-    }
-
-    private View buildKontrolaCell(int cast, CsvStore.Row row, Tudu.Vyhybka vyhybka) {
+    private View buildKontrolaChipDetail(CsvStore.Row row, Tudu.Vyhybka vyhybka) {
         View cell = getLayoutInflater().inflate(R.layout.item_kontrola_cell, kontrolaCellsContainer, false);
         TextView title = cell.findViewById(R.id.tvKontrolaCellTitle);
-        TextView value = cell.findViewById(R.id.tvKontrolaCellValue);
         TextView detail = cell.findViewById(R.id.tvKontrolaCellDetail);
 
-        String castName = kontrolaCastPartName(cast, vyhybka);
-        title.setText("čip " + cast + " · " + castName);
-        if (row == null) {
-            value.setText(getString(R.string.kontrola_empty_cell));
-            detail.setVisibility(View.GONE);
-        } else {
-            String obj = row.vyhybka != null && !row.vyhybka.isEmpty()
-                    ? row.vyhybka
-                    : String.valueOf(parseInt(row.vyhybka, 0));
-            value.setText(obj);
-            String kmExt = row.kmExt != null ? row.kmExt : "";
-            String poloha = row.poloha != null ? row.poloha : "";
-            if (kmExt.isEmpty() && poloha.isEmpty()) {
-                detail.setVisibility(View.GONE);
-            } else {
-                detail.setVisibility(View.VISIBLE);
-                detail.setText(getString(R.string.kontrola_cell_detail,
-                        kmExt.isEmpty() ? "—" : kmExt,
-                        poloha.isEmpty() ? "—" : poloha));
-            }
-        }
+        int cast = parseInt(row.cast, 0);
+        title.setText(getString(R.string.kontrola_chip_header, cast));
+        detail.setText(buildKontrolaFieldLines(row, vyhybka));
         return cell;
+    }
+
+    private String buildKontrolaFieldLines(CsvStore.Row row, Tudu.Vyhybka vyhybka) {
+        int cast = parseInt(row.cast, 0);
+        String empty = getString(R.string.kontrola_empty_value);
+        StringBuilder lines = new StringBuilder();
+        appendKontrolaField(lines, getString(R.string.kontrola_field_chlivecky),
+                kontrolaCastPartName(cast, vyhybka));
+        appendKontrolaField(lines, "ID_RFID", row.idRfid);
+        appendKontrolaField(lines, "EPC", row.epc);
+        appendKontrolaField(lines, "TID", row.tid);
+        appendKontrolaField(lines, "TUDU", row.tudu);
+        appendKontrolaField(lines, "POZICE", row.cast);
+        appendKontrolaField(lines, "POLOHA", row.poloha);
+        appendKontrolaField(lines, "RO_ID_1", row.roId1);
+        appendKontrolaField(lines, "RO_ID_2", row.roId2);
+        appendKontrolaField(lines, "KM_EXT", row.kmExt);
+        if (lines.length() > 0 && lines.charAt(lines.length() - 1) == '\n') {
+            lines.setLength(lines.length() - 1);
+        }
+        return lines.length() == 0 ? empty : lines.toString();
+    }
+
+    private void appendKontrolaField(StringBuilder lines, String label, String value) {
+        String display = value != null && !value.trim().isEmpty()
+                ? value.trim()
+                : getString(R.string.kontrola_empty_value);
+        lines.append(getString(R.string.kontrola_field_line, label, display)).append('\n');
     }
 
     private String kontrolaCastPartName(int cast, Tudu.Vyhybka vyhybka) {

@@ -7,4 +7,8 @@
     <dimen name="cast_branch_button_min_width">88dp</dimen>
     <!-- Stejná šířka obou presetů výkonu – text se nezkracuje ani nesroluje. -->
     <dimen name="power_preset_button_min_width">96dp</dimen>
+    <!-- Chainway C5 – kompaktní dialog hranice TUDU -->
+    <dimen name="tudu_boundary_dialog_max_height">380dp</dimen>
+    <dimen name="tudu_boundary_card_padding">10dp</dimen>
+    <dimen name="tudu_boundary_step_padding">10dp</dimen>
 </resources>
