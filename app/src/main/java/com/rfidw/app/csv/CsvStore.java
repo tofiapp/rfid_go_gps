@@ -143,19 +143,30 @@ public class CsvStore {
 
     /** Najde řádek podle EPC nebo TID načteného tagu. */
     public synchronized Row findRowByTag(String epcHex, String tidHex) {
+        List<Row> matches = findAllRowsByTag(epcHex, tidHex);
+        return matches.isEmpty() ? null : matches.get(0);
+    }
+
+    /** Všechny řádky odpovídající EPC nebo TID (v pořadí zápisu). */
+    public synchronized List<Row> findAllRowsByTag(String epcHex, String tidHex) {
+        LinkedHashMap<String, Row> byId = new LinkedHashMap<>();
         String normEpc = normalizeHex(epcHex);
         String normTid = normalizeHex(tidHex);
         if (!normEpc.isEmpty()) {
             for (Row r : rows.values()) {
-                if (normEpc.equalsIgnoreCase(normalizeHex(r.epc))) return r;
+                if (normEpc.equalsIgnoreCase(normalizeHex(r.epc))) {
+                    byId.put(r.idRfid, r);
+                }
             }
         }
         if (!normTid.isEmpty()) {
             for (Row r : rows.values()) {
-                if (normTid.equalsIgnoreCase(normalizeHex(r.tid))) return r;
+                if (normTid.equalsIgnoreCase(normalizeHex(r.tid))) {
+                    byId.put(r.idRfid, r);
+                }
             }
         }
-        return null;
+        return new ArrayList<>(byId.values());
     }
 
     /** Všechny řádky CSV pro daný TUDU a objekt (výhybku). */

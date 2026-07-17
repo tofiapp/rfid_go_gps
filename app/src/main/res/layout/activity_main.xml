@@ -1016,6 +1016,45 @@
                 android:textStyle="bold"
                 android:visibility="gone"/>
 
+            <LinearLayout
+                android:id="@+id/kontrolaMatchNav"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="center"
+                android:orientation="horizontal"
+                android:visibility="gone">
+
+                <ImageButton
+                    android:id="@+id/btnKontrolaMatchPrev"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/kontrola_match_prev"
+                    android:padding="8dp"
+                    android:src="@android:drawable/ic_media_previous"
+                    app:tint="@color/primary_dark"/>
+
+                <TextView
+                    android:id="@+id/tvKontrolaMatchIndex"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:layout_marginEnd="12dp"
+                    android:textColor="@color/text_muted"
+                    android:textSize="14sp"/>
+
+                <ImageButton
+                    android:id="@+id/btnKontrolaMatchNext"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/kontrola_match_next"
+                    android:padding="8dp"
+                    android:src="@android:drawable/ic_media_next"
+                    app:tint="@color/primary_dark"/>
+            </LinearLayout>
+
             <TextView
                 android:id="@+id/tvKontrolaPrompt"
                 android:layout_width="match_parent"
