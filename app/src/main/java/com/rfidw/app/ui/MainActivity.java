@@ -27,6 +27,7 @@ import android.text.Spanned;
 import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.text.style.ForegroundColorSpan;
+import android.text.style.StrikethroughSpan;
 import android.text.style.StyleSpan;
 import android.util.Log;
 import android.util.TypedValue;
@@ -38,7 +39,6 @@ import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
-import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
@@ -204,7 +204,7 @@ public class MainActivity extends AppCompatActivity {
             tvCard1DbProgress, tvDbIndexProgress,
             tvWriteResult, tvCsvPath, tvPwdWriteResult, tvLockResult,
             tvSummaryTudu, tvSummaryVyhybka, tvSummaryCast,
-            tvCastHintAction, tvCastHintPart,
+            tvCastHintAction, tvCastHintPart, tvCastHintUsedLegend,
             tvScanDoneVyhybka, tvScanDoneCast,
             tvLastRecordVyhybka, tvLastRecordCast,
             step1Circle, step2Circle, step3Circle, step1Label, step2Label;
@@ -338,6 +338,7 @@ public class MainActivity extends AppCompatActivity {
         castHintBox = findViewById(R.id.castHintBox);
         tvCastHintAction = findViewById(R.id.tvCastHintAction);
         tvCastHintPart = findViewById(R.id.tvCastHintPart);
+        tvCastHintUsedLegend = findViewById(R.id.tvCastHintUsedLegend);
         summary1 = findViewById(R.id.summary1);
         colSummaryTudu = findViewById(R.id.colSummaryTudu);
         colSummaryVyhybka = findViewById(R.id.colSummaryVyhybka);
@@ -1971,6 +1972,7 @@ public class MainActivity extends AppCompatActivity {
         tvLastRecordCast.setText(castSpan);
 
         lastRecordBox.setVisibility(View.VISIBLE);
+        lastRecordBox.bringToFront();
     }
 
     private static boolean hasLastRecordObjekt(CsvStore.Row row) {
@@ -2035,6 +2037,7 @@ public class MainActivity extends AppCompatActivity {
         if (tuduBoundaryMode || currentVyhybka == null || epc.cast <= 0) {
             castHintBox.setVisibility(View.GONE);
             if (castBranchGroup != null) castBranchGroup.setVisibility(View.GONE);
+            if (tvCastHintUsedLegend != null) tvCastHintUsedLegend.setVisibility(View.GONE);
             if (!workflowRunning) {
                 updateWorkflowStepIndicatorsVisibility();
             }
@@ -2044,6 +2047,7 @@ public class MainActivity extends AppCompatActivity {
         if (castCount != 3 && castCount != 4) {
             castHintBox.setVisibility(View.GONE);
             if (castBranchGroup != null) castBranchGroup.setVisibility(View.GONE);
+            if (tvCastHintUsedLegend != null) tvCastHintUsedLegend.setVisibility(View.GONE);
             if (!workflowRunning) {
                 updateWorkflowStepIndicatorsVisibility();
             }
@@ -2057,6 +2061,7 @@ public class MainActivity extends AppCompatActivity {
         if (partName == null) {
             castHintBox.setVisibility(View.GONE);
             if (castBranchGroup != null) castBranchGroup.setVisibility(View.GONE);
+            if (tvCastHintUsedLegend != null) tvCastHintUsedLegend.setVisibility(View.GONE);
             if (!workflowRunning) {
                 updateWorkflowStepIndicatorsVisibility();
             }
@@ -2096,6 +2101,7 @@ public class MainActivity extends AppCompatActivity {
             tvCastHintPart.setVisibility(View.VISIBLE);
             tvCastHintPart.setText(partName);
             castBranchGroup.setVisibility(View.GONE);
+            if (tvCastHintUsedLegend != null) tvCastHintUsedLegend.setVisibility(View.GONE);
         }
         castHintBox.setVisibility(View.VISIBLE);
         if (!workflowRunning) {
@@ -2219,7 +2225,11 @@ public class MainActivity extends AppCompatActivity {
         showOverlayScrimBehindTopBar();
         scanDoneScrim.animate().alpha(1f).setDuration(200).start();
         deleteConfirmDialog.setVisibility(View.VISIBLE);
+        deleteConfirmDialog.bringToFront();
         deleteConfirmDialog.animate().alpha(1f).setDuration(200).start();
+        if (backPressedCallback != null) {
+            backPressedCallback.setEnabled(true);
+        }
     }
 
     private void onDeleteConfirmYes() {
@@ -2864,8 +2874,9 @@ public class MainActivity extends AppCompatActivity {
         refreshCsvTable();
         io.execute(() -> {
             try {
-                csvStore.upsertAndPersist(row);
-                ui.post(this::refreshCsvTable);
+                // Jen persist – upsert už proběhl na UI vlákně. upsertAndPersist by po
+                // smazání posledního záznamu mohl řádek znovu vložit z fronty IO úloh.
+                csvStore.persist();
             } catch (Exception e) {
                 ui.post(() -> toast("CSV uložení: " + e.getMessage()));
             }
@@ -3005,17 +3016,40 @@ public class MainActivity extends AppCompatActivity {
     private void updateCastPartButtonStates() {
         if (!isDualRoVyhybka(currentVyhybka)) return;
         Set<CastPartType> used = getUsedCastPartTypes(epc.cast);
-        if (btnCastJazyk != null) {
-            btnCastJazyk.setEnabled(!used.contains(CastPartType.JAZYK));
-        }
-        if (btnCastHlavni != null) {
-            btnCastHlavni.setEnabled(!used.contains(CastPartType.HLAVNI));
-        }
-        if (btnCastVedlejsi != null) {
-            btnCastVedlejsi.setEnabled(!used.contains(CastPartType.VEDLEJSI));
+        applyCastBranchButtonState(btnCastJazyk, CastPartType.JAZYK, used);
+        applyCastBranchButtonState(btnCastHlavni, CastPartType.HLAVNI, used);
+        applyCastBranchButtonState(btnCastVedlejsi, CastPartType.VEDLEJSI, used);
+        if (tvCastHintUsedLegend != null) {
+            tvCastHintUsedLegend.setVisibility(used.isEmpty() ? View.GONE : View.VISIBLE);
         }
         if (isCastPartTypeSelected() && !isCastPartTypeAvailable(selectedCastPartType)) {
             clearCastPartSelection();
+        }
+    }
+
+    private void applyCastBranchButtonState(
+            MaterialButton button, CastPartType type, Set<CastPartType> used) {
+        if (button == null) return;
+        boolean available = !used.contains(type);
+        button.setEnabled(available);
+        button.setAlpha(available ? 1f : 0.55f);
+        String label = castBranchButtonLabel(type);
+        if (!available) {
+            SpannableString span = new SpannableString(label);
+            span.setSpan(new StrikethroughSpan(), 0, label.length(),
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            button.setText(span);
+        } else {
+            button.setText(label);
+        }
+    }
+
+    private String castBranchButtonLabel(CastPartType type) {
+        switch (type) {
+            case JAZYK: return getString(R.string.cast_part_1);
+            case HLAVNI: return getString(R.string.cast_branch_hlavni);
+            case VEDLEJSI: return getString(R.string.cast_branch_vedlejsi);
+            default: return "";
         }
     }
 
@@ -4284,9 +4318,15 @@ public class MainActivity extends AppCompatActivity {
         syncCurrentVyhybka();
         if (tuduBoundaryMode) {
             lastCastHintCast = -1;
-        } else if (currentVyhybka != null) {
+        } else if (currentVyhybka != null && currentTudu != null) {
             lastCastHintCast = -1;
-            advanceCastAndVyhybka();
+            resetCastBranchSelection();
+            int nextCast = firstMissingCast(currentTudu.code, currentVyhybka);
+            if (nextCast > currentVyhybka.resolvedCastMax()) {
+                advanceToNextVyhybka();
+            } else {
+                epc.cast = nextCast;
+            }
         } else {
             pendingAdvanceFromCsv = true;
         }
@@ -4295,6 +4335,7 @@ public class MainActivity extends AppCompatActivity {
         updateSummary1();
         resetTagWorkflow();
         resyncCastRangeFromPersistedState();
+        updateCastHint();
         if (!tuduBoundaryMode && gpsAutoSelection && dzsDatabase != null) {
             forceNextGpsLookup = true;
             lastGpsLookupLat = null;
@@ -4355,16 +4396,25 @@ public class MainActivity extends AppCompatActivity {
             toast("Tabulka se ještě načítá");
             return;
         }
-        CsvStore.Row last = csvStore.removeLast();
-        if (last == null) {
-            toast("Tabulka je prázdná");
-            return;
-        }
-        persistCsvAsync();
-        refreshCsvTable();
-        restoreStateAfterCsvRemoval();
-        updateLastRecordPreview();
-        toast("Poslední záznam vymazán");
+        io.execute(() -> {
+            CsvStore.Row removed = csvStore.removeLast();
+            if (removed == null) {
+                ui.post(() -> toast("Tabulka je prázdná"));
+                return;
+            }
+            try {
+                csvStore.persist();
+            } catch (Exception e) {
+                ui.post(() -> toast("CSV uložení: " + e.getMessage()));
+                return;
+            }
+            ui.post(() -> {
+                refreshCsvTable();
+                restoreStateAfterCsvRemoval();
+                updateLastRecordPreview();
+                toast("Poslední záznam vymazán");
+            });
+        });
     }
 
     // ---------- zápis EPC ----------
@@ -5374,45 +5424,35 @@ public class MainActivity extends AppCompatActivity {
         tvKontrolaHeader.setText(getString(R.string.kontrola_chip_header, cast));
         kontrolaCellsContainer.removeAllViews();
 
-        HorizontalScrollView scroll = new HorizontalScrollView(this);
-        scroll.setLayoutParams(new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-        scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        scroll.setFillViewport(true);
+        addKontrolaFieldCell(kontrolaCellsContainer, "ID_RFID", matched.idRfid, false);
+        addKontrolaFieldCell(kontrolaCellsContainer, "EPC", matched.epc, true);
+        addKontrolaFieldCell(kontrolaCellsContainer, "TID", matched.tid, true);
+        addKontrolaFieldCell(kontrolaCellsContainer, "TUDU", matched.tudu, false);
+        addKontrolaFieldCell(kontrolaCellsContainer, "POZICE", matched.cast, false);
+        addKontrolaFieldCell(kontrolaCellsContainer, "POLOHA", matched.poloha, false);
+        addKontrolaFieldCell(kontrolaCellsContainer, "RO_ID_1", matched.roId1, false);
+        addKontrolaFieldCell(kontrolaCellsContainer, "RO_ID_2", matched.roId2, false);
+        addKontrolaFieldCell(kontrolaCellsContainer, "KM_EXT", matched.kmExt, false);
 
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setLayoutParams(new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT));
-
-        addKontrolaFieldCell(row, "ID_RFID", matched.idRfid, false);
-        addKontrolaFieldCell(row, "EPC", matched.epc, true);
-        addKontrolaFieldCell(row, "TID", matched.tid, true);
-        addKontrolaFieldCell(row, "TUDU", matched.tudu, false);
-        addKontrolaFieldCell(row, "POZICE", matched.cast, false);
-        addKontrolaFieldCell(row, "POLOHA", matched.poloha, false);
-        addKontrolaFieldCell(row, "RO_ID_1", matched.roId1, false);
-        addKontrolaFieldCell(row, "RO_ID_2", matched.roId2, false);
-        addKontrolaFieldCell(row, "KM_EXT", matched.kmExt, false);
-
-        scroll.addView(row);
-        kontrolaCellsContainer.addView(scroll);
         tvKontrolaStatus.setVisibility(View.GONE);
     }
 
-    private void addKontrolaFieldCell(LinearLayout row, String label, String value, boolean monospace) {
-        View cell = getLayoutInflater().inflate(R.layout.item_kontrola_field, row, false);
+    private void addKontrolaFieldCell(LinearLayout container, String label, String value,
+            boolean monospace) {
+        View cell = getLayoutInflater().inflate(R.layout.item_kontrola_field, container, false);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        cell.setLayoutParams(lp);
         TextView labelView = cell.findViewById(R.id.tvKontrolaFieldLabel);
         TextView valueView = cell.findViewById(R.id.tvKontrolaFieldValue);
         labelView.setText(label);
         valueView.setText(kontrolaDisplayValue(value));
         if (monospace) {
             valueView.setTypeface(Typeface.MONOSPACE);
-            valueView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f);
+            valueView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
         }
-        row.addView(cell);
+        container.addView(cell);
     }
 
     private String kontrolaDisplayValue(String value) {

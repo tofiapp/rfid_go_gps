@@ -376,10 +376,10 @@
                             android:paddingStart="12dp"
                             android:paddingEnd="12dp"
                             android:text="@string/cast_part_1"
-                            android:textColor="@color/power_preset_text_color"
+                            android:textColor="@color/cast_branch_text_color"
                             android:textSize="12sp"
-                            app:backgroundTint="@color/power_preset_background_tint"
-                            app:strokeColor="@color/power_preset_stroke"
+                            app:backgroundTint="@color/cast_branch_background_tint"
+                            app:strokeColor="@color/cast_branch_stroke"
                             app:strokeWidth="1dp"/>
 
                         <com.google.android.material.button.MaterialButton
@@ -392,10 +392,10 @@
                             android:paddingStart="12dp"
                             android:paddingEnd="12dp"
                             android:text="@string/cast_branch_hlavni"
-                            android:textColor="@color/power_preset_text_color"
+                            android:textColor="@color/cast_branch_text_color"
                             android:textSize="12sp"
-                            app:backgroundTint="@color/power_preset_background_tint"
-                            app:strokeColor="@color/power_preset_stroke"
+                            app:backgroundTint="@color/cast_branch_background_tint"
+                            app:strokeColor="@color/cast_branch_stroke"
                             app:strokeWidth="1dp"/>
 
                         <com.google.android.material.button.MaterialButton
@@ -408,12 +408,24 @@
                             android:paddingStart="12dp"
                             android:paddingEnd="12dp"
                             android:text="@string/cast_branch_vedlejsi"
-                            android:textColor="@color/power_preset_text_color"
+                            android:textColor="@color/cast_branch_text_color"
                             android:textSize="12sp"
-                            app:backgroundTint="@color/power_preset_background_tint"
-                            app:strokeColor="@color/power_preset_stroke"
+                            app:backgroundTint="@color/cast_branch_background_tint"
+                            app:strokeColor="@color/cast_branch_stroke"
                             app:strokeWidth="1dp"/>
                     </com.google.android.material.button.MaterialButtonToggleGroup>
+
+                    <TextView
+                        android:id="@+id/tvCastHintUsedLegend"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:gravity="center"
+                        android:text="@string/cast_branch_used_legend"
+                        android:textColor="@color/err"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        android:visibility="gone"/>
                 </LinearLayout>
             </LinearLayout>
 
@@ -427,82 +439,6 @@
 
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
-
-    <!-- Poslední záznam nad spodním panelem -->
-    <LinearLayout
-        android:id="@+id/lastRecordBox"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
-        android:layout_marginStart="12dp"
-        android:layout_marginEnd="12dp"
-        android:layout_marginBottom="64dp"
-        android:background="@drawable/card_bg"
-        android:elevation="8dp"
-        android:orientation="vertical"
-        android:padding="12dp"
-        android:visibility="gone">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/last_record_label"
-                android:textColor="@color/text_muted"
-                android:textSize="11sp"
-                android:textStyle="bold"/>
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnDeleteLastRecord"
-                style="@style/Widget.RfidGo.DeleteButtonCompact"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/btn_delete_short"/>
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:background="@drawable/last_record_bg"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:padding="10dp">
-
-            <TextView
-                android:id="@+id/tvLastRecordVyhybka"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:gravity="center"
-                android:textColor="@color/primary_dark"
-                android:textSize="14sp"
-                android:textStyle="bold"/>
-
-            <View
-                android:layout_width="1dp"
-                android:layout_height="28dp"
-                android:layout_marginStart="8dp"
-                android:layout_marginEnd="8dp"
-                android:background="@color/last_record_stroke"/>
-
-            <TextView
-                android:id="@+id/tvLastRecordCast"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:gravity="center"
-                android:textColor="@color/primary_dark"
-                android:textSize="14sp"
-                android:textStyle="bold"/>
-        </LinearLayout>
-    </LinearLayout>
 
     <!-- Hlavička + indikátor kroků -->
     <LinearLayout
@@ -815,6 +751,84 @@
 
     </LinearLayout>
 
+    <!-- Poslední záznam – nad spodním panelem, vyšší elevation než workflowSheet -->
+    <LinearLayout
+        android:id="@+id/lastRecordBox"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="64dp"
+        android:background="@drawable/card_bg"
+        android:clickable="true"
+        android:elevation="36dp"
+        android:focusable="true"
+        android:orientation="vertical"
+        android:padding="12dp"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/last_record_label"
+                android:textColor="@color/text_muted"
+                android:textSize="11sp"
+                android:textStyle="bold"/>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnDeleteLastRecord"
+                style="@style/Widget.RfidGo.DeleteButtonCompact"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/btn_delete_short"/>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/last_record_bg"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:padding="10dp">
+
+            <TextView
+                android:id="@+id/tvLastRecordVyhybka"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:textColor="@color/primary_dark"
+                android:textSize="14sp"
+                android:textStyle="bold"/>
+
+            <View
+                android:layout_width="1dp"
+                android:layout_height="28dp"
+                android:layout_marginStart="8dp"
+                android:layout_marginEnd="8dp"
+                android:background="@color/last_record_stroke"/>
+
+            <TextView
+                android:id="@+id/tvLastRecordCast"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:textColor="@color/primary_dark"
+                android:textSize="14sp"
+                android:textStyle="bold"/>
+        </LinearLayout>
+    </LinearLayout>
+
     <!-- Ztmavení pod horní lištou při velké notifikaci (panel Pokročilé sbalený) -->
     <View
         android:id="@+id/scanDoneScrim"
@@ -1029,15 +1043,19 @@
                 android:orientation="horizontal"
                 android:visibility="gone">
 
-                <ImageButton
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnKontrolaMatchPrev"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="@string/kontrola_match_prev"
-                    android:padding="8dp"
-                    android:src="@android:drawable/ic_media_previous"
-                    app:tint="@color/primary_dark"/>
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minHeight="40dp"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="@string/kontrola_match_prev"
+                    android:textColor="@color/primary_dark"
+                    android:textSize="12sp"
+                    app:strokeColor="@color/primary"
+                    app:strokeWidth="1dp"/>
 
                 <TextView
                     android:id="@+id/tvKontrolaMatchIndex"
@@ -1045,18 +1063,30 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="12dp"
                     android:layout_marginEnd="12dp"
-                    android:textColor="@color/text_muted"
-                    android:textSize="14sp"/>
+                    android:background="@drawable/summary_bg"
+                    android:gravity="center"
+                    android:minWidth="56dp"
+                    android:paddingStart="10dp"
+                    android:paddingTop="6dp"
+                    android:paddingEnd="10dp"
+                    android:paddingBottom="6dp"
+                    android:textColor="@color/primary_dark"
+                    android:textSize="14sp"
+                    android:textStyle="bold"/>
 
-                <ImageButton
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnKontrolaMatchNext"
-                    android:layout_width="48dp"
-                    android:layout_height="48dp"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="@string/kontrola_match_next"
-                    android:padding="8dp"
-                    android:src="@android:drawable/ic_media_next"
-                    app:tint="@color/primary_dark"/>
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minHeight="40dp"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="@string/kontrola_match_next"
+                    android:textColor="@color/primary_dark"
+                    android:textSize="12sp"
+                    app:strokeColor="@color/primary"
+                    app:strokeWidth="1dp"/>
             </LinearLayout>
 
             <TextView
