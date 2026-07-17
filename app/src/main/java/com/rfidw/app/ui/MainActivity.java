@@ -256,6 +256,8 @@ public class MainActivity extends AppCompatActivity {
     private int lastChip1WriteCount = 1;
     private Boolean powerPresetInKoleji;
     private Boolean kontrolaPowerPresetInKoleji;
+    private boolean classicPowerPresetsWereEnabled;
+    private boolean suppressPowerPresetListener;
     private boolean showGpsStatus;
     private boolean gpsUnavailableToastShown;
     private int lastTopBarHeight = -1;
@@ -1870,6 +1872,12 @@ public class MainActivity extends AppCompatActivity {
                 showClassicPresets, classicEnabled, true);
         syncPowerPresetToggleGroup(kontrolaPowerPresetGroup, kontrolaPowerPresetInKoleji,
                 kontrolaActive, kontrolaActive, false);
+        boolean wasClassicEnabled = classicPowerPresetsWereEnabled;
+        classicPowerPresetsWereEnabled = classicEnabled;
+        if (classicEnabled && !wasClassicEnabled
+                && powerPresetInKoleji != null && !kontrolaActive) {
+            applySelectedPowerPreset(powerPresetInKoleji);
+        }
     }
 
     private void syncPowerPresetToggleGroup(MaterialButtonToggleGroup group,
@@ -1880,10 +1888,8 @@ public class MainActivity extends AppCompatActivity {
         for (int i = 0; i < group.getChildCount(); i++) {
             group.getChildAt(i).setEnabled(enabled);
         }
-        if (!enabled && clearWhenDisabled) {
-            if (group == powerPresetGroup) {
-                powerPresetInKoleji = null;
-            }
+        if (clearWhenDisabled && group == powerPresetGroup && !step1Done) {
+            powerPresetInKoleji = null;
             group.clearChecked();
             group.setSelectionRequired(false);
             return;
@@ -1891,9 +1897,20 @@ public class MainActivity extends AppCompatActivity {
         if (presetInKoleji != null) {
             int checkedId = resolvePowerPresetButtonId(group, presetInKoleji);
             if (checkedId != View.NO_ID && group.getCheckedButtonId() != checkedId) {
-                group.check(checkedId);
+                checkPowerPresetButton(group, checkedId);
             }
             group.setSelectionRequired(true);
+        } else {
+            group.setSelectionRequired(false);
+        }
+    }
+
+    private void checkPowerPresetButton(MaterialButtonToggleGroup group, int checkedId) {
+        suppressPowerPresetListener = true;
+        try {
+            group.check(checkedId);
+        } finally {
+            suppressPowerPresetListener = false;
         }
     }
 
@@ -2927,12 +2944,12 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.btnTuduBoundary).setOnClickListener(v -> showTuduBoundaryForm());
 
         powerPresetGroup.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
-            if (!isChecked) return;
+            if (!isChecked || suppressPowerPresetListener) return;
             onClassicPowerPresetSelected(checkedId == R.id.btnPowerPresetKoleji);
         });
         if (kontrolaPowerPresetGroup != null) {
             kontrolaPowerPresetGroup.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
-                if (!isChecked) return;
+                if (!isChecked || suppressPowerPresetListener) return;
                 onKontrolaPowerPresetSelected(checkedId == R.id.btnKontrolaPowerPresetKoleji);
             });
         }
@@ -5511,7 +5528,7 @@ public class MainActivity extends AppCompatActivity {
         kontrolaCellsContainer.removeAllViews();
 
         addKontrolaFieldCell(kontrolaCellsContainer, "EPC", matched.epc, true, true);
-        addKontrolaFieldCell(kontrolaCellsContainer, "TID", matched.tid, true, true);
+        addKontrolaFieldCell(kontrolaCellsContainer, "TID", matched.tid, true, false);
         addKontrolaFieldPair(kontrolaCellsContainer,
                 "TUDU", matched.tudu, false,
                 "OBJEKT", matched.vyhybka, true);
@@ -5556,8 +5573,10 @@ public class MainActivity extends AppCompatActivity {
             valueView.setTextColor(ContextCompat.getColor(this, R.color.kontrola_tag_highlight));
         }
         if (monospace) {
-            valueView.setTypeface(Typeface.MONOSPACE);
+            valueView.setTypeface(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD));
             valueView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
+        } else {
+            valueView.setTypeface(Typeface.DEFAULT_BOLD);
         }
     }
 
