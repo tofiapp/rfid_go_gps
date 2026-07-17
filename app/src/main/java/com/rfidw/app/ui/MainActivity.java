@@ -204,7 +204,7 @@ public class MainActivity extends AppCompatActivity {
             tvCard1DbProgress, tvDbIndexProgress,
             tvWriteResult, tvCsvPath, tvPwdWriteResult, tvLockResult,
             tvSummaryTudu, tvSummaryVyhybka, tvSummaryCast,
-            tvCastHintAction, tvCastHintPart, tvCastHintUsedLegend,
+            tvCastHintAction, tvCastHintPart,
             tvScanDoneVyhybka, tvScanDoneCast,
             tvLastRecordVyhybka, tvLastRecordCast,
             step1Circle, step2Circle, step3Circle, step1Label, step2Label;
@@ -338,7 +338,6 @@ public class MainActivity extends AppCompatActivity {
         castHintBox = findViewById(R.id.castHintBox);
         tvCastHintAction = findViewById(R.id.tvCastHintAction);
         tvCastHintPart = findViewById(R.id.tvCastHintPart);
-        tvCastHintUsedLegend = findViewById(R.id.tvCastHintUsedLegend);
         summary1 = findViewById(R.id.summary1);
         colSummaryTudu = findViewById(R.id.colSummaryTudu);
         colSummaryVyhybka = findViewById(R.id.colSummaryVyhybka);
@@ -2037,7 +2036,6 @@ public class MainActivity extends AppCompatActivity {
         if (tuduBoundaryMode || currentVyhybka == null || epc.cast <= 0) {
             castHintBox.setVisibility(View.GONE);
             if (castBranchGroup != null) castBranchGroup.setVisibility(View.GONE);
-            if (tvCastHintUsedLegend != null) tvCastHintUsedLegend.setVisibility(View.GONE);
             if (!workflowRunning) {
                 updateWorkflowStepIndicatorsVisibility();
             }
@@ -2047,7 +2045,6 @@ public class MainActivity extends AppCompatActivity {
         if (castCount != 3 && castCount != 4) {
             castHintBox.setVisibility(View.GONE);
             if (castBranchGroup != null) castBranchGroup.setVisibility(View.GONE);
-            if (tvCastHintUsedLegend != null) tvCastHintUsedLegend.setVisibility(View.GONE);
             if (!workflowRunning) {
                 updateWorkflowStepIndicatorsVisibility();
             }
@@ -2061,7 +2058,6 @@ public class MainActivity extends AppCompatActivity {
         if (partName == null) {
             castHintBox.setVisibility(View.GONE);
             if (castBranchGroup != null) castBranchGroup.setVisibility(View.GONE);
-            if (tvCastHintUsedLegend != null) tvCastHintUsedLegend.setVisibility(View.GONE);
             if (!workflowRunning) {
                 updateWorkflowStepIndicatorsVisibility();
             }
@@ -2101,7 +2097,6 @@ public class MainActivity extends AppCompatActivity {
             tvCastHintPart.setVisibility(View.VISIBLE);
             tvCastHintPart.setText(partName);
             castBranchGroup.setVisibility(View.GONE);
-            if (tvCastHintUsedLegend != null) tvCastHintUsedLegend.setVisibility(View.GONE);
         }
         castHintBox.setVisibility(View.VISIBLE);
         if (!workflowRunning) {
@@ -3019,9 +3014,6 @@ public class MainActivity extends AppCompatActivity {
         applyCastBranchButtonState(btnCastJazyk, CastPartType.JAZYK, used);
         applyCastBranchButtonState(btnCastHlavni, CastPartType.HLAVNI, used);
         applyCastBranchButtonState(btnCastVedlejsi, CastPartType.VEDLEJSI, used);
-        if (tvCastHintUsedLegend != null) {
-            tvCastHintUsedLegend.setVisibility(used.isEmpty() ? View.GONE : View.VISIBLE);
-        }
         if (isCastPartTypeSelected() && !isCastPartTypeAvailable(selectedCastPartType)) {
             clearCastPartSelection();
         }
@@ -3036,6 +3028,9 @@ public class MainActivity extends AppCompatActivity {
         String label = castBranchButtonLabel(type);
         if (!available) {
             SpannableString span = new SpannableString(label);
+            int muted = ContextCompat.getColor(this, R.color.text_muted);
+            span.setSpan(new ForegroundColorSpan(muted), 0, label.length(),
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             span.setSpan(new StrikethroughSpan(), 0, label.length(),
                     Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             button.setText(span);
@@ -5401,8 +5396,14 @@ public class MainActivity extends AppCompatActivity {
                 getString(R.string.kontrola_match_index, kontrolaMatchIndex + 1, count));
         View prev = findViewById(R.id.btnKontrolaMatchPrev);
         View next = findViewById(R.id.btnKontrolaMatchNext);
-        if (prev != null) prev.setEnabled(kontrolaMatchIndex > 0);
-        if (next != null) next.setEnabled(kontrolaMatchIndex < count - 1);
+        if (prev != null) {
+            prev.setEnabled(kontrolaMatchIndex > 0);
+            prev.setAlpha(kontrolaMatchIndex > 0 ? 1f : 0.35f);
+        }
+        if (next != null) {
+            next.setEnabled(kontrolaMatchIndex < count - 1);
+            next.setAlpha(kontrolaMatchIndex < count - 1 ? 1f : 0.35f);
+        }
     }
 
     private void showPreviousKontrolaMatch() {
@@ -5421,24 +5422,28 @@ public class MainActivity extends AppCompatActivity {
         tvKontrolaPrompt.setVisibility(View.GONE);
         tvKontrolaHeader.setVisibility(View.VISIBLE);
         int cast = parseInt(matched.cast, 0);
-        tvKontrolaHeader.setText(getString(R.string.kontrola_chip_header, cast));
+        String idRfid = matched.idRfid != null ? matched.idRfid.trim() : "";
+        if (!idRfid.isEmpty()) {
+            tvKontrolaHeader.setText(idRfid);
+        } else {
+            tvKontrolaHeader.setText(getString(R.string.kontrola_chip_header, cast));
+        }
         kontrolaCellsContainer.removeAllViews();
 
-        addKontrolaFieldCell(kontrolaCellsContainer, "ID_RFID", matched.idRfid, false);
-        addKontrolaFieldCell(kontrolaCellsContainer, "EPC", matched.epc, true);
-        addKontrolaFieldCell(kontrolaCellsContainer, "TID", matched.tid, true);
-        addKontrolaFieldCell(kontrolaCellsContainer, "TUDU", matched.tudu, false);
-        addKontrolaFieldCell(kontrolaCellsContainer, "POZICE", matched.cast, false);
-        addKontrolaFieldCell(kontrolaCellsContainer, "POLOHA", matched.poloha, false);
-        addKontrolaFieldCell(kontrolaCellsContainer, "RO_ID_1", matched.roId1, false);
-        addKontrolaFieldCell(kontrolaCellsContainer, "RO_ID_2", matched.roId2, false);
-        addKontrolaFieldCell(kontrolaCellsContainer, "KM_EXT", matched.kmExt, false);
+        addKontrolaFieldCell(kontrolaCellsContainer, "EPC", matched.epc, true, true);
+        addKontrolaFieldCell(kontrolaCellsContainer, "TID", matched.tid, true, true);
+        addKontrolaFieldCell(kontrolaCellsContainer, "TUDU", matched.tudu, false, false);
+        addKontrolaFieldCell(kontrolaCellsContainer, "POZICE", matched.cast, false, false);
+        addKontrolaFieldCell(kontrolaCellsContainer, "POLOHA", matched.poloha, false, false);
+        addKontrolaFieldCell(kontrolaCellsContainer, "RO_ID_1", matched.roId1, false, false);
+        addKontrolaFieldCell(kontrolaCellsContainer, "RO_ID_2", matched.roId2, false, false);
+        addKontrolaFieldCell(kontrolaCellsContainer, "KM_EXT", matched.kmExt, false, false);
 
         tvKontrolaStatus.setVisibility(View.GONE);
     }
 
     private void addKontrolaFieldCell(LinearLayout container, String label, String value,
-            boolean monospace) {
+            boolean monospace, boolean tagHighlight) {
         View cell = getLayoutInflater().inflate(R.layout.item_kontrola_field, container, false);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -5448,6 +5453,11 @@ public class MainActivity extends AppCompatActivity {
         TextView valueView = cell.findViewById(R.id.tvKontrolaFieldValue);
         labelView.setText(label);
         valueView.setText(kontrolaDisplayValue(value));
+        if (tagHighlight) {
+            cell.setBackgroundResource(R.drawable.epc_bg);
+            labelView.setTextColor(ContextCompat.getColor(this, R.color.epc_highlight_label));
+            valueView.setTextColor(ContextCompat.getColor(this, R.color.epc_highlight));
+        }
         if (monospace) {
             valueView.setTypeface(Typeface.MONOSPACE);
             valueView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);

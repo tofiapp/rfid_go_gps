@@ -415,17 +415,6 @@
                             app:strokeWidth="1dp"/>
                     </com.google.android.material.button.MaterialButtonToggleGroup>
 
-                    <TextView
-                        android:id="@+id/tvCastHintUsedLegend"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:gravity="center"
-                        android:text="@string/cast_branch_used_legend"
-                        android:textColor="@color/err"
-                        android:textSize="11sp"
-                        android:textStyle="bold"
-                        android:visibility="gone"/>
                 </LinearLayout>
             </LinearLayout>
 
@@ -435,7 +424,11 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="12dp"
-                android:text="@string/kontrola_btn"/>
+                android:backgroundTint="@color/card"
+                android:text="@string/kontrola_btn"
+                android:textColor="@color/primary_dark"
+                app:strokeColor="#E2E6EB"
+                app:strokeWidth="1dp"/>
 
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
@@ -1043,50 +1036,39 @@
                 android:orientation="horizontal"
                 android:visibility="gone">
 
-                <com.google.android.material.button.MaterialButton
+                <ImageButton
                     android:id="@+id/btnKontrolaMatchPrev"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:minHeight="40dp"
-                    android:paddingStart="12dp"
-                    android:paddingEnd="12dp"
-                    android:text="@string/kontrola_match_prev"
-                    android:textColor="@color/primary_dark"
-                    android:textSize="12sp"
-                    app:strokeColor="@color/primary"
-                    app:strokeWidth="1dp"/>
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="@drawable/kontrola_nav_btn_bg"
+                    android:contentDescription="@string/kontrola_match_prev"
+                    android:padding="8dp"
+                    android:scaleType="centerInside"
+                    android:src="@drawable/ic_chevron_left"
+                    app:tint="@color/primary_dark"/>
 
                 <TextView
                     android:id="@+id/tvKontrolaMatchIndex"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="12dp"
-                    android:layout_marginEnd="12dp"
-                    android:background="@drawable/summary_bg"
+                    android:layout_marginStart="16dp"
+                    android:layout_marginEnd="16dp"
                     android:gravity="center"
-                    android:minWidth="56dp"
-                    android:paddingStart="10dp"
-                    android:paddingTop="6dp"
-                    android:paddingEnd="10dp"
-                    android:paddingBottom="6dp"
-                    android:textColor="@color/primary_dark"
+                    android:minWidth="48dp"
+                    android:textColor="@color/text_muted"
                     android:textSize="14sp"
                     android:textStyle="bold"/>
 
-                <com.google.android.material.button.MaterialButton
+                <ImageButton
                     android:id="@+id/btnKontrolaMatchNext"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:minHeight="40dp"
-                    android:paddingStart="12dp"
-                    android:paddingEnd="12dp"
-                    android:text="@string/kontrola_match_next"
-                    android:textColor="@color/primary_dark"
-                    android:textSize="12sp"
-                    app:strokeColor="@color/primary"
-                    app:strokeWidth="1dp"/>
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="@drawable/kontrola_nav_btn_bg"
+                    android:contentDescription="@string/kontrola_match_next"
+                    android:padding="8dp"
+                    android:scaleType="centerInside"
+                    android:src="@drawable/ic_chevron_right"
+                    app:tint="@color/primary_dark"/>
             </LinearLayout>
 
             <TextView
