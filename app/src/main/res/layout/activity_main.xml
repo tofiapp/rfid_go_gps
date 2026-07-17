@@ -69,15 +69,16 @@
                         style="@style/Widget.Material3.Button.OutlinedButton"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:minHeight="32dp"
+                        android:checkable="true"
+                        android:minHeight="34dp"
                         android:paddingStart="8dp"
                         android:paddingEnd="8dp"
                         android:text="@string/gps_reload_location"
-                        android:textColor="@color/primary"
+                        android:textColor="@color/power_preset_text_color"
                         android:textSize="11sp"
                         android:visibility="gone"
-                        app:backgroundTint="@android:color/transparent"
-                        app:strokeColor="@color/primary"
+                        app:backgroundTint="@color/power_preset_background_tint"
+                        app:strokeColor="@color/power_preset_stroke"
                         app:strokeWidth="1dp"/>
                 </LinearLayout>
 

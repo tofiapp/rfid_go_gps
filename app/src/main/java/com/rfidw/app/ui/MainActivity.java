@@ -1344,12 +1344,13 @@ public class MainActivity extends AppCompatActivity {
     private void setupGpsReloadLocation() {
         if (btnGpsReloadLocation == null) return;
         btnGpsReloadLocation.setOnClickListener(v -> onGpsReloadLocation());
-        updateGpsReloadButtonVisibility();
+        updateGpsReloadButton();
     }
 
-    private void updateGpsReloadButtonVisibility() {
+    private void updateGpsReloadButton() {
         if (btnGpsReloadLocation == null) return;
         btnGpsReloadLocation.setVisibility(gpsAutoSelection ? View.VISIBLE : View.GONE);
+        btnGpsReloadLocation.setChecked(gpsAutoSelection);
     }
 
     private void onGpsReloadLocation() {
@@ -1865,7 +1866,7 @@ public class MainActivity extends AppCompatActivity {
                 kontrolaPowerPresetInKoleji = false;
             }
         }
-        boolean classicEnabled = step1Done && !gpsLookupInFlight;
+        boolean classicEnabled = step1Done;
         boolean showClassicPresets = !kontrolaActive
                 && (step1Done || !gpsAutoSelection || tuduBoundaryMode);
         syncPowerPresetToggleGroup(powerPresetGroup, powerPresetInKoleji,
@@ -1876,22 +1877,33 @@ public class MainActivity extends AppCompatActivity {
         classicPowerPresetsWereEnabled = classicEnabled;
         if (classicEnabled && !wasClassicEnabled
                 && powerPresetInKoleji != null && !kontrolaActive) {
-            applySelectedPowerPreset(powerPresetInKoleji);
+            applySelectedPowerPreset(powerPresetInKoleji, false);
         }
     }
 
     private void syncPowerPresetToggleGroup(MaterialButtonToggleGroup group,
             Boolean presetInKoleji, boolean visible, boolean enabled, boolean clearWhenDisabled) {
         if (group == null) return;
-        group.setVisibility(visible ? View.VISIBLE : View.GONE);
-        group.setEnabled(enabled);
-        for (int i = 0; i < group.getChildCount(); i++) {
-            group.getChildAt(i).setEnabled(enabled);
+        int targetVisibility = visible ? View.VISIBLE : View.GONE;
+        if (group.getVisibility() != targetVisibility) {
+            group.setVisibility(targetVisibility);
+        }
+        if (group.isEnabled() != enabled) {
+            group.setEnabled(enabled);
+            for (int i = 0; i < group.getChildCount(); i++) {
+                group.getChildAt(i).setEnabled(enabled);
+            }
         }
         if (clearWhenDisabled && group == powerPresetGroup && !step1Done) {
-            powerPresetInKoleji = null;
-            group.clearChecked();
-            group.setSelectionRequired(false);
+            if (powerPresetInKoleji != null) {
+                powerPresetInKoleji = null;
+            }
+            if (group.getCheckedButtonId() != View.NO_ID) {
+                group.clearChecked();
+            }
+            if (group.isSelectionRequired()) {
+                group.setSelectionRequired(false);
+            }
             return;
         }
         if (presetInKoleji != null) {
@@ -1899,8 +1911,10 @@ public class MainActivity extends AppCompatActivity {
             if (checkedId != View.NO_ID && group.getCheckedButtonId() != checkedId) {
                 checkPowerPresetButton(group, checkedId);
             }
-            group.setSelectionRequired(true);
-        } else {
+            if (!group.isSelectionRequired()) {
+                group.setSelectionRequired(true);
+            }
+        } else if (group.isSelectionRequired()) {
             group.setSelectionRequired(false);
         }
     }
@@ -1967,6 +1981,7 @@ public class MainActivity extends AppCompatActivity {
             tvSummaryCast.setText("—");
         }
         updateCastHint();
+        updateGpsReloadButton();
     }
 
     private void updateLastRecordPreview() {
@@ -3257,7 +3272,7 @@ public class MainActivity extends AppCompatActivity {
         tvTuduModeHint.setText(gpsAutoSelection
                 ? getString(R.string.tudu_mode_gps_hint)
                 : getString(R.string.tudu_mode_manual_hint));
-        updateGpsReloadButtonVisibility();
+        updateGpsReloadButton();
     }
 
     private void onTuduModeChanged(boolean gpsMode) {
@@ -4502,19 +4517,25 @@ public class MainActivity extends AppCompatActivity {
     private void onClassicPowerPresetSelected(boolean inKoleji) {
         if (!step1Done || kontrolaActive) return;
         powerPresetInKoleji = inKoleji;
-        applySelectedPowerPreset(inKoleji);
+        applySelectedPowerPreset(inKoleji, true);
     }
 
     private void onKontrolaPowerPresetSelected(boolean inKoleji) {
         if (!kontrolaActive) return;
         kontrolaPowerPresetInKoleji = inKoleji;
-        applySelectedPowerPreset(inKoleji);
+        applySelectedPowerPreset(inKoleji, true);
     }
 
     private void applySelectedPowerPreset(boolean inKoleji) {
+        applySelectedPowerPreset(inKoleji, true);
+    }
+
+    private void applySelectedPowerPreset(boolean inKoleji, boolean refreshPresetUi) {
         int power = inKoleji ? POWER_PRESET_KOLEJI_DBM : POWER_PRESET_RUCE_DBM;
         etPower.setText(String.valueOf(power));
-        updatePowerPresetUi();
+        if (refreshPresetUi) {
+            updatePowerPresetUi();
+        }
         updateStepIndicators();
         if (!uhf.isReady()) {
             initReaderAsync();
