@@ -358,6 +358,8 @@ docs/
 
 | Dokument | Obsah |
 |----------|-------|
+| [`docs/RFID_Go_GPS_prirucka.pdf`](docs/RFID_Go_GPS_prirucka.pdf) | **PDF příručka pro běžné užívání** v terénu (tisk / sdílení) |
+| [`docs/prirucka-uzivatele.md`](docs/prirucka-uzivatele.md) | Zdroj příručky (Markdown); PDF: `python3 docs/generate_manual.py` |
 | [`README.md`](README.md) | Uživatelská dokumentace a přehled projektu (tento soubor) |
 | [`docs/INDEXACE_DZS.md`](docs/INDEXACE_DZS.md) | Technický popis indexace DZS *(část o plné indexaci je zastaralá – viz audit)* |
 | [`AGENTS.md`](AGENTS.md) | Poznámky pro vývoj v Cursor Cloud VM (JDK, SDK, build) |
