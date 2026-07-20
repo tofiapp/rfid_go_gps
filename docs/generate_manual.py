@@ -458,6 +458,13 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle]) -> list:
                     maxLineLength=110,
                 )
                 append_item(KeepTogether([block]))
+            elif lang == "mermaid":
+                append_item(
+                    Paragraph(
+                        "<i>Vizualizace (Mermaid diagram) – ekvivalent v tabulce nebo ASCII schématu níže.</i>",
+                        styles["quote"],
+                    )
+                )
             continue
 
         if line.strip() == "":

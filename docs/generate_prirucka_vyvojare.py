@@ -51,8 +51,8 @@ def main() -> None:
     story.append(Spacer(1, 1.5 * cm))
     story.append(
         Paragraph(
-            "Architektura, třídy, datové toky a implementační detaily kódu. "
-            "Určeno pro vývoj a údržbu – ne pro terénní provoz.",
+            "Architektura, stavové automaty, datové toky a reference tříd. "
+            "Začněte kapitolou 0 (jak číst) a kapitolou 1 (velký obraz).",
             styles["body"],
         )
     )
