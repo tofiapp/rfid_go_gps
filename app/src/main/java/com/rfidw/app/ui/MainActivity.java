@@ -1302,13 +1302,40 @@ public class MainActivity extends AppCompatActivity {
         exitTuduBoundaryMode();
         gpsTuduLocked = false;
         gpsVyhybkaLocked = false;
-        clearTuduBoundaryObjektLabels();
+        forceGpsLookupFromCurrentPosition();
+    }
+
+    /** Obnoví GPS fix a vynutí nový lookup TUDU/výhybky podle aktuální polohy. */
+    private void forceGpsLookupFromCurrentPosition() {
         gpsLookupNoMatch = false;
         forceNextGpsLookup = true;
         lastGpsLookupLat = null;
         lastGpsLookupLon = null;
         lastGpsLookupTimeMs = 0;
-        scheduleGpsTuduLookup();
+        ensureGpsForTuduLookup();
+    }
+
+    /**
+     * Po úspěšném zápisu tagu hranice TUDU ukončí režim čipu 5 a v GPS režimu
+     * automaticky najde nejbližší další výhybku. Mazání hranice z CSV zůstává
+     * v {@link #restoreStateAfterCsvRemoval()} – tam se režim obnoví podle posledního řádku.
+     */
+    private void finishTuduBoundaryWriteCycle() {
+        exitTuduBoundaryMode();
+        if (!gpsAutoSelection || dzsDatabase == null) {
+            updateStep1();
+            updateSummary1();
+            refreshTemplate();
+            return;
+        }
+        if (locationCache == null || !locationCache.getSnapshot().valid) {
+            toast(getString(R.string.tudu_picker_no_gps));
+            updateStep1();
+            updateSummary1();
+            refreshTemplate();
+            return;
+        }
+        forceGpsLookupFromCurrentPosition();
     }
 
     /**
@@ -2159,8 +2186,12 @@ public class MainActivity extends AppCompatActivity {
         if (!scanDoneAwaitingConfirm) return;
         scanDoneAwaitingConfirm = false;
         hideScanDoneNotification(() -> {
+            boolean wasBoundaryWrite = tuduBoundaryMode;
+            boolean boundaryCsvSaved = wasBoundaryWrite && cbAutoCsv.isChecked();
             onTagCycleComplete();
-            if (tuduBoundaryMode) {
+            if (boundaryCsvSaved) {
+                finishTuduBoundaryWriteCycle();
+            } else if (wasBoundaryWrite) {
                 clearTuduBoundaryObjektLabels();
             }
             updateLastRecordPreview();
@@ -4550,7 +4581,12 @@ public class MainActivity extends AppCompatActivity {
                 } else {
                     setWorkflowStepState(WF_STEP_CSV, WF_STATE_OK);
                 }
+                boolean wasBoundaryWrite = tuduBoundaryMode;
+                boolean boundaryCsvSaved = wasBoundaryWrite && cbAutoCsv.isChecked();
                 onTagCycleComplete();
+                if (boundaryCsvSaved) {
+                    finishTuduBoundaryWriteCycle();
+                }
                 setActionStatusReady();
             }
         } else {
