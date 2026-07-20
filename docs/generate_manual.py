@@ -19,6 +19,7 @@ from reportlab.platypus import (
     KeepTogether,
     PageBreak,
     Paragraph,
+    Preformatted,
     SimpleDocTemplate,
     Spacer,
     Table,
@@ -160,6 +161,19 @@ def build_styles(regular: str, bold: str, mono: str) -> dict[str, ParagraphStyle
             fontSize=9.5,
             leading=13,
             textColor=PRIMARY_DARK,
+        ),
+        "code": ParagraphStyle(
+            "code",
+            parent=base["Code"],
+            fontName=mono,
+            fontSize=8.5,
+            leading=11,
+            leftIndent=4,
+            backColor=colors.HexColor("#F5F5F5"),
+            borderColor=BORDER,
+            borderWidth=0.5,
+            borderPadding=6,
+            spaceAfter=8,
         ),
     }
 
@@ -426,6 +440,31 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle]) -> list:
                 quote_lines.append(lines[i].strip()[2:].strip())
                 i += 1
             append_item(Paragraph(inline_format(" ".join(quote_lines), "DejaVuMono"), styles["quote"]))
+            continue
+
+        if line.strip().startswith("```"):
+            lang = line.strip()[3:].strip().lower()
+            i += 1
+            code_lines: list[str] = []
+            while i < len(lines) and not lines[i].strip().startswith("```"):
+                code_lines.append(lines[i].rstrip())
+                i += 1
+            if i < len(lines):
+                i += 1
+            if code_lines and lang != "mermaid":
+                block = Preformatted(
+                    "\n".join(code_lines),
+                    styles["code"],
+                    maxLineLength=110,
+                )
+                append_item(KeepTogether([block]))
+            elif lang == "mermaid":
+                append_item(
+                    Paragraph(
+                        "<i>Vizualizace (Mermaid diagram) – ekvivalent v tabulce nebo ASCII schématu níže.</i>",
+                        styles["quote"],
+                    )
+                )
             continue
 
         if line.strip() == "":
