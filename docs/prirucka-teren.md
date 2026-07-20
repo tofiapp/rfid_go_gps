@@ -25,7 +25,7 @@ Tato příručka popisuje **každodenní práci v terénu** – načítání tag
 | Tři kroky nahoře | **UDU** → **Načtení** → **Hotovo** |
 | Čtyři tečky pod stavem | průběh zápisu tagu |
 | Karta UDU · výhybka | úsek, výhybka, tlačítka **V koleji** / **V ruce**, **Hranice TUDU** |
-| Nápověda uprostřed | který čip právě načítáte (jazyk, rameno, …) |
+| Nápověda uprostřed | který čip právě načítáte (jazyk, rovně, odbočka) |
 | Poslední záznam | co jste naposledy zapsali |
 
 ---
@@ -179,7 +179,7 @@ Potvrďte **Použít**.
 |-------|--------|
 | **UDU / TUDU** | Kód úseku tratě |
 | **Výhybka** | Číslo výhybky (např. 10A) |
-| **Čip** | Část výhybky – jazyk, rameno, … |
+| **Čip** | Část výhybky – jazyk, rovně nebo odbočka |
 | **Hranice TUDU** | Speciální zápis na hranici dvou úseků |
 | **CSV** | Tabulka se všemi záznamy (soubor ve Stažených souborech) |
 
