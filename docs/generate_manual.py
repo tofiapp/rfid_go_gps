@@ -25,7 +25,9 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-SUBSECTION_MIN_SPACE = 4 * cm
+FRAME_WIDTH = A4[0] - 4 * cm
+FRAME_HEIGHT = A4[1] - 2 * cm - 2.2 * cm
+SUBSECTION_START_MIN = 3 * cm
 
 ROOT = Path(__file__).resolve().parent
 MD_PATH = ROOT / "prirucka-uzivatele.md"
@@ -214,14 +216,20 @@ def parse_table(lines: list[str], styles: dict[str, ParagraphStyle]) -> Table:
     return table
 
 
-def _append_bullet_list(target: list, items: list[str], styles: dict[str, ParagraphStyle]) -> None:
+def _append_bullet_list(
+    target: list,
+    items: list[str],
+    styles: dict[str, ParagraphStyle],
+    *,
+    wrap_short: bool = True,
+) -> None:
     bullets = [
         Paragraph(f"• {inline_format(item, 'DejaVuMono')}", styles["bullet"])
         for item in items
     ]
     if not bullets:
         return
-    if len(bullets) <= 6:
+    if wrap_short and len(bullets) <= 6:
         target.append(KeepTogether(bullets))
     else:
         target.extend(bullets)
@@ -237,6 +245,74 @@ def _peek_next_content_line(lines: list[str], start: int) -> str | None:
     return None
 
 
+def _flatten_flowables(flowables: list) -> list:
+    flat: list = []
+    for item in flowables:
+        if isinstance(item, KeepTogether):
+            flat.extend(item._content)
+        else:
+            flat.append(item)
+    return flat
+
+
+def _estimate_height(flowables: list, width: float = FRAME_WIDTH) -> float:
+    total = 0.0
+    for item in _flatten_flowables(flowables):
+        if isinstance(item, Spacer):
+            total += item.height
+        else:
+            _, height = item.wrap(width, FRAME_HEIGHT)
+            total += height
+    return total
+
+
+def _pull_chapter_intro(flow: list) -> list:
+    intro: list = []
+    while flow:
+        item = flow[-1]
+        if isinstance(item, PageBreak):
+            break
+        intro.insert(0, flow.pop())
+    return intro
+
+
+def _append_atomic(flow: list, flowables: list) -> None:
+    flat = _flatten_flowables(flowables)
+    if not flat:
+        return
+    if len(flat) == 1 and isinstance(flat[0], Table):
+        flow.append(KeepTogether(flat))
+        return
+    if len(flat) >= 2:
+        flow.append(KeepTogether(flat[:2]))
+        for item in flat[2:]:
+            if isinstance(item, Table):
+                flow.append(KeepTogether([item]))
+            else:
+                flow.append(item)
+        return
+    flow.extend(flat)
+
+
+def _flush_subsection(flow: list, subsection: list | None, *, pull_intro: bool = False) -> None:
+    if not subsection:
+        return
+
+    prefix = _pull_chapter_intro(flow) if pull_intro else []
+    block = prefix + _flatten_flowables(subsection)
+    height = _estimate_height(block)
+
+    if height <= FRAME_HEIGHT:
+        flow.append(CondPageBreak(height))
+        flow.append(KeepTogether(block))
+        return
+
+    if prefix:
+        flow.extend(prefix)
+    flow.append(CondPageBreak(SUBSECTION_START_MIN))
+    _append_atomic(flow, subsection)
+
+
 def parse_markdown(md: str, styles: dict[str, ParagraphStyle]) -> list:
     flow: list = []
     lines = md.splitlines()
@@ -245,6 +321,13 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle]) -> list:
     skip_preamble = True
     first_chapter = True
     first_subsection_in_chapter = True
+    subsection: list | None = None
+
+    def append_item(item) -> None:
+        if subsection is not None:
+            subsection.append(item)
+        else:
+            flow.append(item)
 
     while i < len(lines):
         line = lines[i]
@@ -268,28 +351,29 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle]) -> list:
             if next_line and next_line.startswith("## "):
                 i += 1
                 continue
-            flow.append(Spacer(1, 4))
-            flow.append(HRFlowable(width="100%", thickness=0.5, color=BORDER, spaceBefore=4, spaceAfter=8))
+            append_item(Spacer(1, 4))
+            append_item(HRFlowable(width="100%", thickness=0.5, color=BORDER, spaceBefore=4, spaceAfter=8))
             i += 1
             continue
 
         if line.startswith("## "):
+            _flush_subsection(flow, subsection)
+            subsection = None
+            first_subsection_in_chapter = True
             if not first_chapter:
                 flow.append(PageBreak())
             else:
                 first_chapter = False
-            first_subsection_in_chapter = True
             flow.append(Paragraph(inline_format(line[3:].strip(), "DejaVuMono"), styles["h1"]))
             i += 1
             continue
 
         if line.startswith("### "):
-            if first_subsection_in_chapter:
-                flow.append(CondPageBreak(SUBSECTION_MIN_SPACE))
-                first_subsection_in_chapter = False
-            else:
-                flow.append(PageBreak())
-            flow.append(Paragraph(inline_format(line[4:].strip(), "DejaVuMono"), styles["h2"]))
+            _flush_subsection(flow, subsection, pull_intro=first_subsection_in_chapter)
+            first_subsection_in_chapter = False
+            subsection = [
+                Paragraph(inline_format(line[4:].strip(), "DejaVuMono"), styles["h2"]),
+            ]
             i += 1
             continue
 
@@ -298,8 +382,14 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle]) -> list:
             while i < len(lines) and lines[i].strip().startswith("|"):
                 table_lines.append(lines[i])
                 i += 1
-            flow.append(parse_table(table_lines, styles))
-            flow.append(Spacer(1, 8))
+            table = KeepTogether([parse_table(table_lines, styles)])
+            if subsection is not None:
+                subsection.append(table)
+                subsection.append(Spacer(1, 8))
+            else:
+                flow.append(table)
+                flow.append(Spacer(1, 8))
+            i += 1
             continue
 
         if re.match(r"^\d+\.\s", line.strip()):
@@ -307,7 +397,13 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle]) -> list:
             while i < len(lines) and re.match(r"^\d+\.\s", lines[i].strip()):
                 items.append(re.sub(r"^\d+\.\s*", "", lines[i].strip()))
                 i += 1
-            _append_bullet_list(flow, items, styles)
+            target = subsection if subsection is not None else flow
+            _append_bullet_list(
+                target,
+                items,
+                styles,
+                wrap_short=subsection is None,
+            )
             continue
 
         if line.strip().startswith("- "):
@@ -315,7 +411,13 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle]) -> list:
             while i < len(lines) and lines[i].strip().startswith("- "):
                 items.append(lines[i].strip()[2:].strip())
                 i += 1
-            _append_bullet_list(flow, items, styles)
+            target = subsection if subsection is not None else flow
+            _append_bullet_list(
+                target,
+                items,
+                styles,
+                wrap_short=subsection is None,
+            )
             continue
 
         if line.strip().startswith("> "):
@@ -323,7 +425,7 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle]) -> list:
             while i < len(lines) and lines[i].strip().startswith("> "):
                 quote_lines.append(lines[i].strip()[2:].strip())
                 i += 1
-            flow.append(Paragraph(inline_format(" ".join(quote_lines), "DejaVuMono"), styles["quote"]))
+            append_item(Paragraph(inline_format(" ".join(quote_lines), "DejaVuMono"), styles["quote"]))
             continue
 
         if line.strip() == "":
@@ -331,7 +433,7 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle]) -> list:
             continue
 
         if line.strip().startswith("*") and line.strip().endswith("*"):
-            flow.append(Paragraph(inline_format(line.strip().strip("*"), "DejaVuMono"), styles["footer"]))
+            append_item(Paragraph(inline_format(line.strip().strip("*"), "DejaVuMono"), styles["footer"]))
             i += 1
             continue
 
@@ -340,8 +442,9 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle]) -> list:
         while i < len(lines) and lines[i].strip() and not lines[i].startswith(("#", "|", "-", ">", "---")) and not re.match(r"^\d+\.\s", lines[i].strip()):
             para_lines.append(lines[i].strip())
             i += 1
-        flow.append(Paragraph(inline_format(" ".join(para_lines), "DejaVuMono"), styles["body"]))
+        append_item(Paragraph(inline_format(" ".join(para_lines), "DejaVuMono"), styles["body"]))
 
+    _flush_subsection(flow, subsection)
     return flow
 
 
