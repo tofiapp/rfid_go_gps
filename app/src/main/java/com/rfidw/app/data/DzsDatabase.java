@@ -673,21 +673,18 @@ public class DzsDatabase implements Closeable {
         return queryTuduListFromSql(null, null);
     }
 
-    /** Načte všechny podtypy TUDU pro danou stanici (UDU = prvních 5 znaků). */
+    /**
+     * Načte všechny podtypy TUDU pro danou stanici (UDU = prvních 5 znaků).
+     * Vždy přes SQL – index okolí GPS obsahuje jen výhybky s GPS v dosahu ~4 km.
+     */
     public List<Tudu> loadTuduForUdu(String udu) {
         if (udu == null || udu.trim().isEmpty()) {
             return Collections.emptyList();
         }
-        String trimmed = udu.trim();
-        if (!roByPairKey.isEmpty()) {
-            List<Tudu> fromMemory = buildTuduListFromRoIndexForUdu(trimmed);
-            if (!fromMemory.isEmpty()) {
-                return fromMemory;
-            }
-        }
-        return queryTuduListFromSql(null, trimmed);
+        return queryTuduListFromSql(null, udu.trim());
     }
 
+    /** Načte TUDU podle kódů vždy přes SQL (viz {@link #loadTuduForUdu(String)}). */
     public List<Tudu> loadTuduForCodes(Collection<String> codes) {
         if (codes == null || codes.isEmpty()) {
             return loadAllTudu();
@@ -701,58 +698,7 @@ public class DzsDatabase implements Closeable {
         if (wanted.isEmpty()) {
             return Collections.emptyList();
         }
-        List<Tudu> fromMemory = buildTuduListFromRoIndex(wanted);
-        if (coversAllCodes(fromMemory, wanted)) {
-            return fromMemory;
-        }
         return queryTuduListFromSql(wanted, null);
-    }
-
-    private static boolean coversAllCodes(List<Tudu> loaded, Set<String> wanted) {
-        if (loaded.isEmpty()) return false;
-        Set<String> found = new HashSet<>();
-        for (Tudu t : loaded) found.add(t.code);
-        return found.containsAll(wanted);
-    }
-
-    private List<Tudu> buildTuduListFromRoIndex(Set<String> codes) {
-        Map<String, Tudu> map = new LinkedHashMap<>();
-        for (List<RoIndexEntry> entries : roByPairKey.values()) {
-            for (RoIndexEntry ro : entries) {
-                if (codes != null && !codes.contains(ro.tudu)) continue;
-                addRoIndexEntryToTuduMap(map, ro);
-            }
-        }
-        return sortedTuduValues(map);
-    }
-
-    private List<Tudu> buildTuduListFromRoIndexForUdu(String uduCode) {
-        Map<String, Tudu> map = new LinkedHashMap<>();
-        for (List<RoIndexEntry> entries : roByPairKey.values()) {
-            for (RoIndexEntry ro : entries) {
-                if (!uduCode.equals(Tudu.uduCode(ro.tudu))) continue;
-                addRoIndexEntryToTuduMap(map, ro);
-            }
-        }
-        return sortedTuduValues(map);
-    }
-
-    private static void addRoIndexEntryToTuduMap(Map<String, Tudu> map, RoIndexEntry ro) {
-        Tudu tudu = map.get(ro.tudu);
-        if (tudu == null) {
-            tudu = new Tudu(ro.tudu);
-            map.put(ro.tudu, tudu);
-        }
-        Tudu.Vyhybka v = tudu.findOrCreate(ro.vyhybka, ro.iob);
-        if (ro.castMin != null) v.castMin = Math.min(v.castMin, ro.castMin);
-        if (ro.castMax != null) v.castMax = Math.max(v.castMax, ro.castMax);
-        v.addRoBranch(ro.roId, ro.poloha, ro.kmExtChip1, ro.kmExtOther);
-    }
-
-    private static List<Tudu> sortedTuduValues(Map<String, Tudu> map) {
-        List<Tudu> out = new ArrayList<>(map.values());
-        out.sort(Comparator.comparing(t -> t.code));
-        return out;
     }
 
     private List<Tudu> queryTuduListFromSql(Set<String> fullCodes, String uduCode) {
