@@ -249,7 +249,7 @@ public class MainActivity extends AppCompatActivity {
     private String tuduBoundaryVyhybkaLabel = "";
     private String tuduBoundaryKmExt = "";
 
-    /** Typ části dvojvětvé 3částové výhybky – nezávisí na pořadí čipu. */
+    /** Typ části 3částové výhybky – nezávisí na pořadí čipu (jazyk / rovně / odbočka). */
     private enum CastPartType { NONE, JAZYK, HLAVNI, VEDLEJSI }
     private int lastChip1WriteCount = 1;
     private Boolean powerPresetInKoleji;
@@ -2081,17 +2081,17 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         ensureVyhybkaRoBranches(currentTudu != null ? currentTudu.code : null, currentVyhybka);
-        boolean dualRo = isDualRoVyhybka(currentVyhybka);
-        String partName = dualRo
-                ? getString(R.string.cast_branch_select)
-                : castPartName(epc.cast);
-        if (partName == null) {
-            castHintBox.setVisibility(View.GONE);
-            if (castBranchGroup != null) castBranchGroup.setVisibility(View.GONE);
-            if (!workflowRunning) {
-                updateWorkflowStepIndicatorsVisibility();
+        boolean threePart = castCount == 3;
+        if (!threePart) {
+            String partName = castPartName(epc.cast);
+            if (partName == null) {
+                castHintBox.setVisibility(View.GONE);
+                if (castBranchGroup != null) castBranchGroup.setVisibility(View.GONE);
+                if (!workflowRunning) {
+                    updateWorkflowStepIndicatorsVisibility();
+                }
+                return;
             }
-            return;
         }
         String prefix = getString(R.string.cast_hint_prefix);
         String chipLabel = getString(R.string.cast_hint_chip);
@@ -2110,7 +2110,7 @@ public class MainActivity extends AppCompatActivity {
         applyVyhybkaAccent(span, vyhStart, vyhEnd);
 
         tvCastHintAction.setText(span);
-        if (dualRo) {
+        if (threePart) {
             tvCastHintPart.setVisibility(View.GONE);
             castBranchGroup.setVisibility(View.VISIBLE);
             if (epc.cast != lastCastHintCast) {
@@ -2125,7 +2125,7 @@ public class MainActivity extends AppCompatActivity {
         } else {
             lastCastHintCast = -1;
             tvCastHintPart.setVisibility(View.VISIBLE);
-            tvCastHintPart.setText(partName);
+            tvCastHintPart.setText(castPartName(epc.cast));
             castBranchGroup.setVisibility(View.GONE);
         }
         castHintBox.setVisibility(View.VISIBLE);
@@ -2296,8 +2296,8 @@ public class MainActivity extends AppCompatActivity {
         }
         switch (cast) {
             case 1: return getString(R.string.cast_part_1);
-            case 2: return getString(R.string.cast_part_2);
-            case 3: return getString(R.string.cast_part_3);
+            case 2: return getString(R.string.cast_branch_hlavni);
+            case 3: return getString(R.string.cast_branch_vedlejsi);
             default: return null;
         }
     }
@@ -2993,7 +2993,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean requiresCastBranchSelection() {
-        return !tuduBoundaryMode && currentVyhybka != null && isDualRoVyhybka(currentVyhybka);
+        return !tuduBoundaryMode && isThreePartVyhybka(currentVyhybka);
     }
 
     private boolean isCastPartTypeSelected() {
@@ -3054,7 +3054,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateCastPartButtonStates() {
-        if (!isDualRoVyhybka(currentVyhybka)) return;
+        if (!isThreePartVyhybka(currentVyhybka)) return;
         Set<CastPartType> used = getUsedCastPartTypes(epc.cast);
         applyCastBranchButtonState(btnCastJazyk, CastPartType.JAZYK, used);
         applyCastBranchButtonState(btnCastHlavni, CastPartType.HLAVNI, used);
@@ -3104,8 +3104,14 @@ public class MainActivity extends AppCompatActivity {
         boolean has1 = row.roId1 != null && !row.roId1.isEmpty();
         boolean has2 = row.roId2 != null && !row.roId2.isEmpty();
         if (has1 && has2) return CastPartType.JAZYK;
-        if (has1) return CastPartType.HLAVNI;
         if (has2) return CastPartType.VEDLEJSI;
+        if (has1 && Tudu.Vyhybka.RoBranch.isHlavniPoloha(row.poloha)) return CastPartType.HLAVNI;
+        if (has1) {
+            int cast = parseInt(row.cast, -1);
+            if (cast == 1) return CastPartType.JAZYK;
+            if (cast == 2) return CastPartType.HLAVNI;
+            if (cast == 3) return CastPartType.VEDLEJSI;
+        }
         if (row.poloha != null && !row.poloha.isEmpty()) {
             if (Tudu.Vyhybka.RoBranch.isHlavniPoloha(row.poloha)) return CastPartType.HLAVNI;
             if (Tudu.Vyhybka.RoBranch.isVedlejsiPoloha(row.poloha)) return CastPartType.VEDLEJSI;
@@ -3115,7 +3121,7 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean restoreCastPartFromCsv() {
         if (csvStore == null || currentTudu == null || currentVyhybka == null
-                || !isDualRoVyhybka(currentVyhybka)) {
+                || !isThreePartVyhybka(currentVyhybka)) {
             return false;
         }
         CsvStore.Row row = csvStore.findRowForCast(
@@ -3129,7 +3135,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void applyCastPartFromRow(CsvStore.Row row) {
         if (row == null || castBranchGroup == null || currentVyhybka == null
-                || !isDualRoVyhybka(currentVyhybka)) {
+                || !isThreePartVyhybka(currentVyhybka)) {
             return;
         }
         CastPartType type = castPartTypeFromRow(row);
@@ -3137,8 +3143,12 @@ public class MainActivity extends AppCompatActivity {
         applyCastPartType(type);
     }
 
+    private boolean isThreePartVyhybka(Tudu.Vyhybka v) {
+        return v != null && castCountFor(v) == 3;
+    }
+
     private boolean isDualRoVyhybka(Tudu.Vyhybka v) {
-        return v != null && castCountFor(v) == 3 && v.hasDualRoBranches();
+        return isThreePartVyhybka(v) && v.hasDualRoBranches();
     }
 
     private boolean isFourPartVyhybka(Tudu.Vyhybka v) {
@@ -3187,7 +3197,7 @@ public class MainActivity extends AppCompatActivity {
         }
         List<Tudu.Vyhybka.RoBranch> branches = currentVyhybka.getRoBranches();
         if (branches.isEmpty()) return null;
-        if (!isDualRoVyhybka(currentVyhybka)) {
+        if (!isThreePartVyhybka(currentVyhybka)) {
             return branches.get(0);
         }
         if (!isCastPartTypeSelected()) return null;
@@ -3205,7 +3215,7 @@ public class MainActivity extends AppCompatActivity {
                 if (b.isVedlejsi()) return b;
             }
         }
-        return branches.get(0);
+        return branches.isEmpty() ? null : branches.get(0);
     }
 
     private boolean hasCastWrittenOnAnyBranch(String tuduCode, Tudu.Vyhybka v, int cast) {
@@ -4422,7 +4432,7 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
             }
-            if (isDualRoVyhybka(currentVyhybka)) {
+            if (isThreePartVyhybka(currentVyhybka)) {
                 applyCastPartFromRow(row);
             }
         }
@@ -4735,10 +4745,10 @@ public class MainActivity extends AppCompatActivity {
             ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
             lastChip1WriteCount = 1;
 
-            boolean dualRo = isDualRoVyhybka(currentVyhybka);
-            Tudu.Vyhybka.RoBranch branch = dualRo && selectedCastPartType == CastPartType.JAZYK
+            boolean threePart = isThreePartVyhybka(currentVyhybka);
+            Tudu.Vyhybka.RoBranch branch = threePart && selectedCastPartType == CastPartType.JAZYK
                     ? null : resolveBranchForCast(cast);
-            if (dualRo && !isCastPartTypeSelected()) {
+            if (threePart && !isCastPartTypeSelected()) {
                 return false;
             }
             if (isFourPartVyhybka(currentVyhybka) && branch == null) {
@@ -4747,14 +4757,14 @@ public class MainActivity extends AppCompatActivity {
             if (isFourPartVyhybka(currentVyhybka) && branch == null) {
                 return false;
             }
-            if (!dualRo && cast >= 2 && branch == null) {
+            if (threePart && selectedCastPartType != CastPartType.JAZYK && branch == null) {
                 return false;
             }
-            if (dualRo && selectedCastPartType == CastPartType.HLAVNI
+            if (isDualRoVyhybka(currentVyhybka) && selectedCastPartType == CastPartType.HLAVNI
                     && currentVyhybka.findHlavniBranch() == null) {
                 return false;
             }
-            if (dualRo && selectedCastPartType == CastPartType.VEDLEJSI
+            if (isDualRoVyhybka(currentVyhybka) && selectedCastPartType == CastPartType.VEDLEJSI
                     && currentVyhybka.findVedlejsiBranch() == null) {
                 return false;
             }
@@ -4860,9 +4870,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * RO_ID_1 / RO_ID_2:
-     * jazyk u dvojvětvé výhybky vyplní oba sloupce (hlavní JAx/JCx, vedlejší JBx/JDx),
-     * hlavní jen RO_ID_1, vedlejší jen RO_ID_2 – nezávisle na pořadí čipu.
+     * RO_ID_1 / RO_ID_2 u 3částové výhybky:
+     * jazyk vyplní oba sloupce u dvojvětvé (JAx/JBx), u jednovětvé jen RO_ID_1;
+     * rovně jen RO_ID_1, odbočka jen RO_ID_2 – nezávisle na pořadí čipu.
      * 4částová: čipy 1–2 = RO_ID_1 z CA nebo CG, čipy 3–4 = RO_ID_2 z CB nebo CH.
      * KM_EXT: jazyk = KM_REF, hlavní/vedlejší = druhá hodnota z OD/DO.
      */
@@ -4884,10 +4894,19 @@ public class MainActivity extends AppCompatActivity {
         Tudu.Vyhybka.RoBranch vedlejsi = currentVyhybka.findVedlejsiBranch();
         String roId1 = "";
         String roId2 = "";
-        if (isDualRoVyhybka(currentVyhybka)) {
+        if (isThreePartVyhybka(currentVyhybka)) {
             if (selectedCastPartType == CastPartType.JAZYK) {
-                roId1 = hlavni != null ? hlavni.roId : "";
-                roId2 = vedlejsi != null ? vedlejsi.roId : "";
+                if (isDualRoVyhybka(currentVyhybka)) {
+                    roId1 = hlavni != null ? hlavni.roId : "";
+                    roId2 = vedlejsi != null ? vedlejsi.roId : "";
+                } else if (branch != null) {
+                    roId1 = branch.roId;
+                } else {
+                    List<Tudu.Vyhybka.RoBranch> branches = currentVyhybka.getRoBranches();
+                    if (!branches.isEmpty()) {
+                        roId1 = branches.get(0).roId;
+                    }
+                }
             } else if (branch != null) {
                 if (branch.isHlavni()) {
                     roId1 = branch.roId;
@@ -4897,7 +4916,7 @@ public class MainActivity extends AppCompatActivity {
                     roId1 = branch.roId;
                 }
             }
-            return new RoKmColumns(roId1, roId2, resolveKmExtForDualRo(selectedCastPartType, branch));
+            return new RoKmColumns(roId1, roId2, resolveKmExtForThreePart(selectedCastPartType, branch));
         }
         if (branch != null) {
             if (branch.isHlavni()) {
@@ -4921,8 +4940,8 @@ public class MainActivity extends AppCompatActivity {
         return branch.kmExtOther.isEmpty() ? branch.kmExtChip1 : branch.kmExtOther;
     }
 
-    /** KM_EXT pro dvojvětvou 3částovou výhybku podle zvoleného typu části. */
-    private String resolveKmExtForDualRo(CastPartType partType, Tudu.Vyhybka.RoBranch branch) {
+    /** KM_EXT pro 3částovou výhybku podle zvoleného typu části (jazyk / rovně / odbočka). */
+    private String resolveKmExtForThreePart(CastPartType partType, Tudu.Vyhybka.RoBranch branch) {
         if (partType == CastPartType.JAZYK) {
             return sharedKmExtChip1(currentVyhybka.getRoBranches());
         }
@@ -5092,7 +5111,7 @@ public class MainActivity extends AppCompatActivity {
             return castCountFor(v);
         }
         ensureVyhybkaRoBranches(tuduCode, v);
-        if (isDualRoVyhybka(v)) {
+        if (isThreePartVyhybka(v)) {
             int missing = 0;
             if (!hasCastWrittenOnAnyBranch(tuduCode, v, 1)) missing++;
             if (!hasCastWrittenOnAnyBranch(tuduCode, v, 2)) missing++;
@@ -5198,7 +5217,7 @@ public class MainActivity extends AppCompatActivity {
 
     private int firstMissingCast(String tuduCode, Tudu.Vyhybka v) {
         ensureVyhybkaRoBranches(tuduCode, v);
-        if (csvStore != null && isDualRoVyhybka(v)) {
+        if (csvStore != null && isThreePartVyhybka(v)) {
             if (!hasCastWrittenOnAnyBranch(tuduCode, v, 1)) return 1;
             if (!hasCastWrittenOnAnyBranch(tuduCode, v, 2)) return 2;
             if (!hasCastWrittenOnAnyBranch(tuduCode, v, 3)) return 3;

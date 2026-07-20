@@ -20,8 +20,8 @@
     <string name="cast_hint_chip">Čip\u00A0</string>
     <string name="cast_hint_comma_vyhybky">,\u00A0Výhybky\u00A0</string>
     <string name="cast_part_1">Jazyk</string>
-    <string name="cast_part_2">Levé rameno</string>
-    <string name="cast_part_3">Pravé rameno</string>
+    <string name="cast_part_2">Rovně</string>
+    <string name="cast_part_3">Odbočka</string>
     <string name="cast_branch_hlavni">Rovně</string>
     <string name="cast_branch_vedlejsi">Odbočka</string>
     <string name="cast_branch_select">Vyberte jazyk, rovně nebo odbočka</string>
