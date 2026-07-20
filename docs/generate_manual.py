@@ -14,7 +14,9 @@ from reportlab.lib.units import cm, mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
+    CondPageBreak,
     HRFlowable,
+    KeepTogether,
     PageBreak,
     Paragraph,
     SimpleDocTemplate,
@@ -22,6 +24,8 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+
+SUBSECTION_MIN_SPACE = 4 * cm
 
 ROOT = Path(__file__).resolve().parent
 MD_PATH = ROOT / "prirucka-uzivatele.md"
@@ -210,11 +214,37 @@ def parse_table(lines: list[str], styles: dict[str, ParagraphStyle]) -> Table:
     return table
 
 
+def _append_bullet_list(target: list, items: list[str], styles: dict[str, ParagraphStyle]) -> None:
+    bullets = [
+        Paragraph(f"• {inline_format(item, 'DejaVuMono')}", styles["bullet"])
+        for item in items
+    ]
+    if not bullets:
+        return
+    if len(bullets) <= 6:
+        target.append(KeepTogether(bullets))
+    else:
+        target.extend(bullets)
+    target.append(Spacer(1, 4))
+
+
+def _peek_next_content_line(lines: list[str], start: int) -> str | None:
+    for j in range(start, len(lines)):
+        stripped = lines[j].strip()
+        if stripped == "" or stripped == "---":
+            continue
+        return lines[j]
+    return None
+
+
 def parse_markdown(md: str, styles: dict[str, ParagraphStyle]) -> list:
     flow: list = []
     lines = md.splitlines()
     i = 0
     skip_title = True
+    skip_preamble = True
+    first_chapter = True
+    first_subsection_in_chapter = True
 
     while i < len(lines):
         line = lines[i]
@@ -224,18 +254,41 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle]) -> list:
             i += 1
             continue
 
+        if skip_preamble:
+            if line.startswith("## "):
+                skip_preamble = False
+            elif line.strip() == "" or line.startswith("---") or line.strip().startswith("**"):
+                i += 1
+                continue
+            else:
+                skip_preamble = False
+
         if line.startswith("---"):
+            next_line = _peek_next_content_line(lines, i + 1)
+            if next_line and next_line.startswith("## "):
+                i += 1
+                continue
             flow.append(Spacer(1, 4))
             flow.append(HRFlowable(width="100%", thickness=0.5, color=BORDER, spaceBefore=4, spaceAfter=8))
             i += 1
             continue
 
         if line.startswith("## "):
+            if not first_chapter:
+                flow.append(PageBreak())
+            else:
+                first_chapter = False
+            first_subsection_in_chapter = True
             flow.append(Paragraph(inline_format(line[3:].strip(), "DejaVuMono"), styles["h1"]))
             i += 1
             continue
 
         if line.startswith("### "):
+            if first_subsection_in_chapter:
+                flow.append(CondPageBreak(SUBSECTION_MIN_SPACE))
+                first_subsection_in_chapter = False
+            else:
+                flow.append(PageBreak())
             flow.append(Paragraph(inline_format(line[4:].strip(), "DejaVuMono"), styles["h2"]))
             i += 1
             continue
@@ -254,14 +307,7 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle]) -> list:
             while i < len(lines) and re.match(r"^\d+\.\s", lines[i].strip()):
                 items.append(re.sub(r"^\d+\.\s*", "", lines[i].strip()))
                 i += 1
-            for item in items:
-                flow.append(
-                    Paragraph(
-                        f"• {inline_format(item, 'DejaVuMono')}",
-                        styles["bullet"],
-                    )
-                )
-            flow.append(Spacer(1, 4))
+            _append_bullet_list(flow, items, styles)
             continue
 
         if line.strip().startswith("- "):
@@ -269,14 +315,7 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle]) -> list:
             while i < len(lines) and lines[i].strip().startswith("- "):
                 items.append(lines[i].strip()[2:].strip())
                 i += 1
-            for item in items:
-                flow.append(
-                    Paragraph(
-                        f"• {inline_format(item, 'DejaVuMono')}",
-                        styles["bullet"],
-                    )
-                )
-            flow.append(Spacer(1, 4))
+            _append_bullet_list(flow, items, styles)
             continue
 
         if line.strip().startswith("> "):
