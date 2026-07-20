@@ -53,34 +53,183 @@ Aplikace má **jednu hlavní obrazovku** a panel **Pokročilé** (vyjíždí zdo
 | Oblast | Co zobrazuje |
 |--------|----------------|
 | Horní lišta | Logo, výkon čtečky, stav operace, GPS souřadnice |
-| Indikátor 3 kroků | **UDU** → **Načtení** → **Hotovo** |
-| Pod-kroky zápisu | přepis EPC → zápis do CSV → zápis hesla → zamčení |
-| Karta UDU · výhybka | databáze, režim GPS/ručně, náhled výběru, výkon, tlačítko **Hranice TUDU** |
+| Indikátor 3 kroků | **UDU** → **Načtení** → **Hotovo** (barvy: šedá / modrá / zelená ✓ / oranžová upozornění / červená chyba) |
+| Pod-kroky zápisu | přepis EPC → zápis do CSV → zápis hesla → zamčení (tečky pod stavem čtečky) |
+| Karta UDU · výhybka | databáze, režim GPS/ručně, náhled výběru, výkon (**V koleji** / **V ruce**), tlačítko **Hranice TUDU** |
 | Nápověda čipu | jazyk / levé rameno / pravé rameno; u dvojvětvých výhybek **Rovně / Odbočka** |
 | Tlačítko **Kontrola** | ověření již zapsaného tagu |
-| Poslední záznam | náhled posledního řádku CSV |
-| Panel **Pokročilé** | tabulka CSV, ruční kroky, volitelná šablona EPC |
+| Poslední záznam | náhled posledního řádku CSV (s možností smazat) |
+| Panel **Pokročilé** | tabulka CSV (5 posledních záznamů), ruční kroky, volitelná šablona EPC |
+
+> Podrobný popis celého procesu načítání včetně barev indikátorů viz **kapitola 5**.
 
 ---
 
-## 5. Rychlý start v terénu
+## 5. Načítání tagů – průvodce krok za krokem
 
-Postup pro běžný zápis jednoho tagu:
+Tato kapitola popisuje celý proces **načítání (zápisu) tagu** v terénu – od zapnutí čtečky až po ověření záznamu. Průběh provází **indikátory kroků** v horní části obrazovky; barvy řádků režimu a postupu ukazují, co je hotové, co čeká a kde nastala chyba.
+
+### 5.1 Zapnutí a příprava (ne první spuštění)
+
+Pokud už máte databázi ve Stažených souborech a aplikaci jste dříve používali, při běžném startu **nečekáte na výběr databáze** – ta se načte automaticky. Po zapnutí:
+
+1. Počkejte na **GPS fix** (souřadnice v horní liště, např. `49.1951° 16.6084° ±6m`).
+2. Aplikace podle polohy **indexuje okolí 4 km** v databázi DZS (průběh uvidíte v kartě UDU · výhybka).
+3. Jakmile je index hotový, GPS automaticky doplní **UDU** a **nejbližší výhybku** v náhledovém panelu.
+
+> **Tip:** Bez GPS fixu se okolí 4 km neindexuje a UDU/výhybku nelze určit automaticky – vyjděte na volné místo nebo použijte **Testovací režim GPS** (viz kapitola 9).
+
+### 5.2 Indikátory kroků a barev
+
+Na obrazovce sledujte **dva související indikátory**:
+
+#### Hlavní kroky (řádek UDU → Načtení → Hotovo)
+
+| Krok | Název | Význam |
+|------|-------|--------|
+| **1** | **UDU** | Je vybrán UDU a výhybka (nebo objekt u hranice TUDU) |
+| **2** | **Načtení** | Probíhá nebo proběhlo načtení tagu spouštěm |
+| **3** | **Hotovo** | Zápis byl úspěšný – zobrazil se dialog **„Načetli jste“** |
+
+**Barvy kruhů a popisků:**
+
+| Barva | Význam |
+|-------|--------|
+| **Šedá** | Krok ještě neproběhl |
+| **Modrá** | Krok právě probíhá |
+| **Zelená** ✓ | Krok úspěšně dokončen |
+| **Oranžová** | Upozornění – něco chybí (např. není vybrán režim čtení) |
+| **Červená** | Chyba při načítání – zkuste znovu |
+
+Typické stavy:
+
+- Krok **1 oranžový** → čeká se na GPS a doplnění UDU/výhybky, nebo je potřeba výběr ručně.
+- Krok **2 oranžový** → UDU je v pořádku, ale **nevybrali jste režim čtení** (viz 5.3) – bez něj spouště nefunguje.
+- Krok **2 červený** → zápis selhal (např. chyba EPC, hesla nebo zamčení).
+- Krok **3 zelený** ✓ → zobrazil se dialog **„Načetli jste“** s číslem výhybky a části čipu.
+
+#### Pod-kroky zápisu (čtyři tečky pod stavem čtečky)
+
+Po výběru režimu čtení se při načítání zobrazí čtyři pod-kroky:
+
+**Přepis EPC** → **Zápis do CSV** → **Zápis hesla** → **Zamčení**
+
+| Barva tečky | Význam |
+|-------------|--------|
+| Šedá | Čeká na provedení |
+| Modrá | Právě probíhá |
+| Zelená | Úspěšně dokončeno |
+| Červená | Selhalo – stav se střídá s chybovou hláškou (např. *„Načtěte znovu“*, *„Chyba hesla“*) |
+
+### 5.3 Výběr režimu čtení (povinný před načtením)
+
+Před prvním načtením tagu **musíte zvolit režim výkonu** v kartě UDU · výhybka:
+
+| Tlačítko v aplikaci | Význam | Kdy použít |
+|---------------------|--------|------------|
+| **🛤 V koleji** (16 dBm) | Čtení **z dálky** – tag je v koleji, čtečka je dál | Tag je připevněný na výhybce v koleji |
+| **✋ V ruce** (1 dBm) | Čtení **z blízka** – držíte tag v ruce u antény | Tag držíte v ruce při zápisu |
+
+> **Poznámka:** Názvy tlačítek se mohou v budoucí verzi změnit na **Z dálky** / **Z blízka** – význam zůstává stejný.
+
+**Bez výběru režimu nelze načítat** – krok 2 zůstane oranžový a při stisku spouště se zobrazí upozornění.
+
+### 5.4 Určení UDU a výhybky
+
+#### Automaticky z GPS (výchozí)
+
+- Po získání polohy aplikace najde **nejbližší výhybku** a příslušný **UDU**.
+- Hodnoty se zobrazí v **náhledovém panelu** (klepnutím na UDU nebo výhybku je lze změnit).
+
+#### Ruční oprava výběru
+
+- **Výhybka není přesná** → klepněte na náhled **výhybky** (nebo rozbalte kartu UDU · výhybka) a vyberte správnou výhybku ze seznamu. U každé položky uvidíte vzdálenost od GPS; u nedokončených výhybek i **kolik čipů ještě chybí** (např. *„Chybí 2 čipy“*).
+- **Výhybka bez GPS v databázi** → v seznamu je označena jako **„Bez GPS“**; vyhledejte ji ručně (pole hledání nahoře v dialogu).
+- Po ruční změně výhybky se **automatická aktualizace z GPS vypne**, dokud nekliknete **Načíst polohu** (nebo dokud nedokončíte všechny čipy u aktuální výhybky).
+
+#### Režim Ručně
+
+Přepínač **GPS / Ručně** v kartě UDU · výhybka – UDU i výhybku vyberete vždy ze seznamu (vhodné bez signálu GPS).
+
+### 5.5 Kolik čipů načítat
+
+| Typ výhybky | Počet čipů | Části |
+|-------------|------------|-------|
+| **Klasická 3částová** | 3 | **Jazyk**, **Levé rameno**, **Pravé rameno** |
+| **3částová dvojvětvá** | 3 | U čipů 2–3 navíc volba **Rovně** / **Odbočka** |
+| **Křižovatková 4částová** | 4 | Konkrétní kódy podle databáze (CA/CB, CG/CH, …) |
+
+- Při výběru výhybky se automaticky nastaví **první chybějící čip** (podle existujícího CSV).
+- Výhybky, u kterých jsou **všechny čipy zapsané**, jsou v seznamu **zašedlé** a nejdou vybrat.
+
+### 5.6 Výběr části při načítání
+
+Nad tlačítkem Kontrola se zobrazí **nápověda k aktuálnímu čipu**:
+
+- U **klasické výhybky** uvidíte text typu *„Načtěte čip 2, výhybky 10“* a pod ním název části (**Jazyk**, **Levé rameno**, …).
+- U **dvojvětvé výhybky** u čipů 2–3 **vyberte před načtením** tlačítkem **Jazyk**, **Rovně** nebo **Odbočka**. Přeškrtnuté možnosti jsou již zapsané u jiného čipu.
+- U **4částové výhybky** se název části doplní automaticky podle čísla čipu.
+
+### 5.7 Přeskakování mezi výhybkami
+
+Během načítání můžete **kdykoli přepnout na jinou výhybku** – klepněte na náhled výhybky a vyberte jinou z nedokončených. V seznamu u každé výhybky uvidíte, **kolik čipů ještě zbývá**. Aplikace si pamatuje, které čipy už jsou v CSV zapsané.
+
+### 5.8 Hranice TUDU (čip 5)
+
+Pro tag na **hranici TUDU** (mimo běžný cyklus výhybky):
+
+1. Klepněte na **Hranice TUDU** v kartě UDU · výhybka.
+2. Vyplňte **TUDU** – ručně, nebo tlačítkem **Vybrat TUDU z okolí** (10 nejbližších podle GPS).
+3. **Povinně vyplňte číslo objektu** (kolej / výhybka), kde se čip nachází.
+4. Volitelně doplňte **KM_EXT**.
+5. Po potvrzení aplikace přepne do režimu **čip 5** – v náhledu se místo výhybky zobrazuje **objekt**.
+6. Zvolte režim čtení a načtěte tag spouštěm stejně jako u běžného čipu.
+
+Režim hranice TUDU skončí při ruční změně UDU/výhybky nebo po kliknutí **Načíst polohu**.
+
+### 5.9 Jak poznat úspěšný zápis
+
+**Záznam byl úspěšný teprve tehdy, když se zobrazí dialog „Načetli jste“** s číslem výhybky (nebo objektu) a číslem části čipu.
+
+- **Pokračovat** – přejde na další chybějící čip (lze potvrdit i spouštěm).
+- **Opakovat** – zopakuje zápis stejného čipu (např. když byl tag špatně přiložen).
+
+Pokud se dialog **neobjevil**, zápis neproběhl – podívejte se na barvy pod-kroků (červená = chyba) a zkuste znovu.
+
+> **Tip:** Když se tag nedaří načíst, zkoušejte ho přiložit **z různých stran** a případně přepněte režim **V koleji** ↔ **V ruce**. U již zamčeného tagu s jiným heslem aplikace zkusí známá preset hesla automaticky.
+
+### 5.10 Poslední záznam a historie
+
+| Kde | Co uvidíte |
+|-----|------------|
+| **Karta Poslední záznam** (nad panelem Pokročilé) | Náhled posledního zápisu – výhybka a čip. Tlačítko **Smazat** zruší poslední řádek CSV a vrátí stav předchozího zápisu. |
+| **Pokročilé → karta 3. Tabulka CSV** | Až **5 posledních záznamů** se všemi sloupci (EPC, TID, TUDU, OBJEKT, POZICE, POLOHA, KM_EXT, GPS, …). Úplný soubor je v `Download/rfid_go_gps_output.csv`. |
+
+### 5.11 Shrnutí – rychlý postup jednoho tagu
+
+1. Zapněte aplikaci → počkejte na **GPS** a **index okolí 4 km**.
+2. Zkontrolujte **UDU** a **výhybku** (případně opravte ručně).
+3. Zvolte **V koleji** nebo **V ruce**.
+4. U dvojvětvé výhybky zvolte **Jazyk / Rovně / Odbočka** (pokud je potřeba).
+5. Přiložte tag a stiskněte **spouště**.
+6. Po dialogu **„Načetli jste“** zvolte **Pokračovat** a přejděte na další čip.
+
+---
+
+## 6. Rychlý start v terénu
+
+Zkrácený postup pro běžný zápis jednoho tagu (podrobnosti viz kapitola 5):
 
 1. Ověřte, že je načtena databáze a máte GPS fix.
 2. Zkontrolujte **UDU**, **výhybku** a **čip** v náhledovém panelu.
-3. Zvolte výkon:
-   - **V koleji** (16 dBm) – tag je v koleji,
-   - **V ruce** (1 dBm) – držíte tag v ruce.
+3. Zvolte výkon **V koleji** (z dálky) nebo **V ruce** (z blízka).
 4. U dvojvětvých 3částových výhybek u čipů 2–3 zvolte **Rovně** nebo **Odbočka**.
 5. Přiložte tag ke čtečce a stiskněte **spouště čtečky**.
-6. Po dokončení se zobrazí dialog **„Načetli jste“** – zvolte:
-   - **Pokračovat** – přejde na další čip (lze potvrdit i spouštěm),
-   - **Opakovat** – zopakuje zápis stejného čipu.
+6. Po dokončení se zobrazí dialog **„Načetli jste“** – zvolte **Pokračovat** nebo **Opakovat**.
 
 ---
 
-## 6. Zápis tagu – co se děje po spuštění
+## 7. Zápis tagu – co se děje po spuštění
 
 Po stisku spouště proběhne automaticky tento řetězec:
 
@@ -96,7 +245,9 @@ Indikátor pod-kroků na obrazovce ukazuje průběh. Po úspěchu se automaticky
 
 ---
 
-## 7. Výběr UDU, výhybky a čipu
+## 8. Výběr UDU, výhybky a čipu
+
+> Kompletní průvodce načítáním včetně GPS, přeskakování mezi výhybkami a výběru části čipu je v **kapitole 5**. Níže stručný technický přehled.
 
 ### Režim GPS (výchozí)
 
@@ -126,7 +277,7 @@ Indikátor pod-kroků na obrazovce ukazuje průběh. Po úspěchu se automaticky
 
 ---
 
-## 8. GPS poloha
+## 9. GPS poloha
 
 - Souřadnice se zobrazují ve stavu **Připraveno**, např. `49.1951° 16.6084° ±6m`.
 - Při zápisu tagu se do CSV uloží nejlepší známá poloha.
@@ -143,7 +294,7 @@ Vhodný bez signálu (např. v budově) nebo pro zkoušení:
 
 ---
 
-## 9. Kontrola načteného tagu
+## 10. Kontrola načteného tagu
 
 Tlačítko **Kontrola** slouží k **ověření již zapsaného tagu** – nic se nezapisuje.
 
@@ -155,7 +306,9 @@ Tlačítko **Kontrola** slouží k **ověření již zapsaného tagu** – nic s
 
 ---
 
-## 10. Hranice TUDU (čip 5)
+## 11. Hranice TUDU (čip 5)
+
+> Podrobný postup zápisu hranice TUDU je v **kapitole 5.8**. Stručný přehled:
 
 Speciální režim pro tagy na **hranici TUDU** mimo běžný cyklus výhybky:
 
@@ -167,7 +320,7 @@ Speciální režim pro tagy na **hranici TUDU** mimo běžný cyklus výhybky:
 
 ---
 
-## 11. Práce s CSV souborem
+## 12. Práce s CSV souborem
 
 ### Co se ukládá
 
@@ -192,7 +345,7 @@ Pokud soubor v MTP nevidíte, povolte u aplikace **Přístup ke všem souborům*
 
 ---
 
-## 12. Časté situace a řešení
+## 13. Časté situace a řešení
 
 | Situace | Co dělat |
 |---------|----------|
@@ -206,7 +359,7 @@ Pokud soubor v MTP nevidíte, povolte u aplikace **Přístup ke všem souborům*
 
 ---
 
-## 13. Panel Pokročilé (volitelné)
+## 14. Panel Pokročilé (volitelné)
 
 Panel **Pokročilé** otevřete tahem zdola. Pro běžný terénní provoz ho **nemusíte** používat.
 
@@ -219,7 +372,7 @@ Panel **Pokročilé** otevřete tahem zdola. Pro běžný terénní provoz ho **
 
 ---
 
-## 14. Slovníček
+## 15. Slovníček
 
 | Pojem | Význam |
 |-------|--------|
