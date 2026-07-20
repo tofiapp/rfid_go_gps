@@ -1,7 +1,7 @@
 # Hranice TUDU – jak zapsat tag na hranici úseku
 
 **Aplikace:** RFID Go GPS  
-**Verze aplikace:** 3.146  
+**Verze aplikace:** 3.147  
 **Zařízení:** Chainway C5
 
 ---
