@@ -85,8 +85,7 @@ Výhybky, které už máte kompletní, jsou v seznamu **zašedlé**.
 
 | Typ výhybky | Kolik čipů | Části |
 |-------------|------------|-------|
-| Klasická 3částová | 3 | Jazyk, Levé rameno, Pravé rameno |
-| Dvojvětvá | 3 | U čipů 2–3 volba **Rovně** nebo **Odbočka** |
+| 3částová | 3 | Jazyk, Rovně, Odbočka (volba u každého čipu) |
 | 4částová | 4 | Podle databáze (CA/CB, CG/CH, …) |
 
 Aplikace sama nastaví **první chybějící čip**. Nad tlačítkem Kontrola uvidíte nápovědu, co právě načítáte.
@@ -112,7 +111,7 @@ V kartě **Poslední záznam** uvidíte, co jste naposledy zapsali. Tlačítko *
 
 1. Počkejte na GPS a zkontrolujte výhybku v náhledu.
 2. Zvolte **V koleji** nebo **V ruce**.
-3. U dvojvětvé výhybky zvolte **Rovně** nebo **Odbočka** (pokud je potřeba).
+3. U každého čipu 3částové výhybky zvolte **Jazyk**, **Rovně** nebo **Odbočka**.
 4. Přiložte tag a stiskněte **spouště**.
 5. Po dialogu **„Načetli jste“** klepněte **Pokračovat**.
 
