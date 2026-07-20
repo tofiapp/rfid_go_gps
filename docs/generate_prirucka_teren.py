@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a short PDF guide for the TUDU boundary (hranice TUDU) feature."""
+"""Generate the simple field guide PDF for RFID Go GPS."""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer
 from generate_manual import MUTED, build_styles, extract_meta, parse_markdown, register_fonts
 
 ROOT = Path(__file__).resolve().parent
-MD_PATH = ROOT / "hranice-tudu.md"
-OUT_PATH = ROOT / "RFID_Go_GPS_hranice_TUDU.pdf"
+MD_PATH = ROOT / "prirucka-teren.md"
+OUT_PATH = ROOT / "RFID_Go_GPS_prirucka_teren.pdf"
 
 
 def add_page_number(canvas, doc) -> None:
@@ -21,7 +21,7 @@ def add_page_number(canvas, doc) -> None:
     canvas.setFont("DejaVu", 8)
     canvas.setFillColor(MUTED)
     canvas.drawRightString(A4[0] - 2 * cm, 1.2 * cm, f"Strana {doc.page}")
-    canvas.drawString(2 * cm, 1.2 * cm, "RFID Go GPS – Hranice TUDU")
+    canvas.drawString(2 * cm, 1.2 * cm, "RFID Go GPS – Jednoduchá příručka pro terén")
     canvas.restoreState()
 
 
@@ -38,21 +38,21 @@ def main() -> None:
         rightMargin=2 * cm,
         topMargin=2 * cm,
         bottomMargin=2.2 * cm,
-        title="RFID Go GPS – Hranice TUDU",
+        title="RFID Go GPS – Jednoduchá příručka pro terén",
         author="RFID Go GPS",
     )
 
     story: list = []
-    story.append(Spacer(1, 4 * cm))
-    story.append(Paragraph("Hranice TUDU", styles["title"]))
-    story.append(Paragraph("Jak zapsat tag na hranici úseku tratě", styles["subtitle"]))
+    story.append(Spacer(1, 3.5 * cm))
+    story.append(Paragraph("RFID Go GPS", styles["title"]))
+    story.append(Paragraph("Jednoduchá příručka pro terén", styles["subtitle"]))
     if version:
         story.append(Paragraph(f"Verze aplikace {version}", styles["subtitle"]))
     story.append(Spacer(1, 1.5 * cm))
     story.append(
         Paragraph(
-            "Krátký návod pro terén – bez technických detailů. "
-            "Popisuje jen zápis tagu na hranici dvou úseků tratě.",
+            "Návod pro každodenní práci – načítání tagů, barvy na obrazovce "
+            "a zápis na hranici úseku. Bez technických detailů.",
             styles["body"],
         )
     )
