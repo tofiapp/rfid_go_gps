@@ -1,6 +1,6 @@
 # RFID Go GPS – Příručka pro uživatele
 
-**Verze aplikace:** 3.144  
+**Verze aplikace:** 3.146  
 **Zařízení:** Chainway C5 (UHF čtečka s GPS)
 
 ---
@@ -155,15 +155,15 @@ Tlačítko **Kontrola** slouží k **ověření již zapsaného tagu** – nic s
 
 ---
 
-## 10. Hranice TUDU (čip 5)
+## 10. Hranice TUDU
 
-Speciální režim pro tagy na **hranici TUDU** mimo běžný cyklus výhybky:
+Pro zápis tagu **na hranici dvou úseků tratě** (ne na běžné výhybce) použijte tlačítko **Hranice TUDU** v kartě UDU.
 
-1. Klepněte na **Hranice TUDU** v kartě UDU.
-2. Vyplňte **TUDU** (ručně nebo výběrem z 10 nejbližších podle GPS), **objekt** (kolej / výhybka) a volitelně **KM_EXT**.
-3. Po potvrzení aplikace přepne do režimu **čip 5**.
-4. Spouště provede stejný zápis jako u běžného čipu.
-5. Režim skončí při ruční změně UDU/výhybky nebo načtení polohy z GPS.
+1. Vyplňte **TUDU** a **objekt** (kolej nebo výhybka); kilometrickou polohu můžete doplnit později.
+2. Potvrďte **Použít** a zapište tag spouštěm stejně jako u běžného čipu.
+3. Po zápisu aplikace sama skončí režim hranice a v GPS režimu najde **další výhybku**.
+
+Podrobný návod s obrázky kroků je v samostatném PDF: **`RFID_Go_GPS_hranice_TUDU.pdf`** (zdroj: `docs/hranice-tudu.md`).
 
 ---
 
@@ -234,4 +234,4 @@ Panel **Pokročilé** otevřete tahem zdola. Pro běžný terénní provoz ho **
 
 ---
 
-*Dokument vytvořen pro RFID Go GPS verze 3.144. Technické detaily vývoje a sestavení viz README.md v repozitáři projektu.*
+*Dokument vytvořen pro RFID Go GPS verze 3.146. Technické detaily vývoje a sestavení viz README.md v repozitáři projektu.*

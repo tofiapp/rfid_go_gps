@@ -178,17 +178,16 @@ Tlačítko **Kontrola** na hlavní obrazovce otevře celoobrazovkový režim pro
 
 Režim Kontrola **nezapisuje** do tagu ani do CSV – slouží jen ke kontrole v terénu.
 
-### 8. Hranice TUDU (čip 5)
+### 8. Hranice TUDU
 
-Speciální režim pro zápis tagů na **hranici TUDU** mimo běžný cyklus výhybky (čip **5**):
+Zápis tagu na **hranici dvou úseků tratě** (mimo běžný cyklus výhybky):
 
 1. Klepněte na **Hranice TUDU** v kartě UDU.
-2. Vyplňte **TUDU** (ručně nebo výběrem z 10 nejbližších podle GPS), **objekt** (kolej / výhybka) a volitelně **KM_EXT**.
-3. Po potvrzení aplikace přepne do režimu **čip 5** – v náhledu se místo „výhybka“ zobrazuje **objekt**.
-4. Spouště provede stejný řetězec jako u běžného zápisu (EPC → CSV → heslo → zamčení).
-5. Do CSV se uloží `POZICE = 5`, prázdná `POLOHA` a zadaný objekt v `OBJEKT`.
+2. Vyplňte **TUDU** (ručně nebo výběrem z okolí podle GPS), **objekt** (kolej / výhybka) a volitelně kilometrickou polohu.
+3. Po potvrzení zapište tag spouštěm stejně jako u běžného čipu.
+4. Po úspěšném zápisu aplikace ukončí režim hranice a v GPS režimu automaticky najde **nejbližší další výhybku**.
 
-Režim se ukončí při ruční změně UDU/výhybky, načtení polohy z GPS nebo při obnovení stavu z CSV řádku s jiným čipem.
+Podrobný návod pro terén: [`docs/RFID_Go_GPS_hranice_TUDU.pdf`](docs/RFID_Go_GPS_hranice_TUDU.pdf) (zdroj: `python3 docs/generate_hranice_tudu.py`).
 
 ---
 
@@ -359,7 +358,9 @@ docs/
 | Dokument | Obsah |
 |----------|-------|
 | [`docs/RFID_Go_GPS_prirucka.pdf`](docs/RFID_Go_GPS_prirucka.pdf) | **PDF příručka pro běžné užívání** v terénu (tisk / sdílení) |
+| [`docs/RFID_Go_GPS_hranice_TUDU.pdf`](docs/RFID_Go_GPS_hranice_TUDU.pdf) | **PDF návod – hranice TUDU** (samostatný, srozumitelný text pro terén) |
 | [`docs/prirucka-uzivatele.md`](docs/prirucka-uzivatele.md) | Zdroj příručky (Markdown); PDF: `python3 docs/generate_manual.py` |
+| [`docs/hranice-tudu.md`](docs/hranice-tudu.md) | Zdroj návodu k hranici TUDU; PDF: `python3 docs/generate_hranice_tudu.py` |
 | [`README.md`](README.md) | Uživatelská dokumentace a přehled projektu (tento soubor) |
 | [`docs/INDEXACE_DZS.md`](docs/INDEXACE_DZS.md) | Technický popis indexace DZS *(část o plné indexaci je zastaralá – viz audit)* |
 | [`AGENTS.md`](AGENTS.md) | Poznámky pro vývoj v Cursor Cloud VM (JDK, SDK, build) |
