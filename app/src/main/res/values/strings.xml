@@ -69,10 +69,6 @@
     <string name="gps_db_wait">Čekám na GPS pro indexaci okolí…</string>
     <string name="gps_db_indexing">GPS připravena, indexuji okolí…</string>
     <string name="gps_db_open_without_fix">GPS zatím nedostupná – databáze se načte, okolí se doindexuje po získání polohy</string>
-    <string name="db_index_card_title">Indexace databáze</string>
-    <string name="db_index_progress">%1$s · %2$d %%</string>
-    <string name="db_index_complete">Indexace dokončena – plný index je připraven</string>
-    <string name="db_index_failed">Indexace selhala – aplikace používá okolí GPS</string>
     <string name="db_select_required">Nejdříve vyberte databázi SQLite</string>
     <string name="db_file_type_error">Podporovaný formát je SQLite (.db / .sqlite)</string>
     <string name="gps_reload_location">Načíst polohu</string>

@@ -96,15 +96,6 @@ final class VyhybkaGpsStore {
         }
     }
 
-    static VyhybkaGpsStore merge(VyhybkaGpsStore existing, VyhybkaGpsStore added) {
-        if (existing == null || existing.isEmpty()) return added != null ? added : empty();
-        if (added == null || added.isEmpty()) return existing;
-        Builder builder = builder();
-        appendAll(builder, existing);
-        appendAll(builder, added);
-        return builder.build();
-    }
-
     static VyhybkaGpsStore empty() {
         return new VyhybkaGpsStore(new String[0], new String[0], new int[0],
                 new String[0], new String[0], new float[0], new float[0]);

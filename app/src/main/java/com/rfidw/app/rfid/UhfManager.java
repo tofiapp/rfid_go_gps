@@ -29,10 +29,6 @@ public class UhfManager {
     public static final String DEFAULT_LOCK_CODE = "008020";
     public static final String DEFAULT_ACCESS_PASSWORD = "00000000";
 
-    /** @deprecated použijte {@link #PRESET_ACCESS_PASSWORDS} */
-    @Deprecated
-    public static final String PRESET_ACCESS_PASSWORD = "11223344";
-
     /**
      * Preset access hesla zkoušená při selhání zápisu s uživatelským heslem.
      */
