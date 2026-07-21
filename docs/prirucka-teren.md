@@ -25,7 +25,7 @@ Technické detaily: `RFID_Go_GPS_prirucka.pdf`.
 ## 1. Běžný zápis
 
 1. Zapněte aplikaci → zelené GPS nahoře.
-2. V kartě zkontrolujte **UDU**, **výhybku**, **čip**. Špatně → [kap. 2](#2-špatné-udu--výhybka).
+2. V kartě zkontrolujte **UDU**, **výhybku**, **čip**. Špatně → kap. 2.
 3. **Daleko** (tag v koleji) nebo **Blízko** (u antény). Bez toho spoušť nefunguje.
 4. U 3částové výhybky: **Jazyk** / **Rovně** / **Odbočka**.
 5. Spoušť.
@@ -40,8 +40,8 @@ Technické detaily: `RFID_Go_GPS_prirucka.pdf`.
 | Tři kroky | **UDU** → **Načtení** → **Hotovo** (šedá / modrá / zelená / oranžová / červená) |
 | Karta | UDU, výhybka, čip |
 | Uprostřed | nápověda čipu; **Jazyk** / **Rovně** / **Odbočka** |
-| **Kontrola** | ověření bez zápisu → [kap. 4](#4-kontrola) |
-| **Hranice TUDU** | → [kap. 3](#3-hranice-tudu) |
+| **Kontrola** | ověření bez zápisu → kap. 4 |
+| **Hranice TUDU** | → kap. 3 |
 
 ### Úspěch
 
@@ -141,7 +141,7 @@ Mimo CSV → **„Tag není v CSV“**. Více shod → šipky.
 | Spoušť nic / Načtení oranžové | Daleko nebo Blízko |
 | Načtení červené / Načtěte znovu | znovu, Daleko ↔ Blízko, jiná strana tagu |
 | GPS nejde | volné místo / Testovací režim GPS |
-| Špatná výhybka | [kap. 2](#2-špatné-udu--výhybka) |
+| Špatná výhybka | kap. 2 |
 | Chyba po zápisu | **Smazat** u posledního záznamu → znovu |
 
 ---
