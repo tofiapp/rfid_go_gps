@@ -51,8 +51,9 @@ def main() -> None:
     story.append(Spacer(1, 1.5 * cm))
     story.append(
         Paragraph(
-            "Architektura, stavové automaty, datové toky a reference tříd. "
-            "Začněte kapitolou 0 (jak číst) a kapitolou 1 (velký obraz).",
+            "Architektura, anatomie zápisu, stavové automaty, datové toky a mapa MainActivity. "
+            "Začněte kapitolou 0 a kapitolou 2 (anatomie jednoho zápisu). "
+            "Barevné Mermaid diagramy: otevřete prirucka-vyvojare.html.",
             styles["body"],
         )
     )

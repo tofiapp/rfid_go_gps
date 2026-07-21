@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RFID Go GPS – Technická příručka pro vývojáře</title>
+  <style>
+:root {
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --text: #1a1d23;
+  --muted: #5c6570;
+  --accent: #0b5cab;
+  --accent-soft: #e8f1fb;
+  --border: #d5dde6;
+  --code-bg: #f0f3f6;
+  --sidebar-w: 280px;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", "DejaVu Sans", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.55;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.layout { display: flex; min-height: 100vh; }
+nav.toc {
+  position: sticky; top: 0; align-self: flex-start;
+  width: var(--sidebar-w); max-height: 100vh; overflow: auto;
+  background: var(--surface); border-right: 1px solid var(--border);
+  padding: 1.25rem 1rem 2rem;
+  flex-shrink: 0;
+}
+nav.toc h1 {
+  font-size: 0.95rem; margin: 0 0 0.75rem; color: var(--accent);
+  letter-spacing: 0.02em;
+}
+nav.toc .meta { font-size: 0.75rem; color: var(--muted); margin-bottom: 1rem; }
+nav.toc a {
+  display: block; font-size: 0.82rem; color: var(--text);
+  padding: 0.28rem 0.4rem; border-radius: 4px; margin: 0.05rem 0;
+}
+nav.toc a:hover { background: var(--accent-soft); text-decoration: none; }
+nav.toc a.h3 { padding-left: 1rem; color: var(--muted); font-size: 0.78rem; }
+main {
+  flex: 1; max-width: 920px; padding: 2rem 2.5rem 4rem; margin: 0 auto;
+}
+.hero {
+  background: linear-gradient(145deg, #0b5cab 0%, #154f8a 55%, #1a3348 100%);
+  color: #fff; border-radius: 12px; padding: 1.75rem 1.75rem 1.5rem;
+  margin-bottom: 2rem;
+}
+.hero h1 { margin: 0 0 0.4rem; font-size: 1.75rem; font-weight: 700; }
+.hero p { margin: 0.35rem 0; opacity: 0.92; font-size: 0.95rem; }
+.hero .links { margin-top: 0.9rem; display: flex; gap: 0.6rem; flex-wrap: wrap; }
+.hero .links a {
+  background: rgba(255,255,255,0.15); color: #fff;
+  padding: 0.35rem 0.75rem; border-radius: 6px; font-size: 0.85rem;
+}
+.hero .links a:hover { background: rgba(255,255,255,0.28); text-decoration: none; }
+h2 {
+  margin-top: 2.4rem; padding-top: 0.6rem;
+  border-top: 2px solid var(--border); color: #0d47a1; font-size: 1.45rem;
+}
+h3 { margin-top: 1.6rem; color: var(--accent); font-size: 1.12rem; }
+p, li { font-size: 0.98rem; }
+blockquote {
+  margin: 1rem 0; padding: 0.75rem 1rem;
+  background: var(--accent-soft); border-left: 4px solid var(--accent);
+  color: var(--muted); border-radius: 0 6px 6px 0;
+}
+table {
+  width: 100%; border-collapse: collapse; margin: 0.9rem 0 1.2rem;
+  font-size: 0.9rem; background: var(--surface);
+}
+th, td { border: 1px solid var(--border); padding: 0.45rem 0.6rem; text-align: left; vertical-align: top; }
+th { background: var(--accent-soft); color: #0d47a1; }
+tr:nth-child(even) td { background: #fafbfc; }
+pre {
+  background: var(--code-bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 0.85rem 1rem; overflow-x: auto;
+  font-size: 0.82rem; line-height: 1.4;
+}
+code {
+  font-family: "DejaVu Sans Mono", "Consolas", monospace;
+  font-size: 0.88em; background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 3px;
+}
+pre code { background: none; padding: 0; font-size: inherit; }
+.mermaid {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 1rem; margin: 1rem 0 1.25rem;
+  overflow-x: auto; text-align: center;
+}
+hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+.footer-note { color: var(--muted); font-size: 0.85rem; margin-top: 3rem; text-align: center; }
+@media (max-width: 900px) {
+  .layout { flex-direction: column; }
+  nav.toc {
+    position: relative; width: 100%; max-height: none;
+    border-right: none; border-bottom: 1px solid var(--border);
+  }
+  main { padding: 1.25rem 1rem 3rem; }
+}
+</style>
+  
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+      primaryColor: '#e8f1fb',
+      primaryTextColor: '#1a1d23',
+      primaryBorderColor: '#0b5cab',
+      lineColor: '#5c6570',
+      secondaryColor: '#f7f8fa',
+      tertiaryColor: '#ffffff',
+      fontFamily: 'Segoe UI, DejaVu Sans, system-ui, sans-serif'
+    },
+    flowchart: { curve: 'basis', htmlLabels: true },
+    sequence: { actorMargin: 24, messageMargin: 32 }
+  });
+</script>
+
+</head>
+<body>
+<div class="layout">
+<nav class="toc">
+<h1>Obsah</h1>
+<p class="meta">RFID Go GPS · vývojářská příručka</p>
+<a href="#obsah">Obsah</a>
+<a href="#0-jak-číst-tuto-příručku">0. Jak číst tuto příručku</a>
+<a href="#01-tři-úrovně" class="h3">0.1 Tři úrovně</a>
+<a href="#02-kam-jít-podle-otázky" class="h3">0.2 Kam jít podle otázky</a>
+<a href="#1-velký-obraz">1. Velký obraz</a>
+<a href="#11-jedna-věta" class="h3">1.1 Jedna věta</a>
+<a href="#12-plakát-systému" class="h3">1.2 Plakát systému</a>
+<a href="#13-velikost-modulů-orientace-v-repu" class="h3">1.3 Velikost modulů (orientace v repu)</a>
+<a href="#2-anatomie-jednoho-zápisu">2. Anatomie jednoho zápisu</a>
+<a href="#21-časová-osa-co-se-děje" class="h3">2.1 Časová osa (co se děje)</a>
+<a href="#22-krok-za-krokem-stavy-paměti" class="h3">2.2 Krok za krokem – stavy paměti</a>
+<a href="#23-call-stack-při-spoušti-zjednodušeně" class="h3">2.3 Call stack při spoušti (zjednodušeně)</a>
+<a href="#24-swimlane-mermaid" class="h3">2.4 Swimlane (Mermaid)</a>
+<a href="#25-kde-to-je-v-kódu" class="h3">2.5 Kde to je v kódu</a>
+<a href="#3-stavové-automaty">3. Stavové automaty</a>
+<a href="#31-horní-karty-udu-načtení-hotovo" class="h3">3.1 Horní karty (UDU → Načtení → Hotovo)</a>
+<a href="#32-pod-workflow-zápisu-4-kruhy" class="h3">3.2 Pod-workflow zápisu (4 kruhy)</a>
+<a href="#33-režimy-vzájemně-se-vylučují" class="h3">3.3 Režimy (vzájemně se vylučují)</a>
+<a href="#4-datové-toky">4. Datové toky</a>
+<a href="#41-start-oncreate" class="h3">4.1 Start (`onCreate`)</a>
+<a href="#42-gps-výběr-výhybky" class="h3">4.2 GPS → výběr výhybky</a>
+<a href="#43-dzs-a-cache-pidx" class="h3">4.3 DZS a cache `.pidx`</a>
+<a href="#44-csv" class="h3">4.4 CSV</a>
+<a href="#45-spouště-rozhodovací-strom" class="h3">4.5 Spouště – rozhodovací strom</a>
+<a href="#5-vlákna-a-souběžnost">5. Vlákna a souběžnost</a>
+<a href="#51-tři-executory" class="h3">5.1 Tři executory</a>
+<a href="#52-pravidla-povinná" class="h3">5.2 Pravidla (povinná)</a>
+<a href="#6-režimy-aplikace">6. Režimy aplikace</a>
+<a href="#7-mainactivity-mapa-souboru">7. MainActivity – mapa souboru</a>
+<a href="#71-mapa-podle-řádků" class="h3">7.1 Mapa podle řádků</a>
+<a href="#72-mapa-podle-úkolu" class="h3">7.2 Mapa podle úkolu</a>
+<a href="#73-instance-proměnné-seskupeno" class="h3">7.3 Instance proměnné (seskupeno)</a>
+<a href="#74-závislosti-mainactivity-doména" class="h3">7.4 Závislosti MainActivity → doména</a>
+<a href="#8-karty-tříd">8. Karty tříd</a>
+<a href="#81-epcmodel" class="h3">8.1 EpcModel</a>
+<a href="#82-tudu" class="h3">8.2 Tudu</a>
+<a href="#83-uhfmanager" class="h3">8.3 UhfManager</a>
+<a href="#84-dzsdatabase" class="h3">8.4 DzsDatabase</a>
+<a href="#85-dzsindexcache" class="h3">8.5 DzsIndexCache</a>
+<a href="#86-csvstore-csvstorage-csvrecordbuilder" class="h3">8.6 CsvStore / CsvStorage / CsvRecordBuilder</a>
+<a href="#87-locationcache" class="h3">8.7 LocationCache</a>
+<a href="#88-kmextresolver" class="h3">8.8 KmExtResolver</a>
+<a href="#9-kde-hledat-při-problému">9. Kde hledat při problému</a>
+<a href="#příloha-cheat-sheet">Příloha: Cheat sheet</a>
+</nav>
+<main>
+  <div class="hero">
+    <h1>RFID Go GPS</h1>
+    <p>Technická příručka pro vývojáře</p>
+    <p>Verze aplikace 3.155</p>
+    <div class="links">
+      <a href="RFID_Go_GPS_prirucka_vyvojare.pdf">PDF</a>
+      <a href="prirucka-vyvojare.md">Markdown zdroj</a>
+      <a href="../README.md">README</a>
+    </div>
+  </div>
+<p><strong>Verze aplikace:</strong> 3.155 <strong>Package:</strong> <code>com.rfidw.app</code> · <code>applicationId</code> <code>com.rfidw.app.gps</code> <strong>Zařízení:</strong> Chainway C5 (UHF UART, RSCJA SDK)</p>
+<blockquote><p><strong>Formáty:</strong> Markdown (zdroj) · <a href="RFID_Go_GPS_prirucka_vyvojare.pdf">PDF</a> · <a href="prirucka-vyvojare.html">HTML s Mermaid</a> V PDF jsou Mermaid bloky nahrazené odkazem na tabulku/ASCII níže. V HTML a na GitHubu se vykreslí barevně.</p></blockquote>
+<hr>
+<h2 id="obsah">Obsah</h2>
+<table>
+<tr><th>#</th><th>Kapitola</th><th>Kdy číst</th></tr>
+<tr><td>0</td><td><a href="#0-jak-číst-tuto-příručku">Jak číst</a></td><td>vždy první</td></tr>
+<tr><td>1</td><td><a href="#1-velký-obraz">Velký obraz</a></td><td>orientace</td></tr>
+<tr><td>2</td><td><a href="#2-anatomie-jednoho-zápisu">Anatomie jednoho zápisu</a></td><td>nejdůležitější kapitola</td></tr>
+<tr><td>3</td><td><a href="#3-stavové-automaty">Stavové automaty</a></td><td>UI / workflow stavy</td></tr>
+<tr><td>4</td><td><a href="#4-datové-toky">Datové toky</a></td><td>start, GPS, DZS, CSV</td></tr>
+<tr><td>5</td><td><a href="#5-vlákna-a-souběžnost">Vlákna</a></td><td>co smí kam</td></tr>
+<tr><td>6</td><td><a href="#6-režimy-aplikace">Režimy</a></td><td>Kontrola, hranice, ruční</td></tr>
+<tr><td>7</td><td><a href="#7-mainactivity--mapa-souboru">MainActivity – mapa souboru</a></td><td>navigace v 5600 řádcích</td></tr>
+<tr><td>8</td><td><a href="#8-karty-tříd">Karty tříd</a></td><td>API modulů</td></tr>
+<tr><td>9</td><td><a href="#9-kde-hledat-při-problému">Debug</a></td><td>ladění</td></tr>
+<tr><td>A</td><td><a href="#příloha-cheat-sheet">Cheat sheet</a></td><td>rychlá reference</td></tr>
+</table>
+<hr>
+<h2 id="0-jak-číst-tuto-příručku">0. Jak číst tuto příručku</h2>
+<h3 id="01-tři-úrovně">0.1 Tři úrovně</h3>
+<pre><code>ÚROVEŇ 1 – Orientace          kap. 1 + 2 + Příloha
+ÚROVEŇ 2 – Konkrétní scénář   kap. 3–6 (vyber téma)
+ÚROVEŇ 3 – Implementace       kap. 7–9 (otevři IDE)</code></pre>
+<h3 id="02-kam-jít-podle-otázky">0.2 Kam jít podle otázky</h3>
+<table>
+<tr><th>Ptám se…</th><th>Jdi sem</th></tr>
+<tr><td>Co přesně se stane po spoušti?</td><td><a href="#2-anatomie-jednoho-zápisu">2 Anatomie zápisu</a></td></tr>
+<tr><td>Kde v <code>MainActivity</code> to najdu?</td><td><a href="#7-mainactivity--mapa-souboru">7 Mapa souboru</a></td></tr>
+<tr><td>Proč UI blokuje / čeká?</td><td><a href="#3-stavové-automaty">3 Stavy</a></td></tr>
+<tr><td>Jak se vybere výhybka z GPS?</td><td><a href="#42-gps--výběr-výhybky">4.2</a> + <a href="#84-dzsdatabase">8.4</a></td></tr>
+<tr><td>Jak funguje <code>.pidx</code>?</td><td><a href="#43-dzs-a-cache-pidx">4.3</a></td></tr>
+<tr><td>Proč CSV z PC „nejde“?</td><td><a href="#44-csv">4.4</a> + <a href="#9-kde-hledat-při-problému">9</a></td></tr>
+<tr><td>Na jakém vlákně smím volat DB/RFID?</td><td><a href="#5-vlákna-a-souběžnost">5</a></td></tr>
+<tr><td>Kontrola / hranice TUDU?</td><td><a href="#6-režimy-aplikace">6</a></td></tr>
+</table>
+<hr>
+<h2 id="1-velký-obraz">1. Velký obraz</h2>
+<h3 id="11-jedna-věta">1.1 Jedna věta</h3>
+<p>Aplikace <strong>určí kontext výhybky</strong> (GPS + DZS + CSV), <strong>zapíše UHF tag</strong> (EPC → heslo → lock) a <strong>uloží řádek CSV</strong> včetně GPS čtečky.</p>
+<h3 id="12-plakát-systému">1.2 Plakát systému</h3>
+<pre class="mermaid">flowchart LR
+    subgraph IN[&quot;Vstup&quot;]
+        T[Spouště]
+        G[GPS]
+        D[(DZS .sqlite)]
+        C[(CSV)]
+    end
+
+    subgraph ORCH[&quot;MainActivity&quot;]
+        W[Workflow]
+        S[GPS výběr]
+        M[Režimy]
+    end
+
+    subgraph DOM[&quot;Doména&quot;]
+        UHF[UhfManager]
+        DZS[DzsDatabase]
+        CSV[CsvStore]
+        EPC[EpcModel]
+        LOC[LocationCache]
+    end
+
+    subgraph OUT[&quot;Výstup&quot;]
+        TAG[UHF čip]
+        ROW[řádek CSV]
+        UI[Obrazovka]
+    end
+
+    T --&gt; W --&gt; UHF --&gt; TAG
+    W --&gt; CSV --&gt; ROW
+    G --&gt; LOC --&gt; S
+    D --&gt; DZS --&gt; S
+    C --&gt; CSV --&gt; S
+    S --&gt; UI
+    M --&gt; W
+    EPC -.-&gt; W</pre>
+<p><strong>ASCII plakát (PDF):</strong></p>
+<pre><code> ┌─────────┐     ┌──────────────────┐     ┌────────────┐     ┌──────────┐
+ │ Spouště │────►│   MainActivity   │────►│ UhfManager │────►│ UHF čip  │
+ │ GPS     │────►│  workflow+výběr  │────►│ DzsDatabase│────►│ .sqlite  │
+ │ CSV/PC  │────►│  režimy          │────►│ CsvStore   │────►│ CSV file │
+ └─────────┘     └──────────────────┘     │ EpcModel   │     │ UI       │
+                                          │ Location…  │     └──────────┘
+                                          └────────────┘</code></pre>
+<h3 id="13-velikost-modulů-orientace-v-repu">1.3 Velikost modulů (orientace v repu)</h3>
+<table>
+<tr><th>Soubor</th><th>Řádků</th><th>Role</th></tr>
+<tr><td><code>ui/MainActivity.java</code></td><td>~5640</td><td>orchestrátor – <strong>všechno se tady spojuje</strong></td></tr>
+<tr><td><code>data/DzsDatabase.java</code></td><td>~1580</td><td>SQLite, proximity, spatial grid</td></tr>
+<tr><td><code>csv/CsvStore.java</code></td><td>~600</td><td>tabulka + index dokončených čipů</td></tr>
+<tr><td><code>data/Tudu.java</code></td><td>~450</td><td>model TUDU / výhybka / RO</td></tr>
+<tr><td><code>data/DzsIndexCache.java</code></td><td>~370</td><td><code>.pidx</code> v21</td></tr>
+<tr><td><code>rfid/UhfManager.java</code></td><td>~360</td><td>obal UHF SDK</td></tr>
+<tr><td><code>location/LocationCache.java</code></td><td>~280</td><td>GPS cache 500 ms</td></tr>
+<tr><td><code>epc/EpcModel.java</code></td><td>~180</td><td>sestavení / validace EPC</td></tr>
+<tr><td>ostatní</td><td>&amp;lt;150</td><td>CSV cesta, KmExt, adapter</td></tr>
+</table>
+<p><strong>Pravidlo:</strong> logiku hledej v malých třídách; v <code>MainActivity</code> hledej <strong>kdy</strong> se volá.</p>
+<hr>
+<h2 id="2-anatomie-jednoho-zápisu">2. Anatomie jednoho zápisu</h2>
+<p>Tato kapitola je <strong>nejdůležitější</strong>. Jeden úspěšný zápis od spouště po „Pokračovat“.</p>
+<h3 id="21-časová-osa-co-se-děje">2.1 Časová osa (co se děje)</h3>
+<pre><code>čas →
+
+ MAIN ──► onKeyDown ──► runTriggerAction ──► validace ──┬── doWrite() ──┐
+                                                        │               │
+ IO   ──────────────────────────────────────────────────┴───────────────┤
+                                                                        ▼
+                                                              uhf.writeEpcFromTid
+                                                                        │
+ MAIN ◄─────────────────────────────────────────────── ui.post(onWriteDone)
+        │
+        ├── saveRowToCsv ──► (IO) upsertAndPersist ──► UI
+        ├── doWritePassword ──► (IO) writeAccessPassword ──► onPwdWriteDone
+        ├── doLock ──► (IO) lockTag ──► onLockDone
+        └── dialog „Načetli jste“  (scanDoneAwaitingConfirm = true)
+                │
+                ▼ spouště / Pokračovat
+           onScanDoneContinue → onTagCycleComplete → další čip</code></pre>
+<h3 id="22-krok-za-krokem-stavy-paměti">2.2 Krok za krokem – stavy paměti</h3>
+<table>
+<tr><th>#</th><th>Metoda</th><th>Vlákno</th><th>Co se změní</th></tr>
+<tr><td>1</td><td><code>onKeyDown</code></td><td>main</td><td>detekce trigger key</td></tr>
+<tr><td>2</td><td><code>runTriggerAction</code></td><td>main</td><td><code>chainWorkflow=true</code>, <code>workflowRunning=true</code>, <code>wfStepStates[EPC]=ACTIVE</code></td></tr>
+<tr><td>3</td><td><code>doWrite</code></td><td>main→io</td><td>volá <code>writeEpcFromTid</code> nebo <code>writeEpc</code></td></tr>
+<tr><td>4</td><td><code>onWriteDone</code></td><td>main</td><td><code>wfStepStates[EPC]=OK</code>, spustí CSV</td></tr>
+<tr><td>5</td><td><code>saveRowToCsv</code></td><td>main→io</td><td>řádek do <code>CsvStore</code> + soubor</td></tr>
+<tr><td>6</td><td><code>doWritePassword</code></td><td>main→io</td><td>access heslo do tagu</td></tr>
+<tr><td>7</td><td><code>doLock</code></td><td>main→io</td><td>lock <code>008020</code></td></tr>
+<tr><td>8</td><td><code>onLockDone</code></td><td>main</td><td><code>step3Done=true</code>, dialog, <code>scanDoneAwaitingConfirm=true</code></td></tr>
+<tr><td>9</td><td><code>onScanDoneContinue</code></td><td>main</td><td><code>onTagCycleComplete</code> (ID++, čip++), reset kroků</td></tr>
+</table>
+<h3 id="23-call-stack-při-spoušti-zjednodušeně">2.3 Call stack při spoušti (zjednodušeně)</h3>
+<pre><code>onKeyDown
+ └─ runTriggerAction
+     ├─ requirePowerPreset()          // Daleko 16 dBm / Blízko 1 dBm
+     ├─ requireCastBranchSelection()  // Jazyk/Rovně/Odbočka u 3částové
+     ├─ refreshGpsAtWorkflowStart()
+     └─ doWrite()
+         └─ io.execute → uhf.writeEpcFromTid(...)
+             └─ ui.post → onWriteDone
+                 ├─ saveRowToCsv → buildCsvRow → CsvRecordBuilder
+                 ├─ doWritePassword → onPwdWriteDone
+                 └─ doLock → onLockDone → showScanDoneNotification</code></pre>
+<h3 id="24-swimlane-mermaid">2.4 Swimlane (Mermaid)</h3>
+<pre class="mermaid">sequenceDiagram
+    actor Op as Operátor
+    participant MT as Main thread
+    participant IO as io executor
+    participant UHF as UhfManager
+    participant CSV as CsvStore
+
+    Op-&gt;&gt;MT: spouště (onKeyDown)
+    MT-&gt;&gt;MT: runTriggerAction + validace
+    MT-&gt;&gt;IO: doWrite()
+    IO-&gt;&gt;UHF: writeEpcFromTid / writeEpc
+    UHF--&gt;&gt;IO: WriteResult
+    IO-&gt;&gt;MT: onWriteDone
+    MT-&gt;&gt;IO: saveRowToCsv
+    IO-&gt;&gt;CSV: upsertAndPersist
+    CSV--&gt;&gt;MT: OK
+    MT-&gt;&gt;IO: doWritePassword
+    IO-&gt;&gt;UHF: writeAccessPassword
+    UHF--&gt;&gt;MT: onPwdWriteDone
+    MT-&gt;&gt;IO: doLock
+    IO-&gt;&gt;UHF: lockTag
+    UHF--&gt;&gt;MT: onLockDone
+    MT-&gt;&gt;Op: dialog „Načetli jste“
+    Op-&gt;&gt;MT: Pokračovat / spouště
+    MT-&gt;&gt;MT: onScanDoneContinue</pre>
+<p><strong>Tabulka (PDF):</strong></p>
+<table>
+<tr><th>Fáze</th><th>Main</th><th><code>io</code></th></tr>
+<tr><td>Trigger</td><td><code>onKeyDown</code> → <code>runTriggerAction</code></td><td>—</td></tr>
+<tr><td>EPC</td><td>spustí <code>doWrite</code></td><td><code>uhf.writeEpcFromTid</code></td></tr>
+<tr><td>CSV</td><td>rozhodnutí</td><td><code>csvStore.upsertAndPersist</code></td></tr>
+<tr><td>Heslo / Lock</td><td>callback řetězec</td><td><code>writeAccessPassword</code> / <code>lockTag</code></td></tr>
+<tr><td>Konec</td><td>dialog + <code>onScanDoneContinue</code></td><td>—</td></tr>
+</table>
+<h3 id="25-kde-to-je-v-kódu">2.5 Kde to je v kódu</h3>
+<table>
+<tr><th>Krok</th><th><code>MainActivity</code> ≈ řádek</th></tr>
+<tr><td><code>onKeyDown</code></td><td>5359</td></tr>
+<tr><td><code>runTriggerAction</code></td><td>5323</td></tr>
+<tr><td><code>doWrite</code></td><td>4525</td></tr>
+<tr><td><code>onWriteDone</code></td><td>4568</td></tr>
+<tr><td><code>saveRowToCsv</code></td><td>4738</td></tr>
+<tr><td><code>buildCsvRow</code></td><td>4821</td></tr>
+<tr><td><code>doWritePassword</code></td><td>4615</td></tr>
+<tr><td><code>onPwdWriteDone</code></td><td>4646</td></tr>
+<tr><td><code>doLock</code></td><td>4677</td></tr>
+<tr><td><code>onLockDone</code></td><td>4703</td></tr>
+<tr><td><code>onScanDoneContinue</code></td><td>2185</td></tr>
+<tr><td><code>onTagCycleComplete</code></td><td>4961</td></tr>
+</table>
+<blockquote><p>Řádky se posouvají s refaktoringem – hledej <strong>název metody</strong>, číslo je orientační.</p></blockquote>
+<hr>
+<h2 id="3-stavové-automaty">3. Stavové automaty</h2>
+<h3 id="31-horní-karty-udu-načtení-hotovo">3.1 Horní karty (UDU → Načtení → Hotovo)</h3>
+<pre class="mermaid">stateDiagram-v2
+    [*] --&gt; UDU: start / reset
+    UDU --&gt; Nacteni: TUDU + výhybka OK
+    Nacteni --&gt; Hotovo: výkon + zápis OK
+    Hotovo --&gt; UDU: onScanDoneContinue</pre>
+<table>
+<tr><th>Krok</th><th>Flag</th><th>Splněno když</th></tr>
+<tr><td>① UDU</td><td><code>step1Done</code></td><td>TUDU + výhybka (nebo vyplněná hranice)</td></tr>
+<tr><td>② Načtení</td><td><code>step2Done</code></td><td>zvolený výkon (<code>activePowerPresetInKoleji != null</code>)</td></tr>
+<tr><td>③ Hotovo</td><td><code>step3Done</code></td><td>úspěšné zamčení</td></tr>
+</table>
+<h3 id="32-pod-workflow-zápisu-4-kruhy">3.2 Pod-workflow zápisu (4 kruhy)</h3>
+<pre class="mermaid">stateDiagram-v2
+    direction LR
+    [*] --&gt; EPC
+    EPC --&gt; CSV: onWriteDone OK
+    CSV --&gt; PWD: saveRowToCsv OK
+    PWD --&gt; LOCK: onPwdWriteDone OK
+    LOCK --&gt; DIALOG: onLockDone OK
+    DIALOG --&gt; [*]: onScanDoneContinue
+    EPC --&gt; FAIL: chyba
+    CSV --&gt; FAIL
+    PWD --&gt; FAIL
+    LOCK --&gt; FAIL
+    FAIL --&gt; [*]: onWorkflowFailed</pre>
+<table>
+<tr><th>i</th><th>Konstanta</th><th>Akce</th><th>Callback</th></tr>
+<tr><td>0</td><td><code>WF_STEP_EPC</code></td><td><code>doWrite</code></td><td><code>onWriteDone</code></td></tr>
+<tr><td>1</td><td><code>WF_STEP_CSV</code></td><td><code>saveRowToCsv</code></td><td>→ <code>doWritePassword</code></td></tr>
+<tr><td>2</td><td><code>WF_STEP_PWD</code></td><td><code>doWritePassword</code></td><td><code>onPwdWriteDone</code></td></tr>
+<tr><td>3</td><td><code>WF_STEP_LOCK</code></td><td><code>doLock</code></td><td><code>onLockDone</code></td></tr>
+</table>
+<p><code>wfStepStates[i]</code>: <code>PENDING(0)</code> → <code>ACTIVE(1)</code> → <code>OK(2)</code> / <code>FAIL(3)</code>.</p>
+<table>
+<tr><th>Příznak</th><th>Význam</th></tr>
+<tr><td><code>chainWorkflow</code></td><td>spouště spustilo celý řetězec</td></tr>
+<tr><td><code>workflowRunning</code></td><td>zápis právě běží</td></tr>
+<tr><td><code>scanDoneAwaitingConfirm</code></td><td>LOCK OK, čeká dialog</td></tr>
+</table>
+<h3 id="33-režimy-vzájemně-se-vylučují">3.3 Režimy (vzájemně se vylučují)</h3>
+<pre class="mermaid">stateDiagram-v2
+    [*] --&gt; Normal
+    Normal --&gt; Kontrola: tlačítko Kontrola
+    Normal --&gt; Hranice: Hranice TUDU
+    Normal --&gt; ManualGps: přepínač Ručně
+    Kontrola --&gt; Normal: zavřít
+    Hranice --&gt; Normal: finishTuduBoundaryWriteCycle
+    ManualGps --&gt; Normal: přepínač GPS</pre>
+<hr>
+<h2 id="4-datové-toky">4. Datové toky</h2>
+<h3 id="41-start-oncreate">4.1 Start (<code>onCreate</code>)</h3>
+<pre class="mermaid">sequenceDiagram
+    participant MA as MainActivity
+    participant LOC as LocationCache
+    participant CSV as CsvStore
+    participant DZS as DzsDatabase
+
+    MA-&gt;&gt;MA: bindViews, prefs, UhfManager.init
+    MA-&gt;&gt;LOC: start()
+    MA-&gt;&gt;CSV: new CsvStore → reload
+    CSV--&gt;&gt;MA: idRfid + dokončené čipy
+    MA-&gt;&gt;MA: tryAutoLoadDefaultDatabase
+    MA-&gt;&gt;DZS: open (gpsIo)
+    DZS--&gt;&gt;MA: proximity index
+    MA-&gt;&gt;MA: scheduleGpsTuduLookup</pre>
+<table>
+<tr><th>#</th><th>Co</th><th>Metoda</th></tr>
+<tr><td>1</td><td>UI + prefs</td><td><code>onCreate</code>, <code>bindViews</code></td></tr>
+<tr><td>2</td><td>GPS</td><td><code>LocationCache.start()</code></td></tr>
+<tr><td>3</td><td>CSV</td><td><code>CsvStore</code> → <code>applyReloadedCsvState</code></td></tr>
+<tr><td>4</td><td>Auto DB</td><td><code>tryAutoLoadDefaultDatabase</code> → Download/<code>DZS_PASPORT_TPI.sqlite</code></td></tr>
+<tr><td>5</td><td>Index</td><td><code>loadDatabaseFromPath</code> na <code>gpsIo</code></td></tr>
+<tr><td>6</td><td>Lookup</td><td><code>scheduleGpsTuduLookup</code></td></tr>
+</table>
+<h3 id="42-gps-výběr-výhybky">4.2 GPS → výběr výhybky</h3>
+<pre class="mermaid">flowchart TD
+    A([GPS fix 500 ms]) --&gt; B{posun ≥ 5 m&lt;br/&gt;a ≥ 1 s?}
+    B -- ne --&gt; Z([konec])
+    B -- ano --&gt; C[ensureProximityLoaded]
+    C --&gt; D{.pidx platná?}
+    D -- ano --&gt; E[načti cache]
+    D -- ne --&gt; F[SQL bbox ±4 km]
+    F --&gt; G[ulož .pidx v21]
+    E --&gt; H[SpatialGrid]
+    G --&gt; H
+    H --&gt; I[findNearest*]
+    I --&gt; J{gps locked?}
+    J -- ano --&gt; Z
+    J -- ne --&gt; K[applyGpsMatch → UI]</pre>
+<table>
+<tr><th>Konstanta</th><th>Hodnota</th><th>Význam</th></tr>
+<tr><td><code>GPS_LOOKUP_MIN_MOVE_M</code></td><td>5 m</td><td>min. pohyb</td></tr>
+<tr><td><code>GPS_LOOKUP_MIN_INTERVAL_MS</code></td><td>1000</td><td>throttle</td></tr>
+<tr><td><code>GPS_LOOKUP_TIMEOUT_MS</code></td><td>10 s</td><td>timeout lookupu</td></tr>
+<tr><td><code>PROXIMITY_BBOX_DEG</code></td><td>0,04</td><td>~4 km</td></tr>
+<tr><td><code>PROXIMITY_RELOAD_MOVE_KM</code></td><td>3 km</td><td>reindex při odjezdu</td></tr>
+</table>
+<h3 id="43-dzs-a-cache-pidx">4.3 DZS a cache <code>.pidx</code></h3>
+<pre><code>  DZS_PASPORT_TPI.sqlite
+           │  kopie → files/dzs/
+           ▼
+     SHA-256 (sidecar hash2_*.txt)
+           │
+           ▼
+  proximity index (bbox kolem GPS)
+     ┌─────┴──────────────┐
+     ▼                    ▼
+ roByPairKey         VyhybkaGpsStore
+     └────────┬───────────┘
+              ▼
+        SpatialGrid → GpsMatch → applyGpsMatch</code></pre>
+<table>
+<tr><th>Tabulka SQLite</th><th>Klíčová data</th></tr>
+<tr><td><code>DZS_SUPER_RO_TPI</code></td><td>TUDU, výhybka, POLOHA, RO_ID, OD, DO</td></tr>
+<tr><td><code>DZS_SUPERTRA_GPS_KM</code></td><td>LAT, LON, KM_EXT, SUPER_Z/D_ID</td></tr>
+</table>
+<p>Detail: <a href="INDEXACE_DZS.md"><code>INDEXACE_DZS.md</code></a> *(část o plné indexaci je zastaralá – po auditu v3.141 jen proximity)*.</p>
+<h3 id="44-csv">4.4 CSV</h3>
+<pre class="mermaid">flowchart LR
+    subgraph ZAPIS[&quot;Zápis&quot;]
+        A[buildCsvRow] --&gt; B[CsvRecordBuilder]
+        B --&gt; C[upsert]
+        C --&gt; D[persist]
+        D --&gt; E[(Download/*.csv)]
+    end
+
+    subgraph SYNC[&quot;Sync z PC&quot;]
+        F[USB MTP] --&gt; G[reloadIfChanged]
+        G --&gt; H[SHA-256]
+        H --&gt; I[castsByVyhybkaRo]
+    end</pre>
+<table>
+<tr><th>Index</th><th>Klíč</th><th>Hodnota</th></tr>
+<tr><td>řádky</td><td><code>ID_RFID</code></td><td><code>CsvStore.Row</code></td></tr>
+<tr><td>dokončené čipy</td><td><code>TUDU\0výhybka\0roId</code></td><td><code>Set&amp;lt;Integer&amp;gt;</code> castů</td></tr>
+</table>
+<p>Soubor: <code>Download/rfid_go_gps_output.csv</code> (<code>CsvStorage</code> – MediaStore na Android 10+).</p>
+<h3 id="45-spouště-rozhodovací-strom">4.5 Spouště – rozhodovací strom</h3>
+<pre><code>              onKeyDown (trigger key)
+                       │
+         ┌─────────────┼─────────────┐
+         ▼             ▼             ▼
+   kontrolaActive  scanDoneConfirm  delete dialog
+         │             │             │
+         ▼             ▼             ▼
+  runKontrolaRead  onScanDoneContinue  (ignorovat)
+         │
+         └──────────► runTriggerAction
+                            │
+                            ▼
+                   EPC → CSV → PWD → LOCK</code></pre>
+<hr>
+<h2 id="5-vlákna-a-souběžnost">5. Vlákna a souběžnost</h2>
+<h3 id="51-tři-executory">5.1 Tři executory</h3>
+<pre><code>┌──────────────┐   ┌────────────────────┐   ┌────────────────────┐
+│  main / ui   │   │  io                │   │  gpsIo             │
+│  Handler     │   │  (1 vlákno)        │   │  (1 vlákno)        │
+├──────────────┤   ├────────────────────┤   ├────────────────────┤
+│ UI, validace │   │ UHF zápis/čtení    │   │ DzsDatabase.open   │
+│ callbacky    │   │ CSV persist        │   │ ensureProximity…   │
+│ dialogy      │   │ některé pickery    │   │ GPS lookup DB      │
+└──────────────┘   └────────────────────┘   └────────────────────┘</code></pre>
+<h3 id="52-pravidla-povinná">5.2 Pravidla (povinná)</h3>
+<table>
+<tr><th>Smí na main?</th><th>Operace</th></tr>
+<tr><td>✗</td><td>RFID write/read (kromě <code>UhfManager.init()</code> při startu)</td></tr>
+<tr><td>✗</td><td>SQLite / indexace DZS</td></tr>
+<tr><td>✗</td><td>těžký CSV I/O (persist celého souboru)</td></tr>
+<tr><td>✓</td><td><code>ui.post</code> / <code>runOnUiThread</code> po dokončení I/O</td></tr>
+<tr><td>✓</td><td>validace formuláře, dialogy, změna View</td></tr>
+</table>
+<p><strong>Proč dva executory:</strong> RFID a SQLite nesmí blokovat sebe navzájem – GPS lookup běží na <code>gpsIo</code>, zápis tagu na <code>io</code>.</p>
+<hr>
+<h2 id="6-režimy-aplikace">6. Režimy aplikace</h2>
+<table>
+<tr><th></th><th><strong>Normál</strong></th><th><strong>Kontrola</strong></th><th><strong>Hranice TUDU</strong></th><th><strong>Ruční GPS</strong></th></tr>
+<tr><td>Zápis tagu</td><td>✓</td><td>✗</td><td>✓ (čip 5)</td><td>✓</td></tr>
+<tr><td>GPS auto-výběr</td><td>✓</td><td>—</td><td>✗</td><td>✗</td></tr>
+<tr><td>Čte CSV</td><td>stav</td><td>porovnání</td><td>—</td><td>stav</td></tr>
+<tr><td><code>epc.cast</code></td><td>1–4</td><td>—</td><td><strong>5</strong></td><td>1–4</td></tr>
+<tr><td>POLOHA</td><td>z DB</td><td>—</td><td>prázdná</td><td>z DB</td></tr>
+<tr><td>Metody</td><td><code>runTriggerAction</code></td><td><code>runKontrolaRead</code></td><td><code>showTuduBoundaryForm</code></td><td><code>showTuduPicker</code></td></tr>
+</table>
+<p><strong>Spouště v režimech:</strong></p>
+<table>
+<tr><th>Režim</th><th>Spouště</th></tr>
+<tr><td>Normál</td><td>celý řetězec zápisu</td></tr>
+<tr><td>Kontrola</td><td><code>readSingle</code> + match CSV</td></tr>
+<tr><td>Dialog „Načetli jste“</td><td>= tlačítko Pokračovat</td></tr>
+<tr><td>Delete confirm</td><td>spouště se ignoruje</td></tr>
+</table>
+<hr>
+<h2 id="7-mainactivity-mapa-souboru">7. MainActivity – mapa souboru</h2>
+<p><code>MainActivity.java</code> (~5640 řádků) je <strong>jeden orchestrátor</strong>. Níže mapa podle bloků – otevři soubor a skoč na oblast.</p>
+<h3 id="71-mapa-podle-řádků">7.1 Mapa podle řádků</h3>
+<pre><code>  130–270   pole, konstanty, prefs klíče
+  271–390   onCreate, bindViews
+  390–600   UI sheet, karty, collapsibles
+  600–1320  pickery (TUDU, výhybka, nearby), hranice TUDU form
+ 1320–1800  GPS reload, workflow step indicators
+ 1800–2180  summary, cast hint, power presets
+ 2185–2230  onScanDoneContinue / Retry
+ 2567+      onWorkflowFailed
+ 3770–4100  loadDatabase*, scheduleGpsTuduLookup, applyGpsMatch
+ 4525–5000  doWrite / CSV / heslo / lock / onTagCycleComplete
+ 5218+      firstMissingCast, posun na další výhybku
+ 5323–5380  runTriggerAction, onKeyDown
+ 5397–5640  Kontrola overlay</code></pre>
+<h3 id="72-mapa-podle-úkolu">7.2 Mapa podle úkolu</h3>
+<table>
+<tr><th>Úkol</th><th>Metody</th></tr>
+<tr><td>Start</td><td><code>onCreate</code>, <code>tryAutoLoadDefaultDatabase</code>, <code>loadDatabaseFromPath</code></td></tr>
+<tr><td>GPS</td><td><code>scheduleGpsTuduLookup</code>, <code>applyGpsMatch</code>, <code>refreshGpsAtWorkflowStart</code></td></tr>
+<tr><td>Zápis</td><td><code>runTriggerAction</code>, <code>doWrite</code>, <code>doWritePassword</code>, <code>doLock</code></td></tr>
+<tr><td>Po zápisu</td><td><code>onWriteDone</code>, <code>onLockDone</code>, <code>onTagCycleComplete</code>, <code>onScanDoneContinue</code></td></tr>
+<tr><td>CSV</td><td><code>saveRowToCsv</code>, <code>buildCsvRow</code>, <code>reloadCsvFromDiskIfChanged</code>, <code>firstMissingCast</code></td></tr>
+<tr><td>Pickery</td><td><code>showTuduPicker</code>, <code>showVyhybkaPicker</code>, <code>showNearbyTuduPicker</code></td></tr>
+<tr><td>Kontrola</td><td><code>showKontrolaOverlay</code>, <code>runKontrolaRead</code></td></tr>
+<tr><td>Hranice</td><td><code>showTuduBoundaryForm</code>, <code>finishTuduBoundaryWriteCycle</code></td></tr>
+</table>
+<h3 id="73-instance-proměnné-seskupeno">7.3 Instance proměnné (seskupeno)</h3>
+<table>
+<tr><th>Skupina</th><th>Proměnné</th></tr>
+<tr><td>Kroky UI</td><td><code>step1Done</code>, <code>step2Done</code>, <code>step3Done</code></td></tr>
+<tr><td>Workflow</td><td><code>chainWorkflow</code>, <code>workflowRunning</code>, <code>wfStepStates[]</code>, <code>scanDoneAwaitingConfirm</code></td></tr>
+<tr><td>GPS</td><td><code>gpsAutoSelection</code>, <code>gpsTuduLocked</code>, <code>gpsVyhybkaLocked</code>, <code>gpsTestMode</code></td></tr>
+<tr><td>Režimy</td><td><code>kontrolaActive</code>, <code>tuduBoundaryMode</code>, <code>epcTemplateMode</code></td></tr>
+<tr><td>Kontext</td><td><code>epc</code>, <code>currentTudu</code>, <code>currentVyhybka</code>, <code>castPartType</code></td></tr>
+<tr><td>Služby</td><td><code>csvStore</code>, <code>dzsDatabase</code>, <code>uhf</code>, <code>locationCache</code></td></tr>
+</table>
+<h3 id="74-závislosti-mainactivity-doména">7.4 Závislosti MainActivity → doména</h3>
+<pre class="mermaid">flowchart TB
+    MA[MainActivity]
+    MA --&gt; UHF[UhfManager]
+    MA --&gt; EPC[EpcModel]
+    MA --&gt; DZS[DzsDatabase]
+    MA --&gt; CSV[CsvStore]
+    MA --&gt; LOC[LocationCache]
+    MA --&gt; TUDU[Tudu]
+    DZS --&gt; CACHE[DzsIndexCache]
+    DZS --&gt; GPS[VyhybkaGpsStore]
+    CSV --&gt; STOR[CsvStorage]
+    CSV --&gt; BLD[CsvRecordBuilder]
+    MA --&gt; KM[KmExtResolver]</pre>
+<hr>
+<h2 id="8-karty-tříd">8. Karty tříd</h2>
+<p>Každá karta: <strong>vstup → výstup → metody</strong>.</p>
+<h3 id="81-epcmodel">8.1 EpcModel</h3>
+<table>
+<tr><th></th><th></th></tr>
+<tr><td>Soubor</td><td><code>epc/EpcModel.java</code> (~180 ř.)</td></tr>
+<tr><td>Vstup</td><td><code>year</code>, <code>tudu</code>, <code>vyhybka</code>, <code>cast</code>, <code>idRfid</code></td></tr>
+<tr><td>Výstup</td><td>24 hex EPC</td></tr>
+<tr><td>Metody</td><td><code>buildEpc()</code>, <code>decode()</code>, <code>isValid()</code></td></tr>
+<tr><td>Poznámka</td><td>čistá Java – testovatelná na JVM</td></tr>
+</table>
+<pre><code>┌──────┬──────┬───┬───┬─────┬──┬──────────┐
+│ ROK  │TUDU  │T5 │T6 │ VÝH │Č │ ID_RFID  │
+│  4   │ 1-4  │ 2 │ 2 │  3  │1 │    8     │
+└──────┴──────┴───┴───┴─────┴──┴──────────┘
+ Příklad: 202615014A01010100030001</code></pre>
+<p>V terénu je výchozí <strong>Šablona OFF</strong> → EPC = TID (<code>writeEpcFromTid</code>).</p>
+<h3 id="82-tudu">8.2 Tudu</h3>
+<table>
+<tr><th></th><th></th></tr>
+<tr><td>Soubor</td><td><code>data/Tudu.java</code></td></tr>
+<tr><td>Vstup</td><td>řádky DZS (<code>POLOHA</code>, <code>RO_ID</code>, OD/DO)</td></tr>
+<tr><td>Výstup</td><td>TUDU → Výhybka → RoBranch</td></tr>
+<tr><td>Metody</td><td><code>uduCode()</code>, <code>findOrCreate()</code>, <code>resolvedCastMax()</code>, <code>fourPartFamily()</code></td></tr>
+</table>
+<table>
+<tr><th>POLOHA</th><th>Typ</th><th>Čipy</th><th>UI nápověda</th></tr>
+<tr><td><code>J*</code></td><td>3částová</td><td>1–3</td><td>Jazyk / Rovně / Odbočka</td></tr>
+<tr><td><code>C*</code></td><td>4částová</td><td>1–4</td><td>kódy sady (CA/CB, …)</td></tr>
+</table>
+<h3 id="83-uhfmanager">8.3 UhfManager</h3>
+<table>
+<tr><th></th><th></th></tr>
+<tr><td>Soubor</td><td><code>rfid/UhfManager.java</code></td></tr>
+<tr><td>Vstup</td><td>access pwd, EPC 24 hex / TID</td></tr>
+<tr><td>Výstup</td><td><code>WriteResult</code></td></tr>
+<tr><td>Metody</td><td><code>writeEpcFromTid()</code>, <code>writeAccessPassword()</code>, <code>lockTag()</code>, <code>readSingle()</code></td></tr>
+</table>
+<table>
+<tr><th>Banka</th><th>ptr</th><th>len</th><th>Účel</th></tr>
+<tr><td>EPC (1)</td><td>2</td><td>6</td><td>24 hex</td></tr>
+<tr><td>RESERVED (0)</td><td>2</td><td>2</td><td>access heslo</td></tr>
+</table>
+<p>Fallback hesel: <code>11223344</code>, <code>11112222</code>, <code>12345678</code>. Lock: <code>008020</code>.</p>
+<h3 id="84-dzsdatabase">8.4 DzsDatabase</h3>
+<table>
+<tr><th></th><th></th></tr>
+<tr><td>Soubor</td><td><code>data/DzsDatabase.java</code> (~1580 ř.)</td></tr>
+<tr><td>Vstup</td><td>cesta SQLite + GPS</td></tr>
+<tr><td>Výstup</td><td><code>GpsMatch</code>, <code>List&amp;lt;Tudu&amp;gt;</code></td></tr>
+<tr><td>Metody</td><td><code>open()</code>, <code>ensureProximityLoaded()</code>, <code>findNearest*()</code>, <code>loadAllTudu()</code></td></tr>
+</table>
+<h3 id="85-dzsindexcache">8.5 DzsIndexCache</h3>
+<table>
+<tr><th></th><th></th></tr>
+<tr><td>Soubor</td><td><code>data/DzsIndexCache.java</code> (package-private)</td></tr>
+<tr><td>Formát</td><td><code>.pidx</code> <strong>v21</strong>, gzip</td></tr>
+<tr><td>Metody</td><td><code>tryLoadProximity()</code>, <code>saveProximity()</code>, <code>resolveContentHash()</code></td></tr>
+</table>
+<h3 id="86-csvstore-csvstorage-csvrecordbuilder">8.6 CsvStore / CsvStorage / CsvRecordBuilder</h3>
+<table>
+<tr><th>Třída</th><th>Role</th></tr>
+<tr><td><code>CsvStore</code></td><td>in-memory tabulka, index čipů, legacy migrace</td></tr>
+<tr><td><code>CsvStorage</code></td><td>cesta Download/, MediaStore Android 10+</td></tr>
+<tr><td><code>CsvRecordBuilder</code></td><td>factory řádku (odděleno od EpcModel)</td></tr>
+</table>
+<h3 id="87-locationcache">8.7 LocationCache</h3>
+<p>Interval <strong>500 ms</strong>, stale <strong>30 s</strong>. API: <code>getSnapshot()</code>, <code>setTestOverride()</code>, <code>formatStatusText()</code>.</p>
+<h3 id="88-kmextresolver">8.8 KmExtResolver</h3>
+<p><code>fromOdDoKmRef(od, do, kmRef)</code> → <code>chip1</code> = KM_REF, <code>other</code> = druhý konec.</p>
+<hr>
+<h2 id="9-kde-hledat-při-problému">9. Kde hledat při problému</h2>
+<table>
+<tr><th>Symptom</th><th>Příčina</th><th>Kde</th></tr>
+<tr><td>Spouště nic nedělá</td><td>chybí výkon / větev 3částové</td><td><code>runTriggerAction</code>, <code>requirePowerPreset</code>, <code>requireCastBranchSelection</code></td></tr>
+<tr><td>Špatná výhybka</td><td>stale GPS / zámek / cache</td><td><code>applyGpsMatch</code>, <code>gpsVyhybkaLocked</code>, <code>.pidx</code></td></tr>
+<tr><td>DB se dlouho načítá</td><td>první index okolí</td><td><code>DzsDatabase.open</code>, <code>ensureProximityLoaded</code></td></tr>
+<tr><td>CSV z PC se nenačte</td><td>hash / MediaStore / oprávnění</td><td><code>reloadIfChanged</code>, <code>CsvStorage</code></td></tr>
+<tr><td>Zápis EPC selže</td><td>špatné heslo tagu</td><td><code>writeDataWithPresetFallback</code></td></tr>
+<tr><td>Tag zamčen</td><td>lock z dřívějška</td><td><code>lockTag</code>, preset hesla</td></tr>
+<tr><td>Čip se neposune</td><td>dialog stále čeká</td><td><code>scanDoneAwaitingConfirm</code>, <code>onScanDoneContinue</code></td></tr>
+<tr><td>Hranice TUDU špatná data</td><td>režim hranice</td><td><code>saveTuduBoundaryRowToCsv</code></td></tr>
+<tr><td>UI „zamrzlé“ během zápisu</td><td><code>workflowRunning</code></td><td>počkat / <code>onWorkflowFailed</code></td></tr>
+</table>
+<hr>
+<h2 id="příloha-cheat-sheet">Příloha: Cheat sheet</h2>
+<h3 id="struktura-balíčků">Struktura balíčků</h3>
+<pre><code>com.rfidw.app/
+  ui/MainActivity.java          ← orchestrátor (~5640 ř.)
+  epc/EpcModel.java
+  data/{Tudu, DzsDatabase, DzsIndexCache, VyhybkaGpsStore}
+  csv/{CsvStore, CsvStorage, CsvRecordBuilder}
+  rfid/UhfManager.java
+  location/LocationCache.java
+  kmext/KmExtResolver.java</code></pre>
+<h3 id="sharedpreferences-rfidgogps">SharedPreferences <code>rfidgogps</code></h3>
+<p><code>idRfid</code> · <code>epcTemplateMode</code> · <code>tuduModeGps</code> · <code>gpsTestMode</code> · <code>testLat/Lon</code> · <code>dbSourcePath/Uri/DisplayName</code></p>
+<h3 id="trigger-keys">Trigger keys</h3>
+<p><code>139, 280, 293, 311, 312, 522, 523, 0x3E8</code></p>
+<h3 id="výkon">Výkon</h3>
+<table>
+<tr><th>UI popisek</th><th>dBm</th><th>Konstanta</th></tr>
+<tr><td><strong>Daleko</strong></td><td>16</td><td><code>POWER_PRESET_KOLEJI_DBM</code></td></tr>
+<tr><td><strong>Blízko</strong></td><td>1</td><td><code>POWER_PRESET_RUCE_DBM</code></td></tr>
+</table>
+<h3 id="csv-sloupce">CSV sloupce</h3>
+<p><code>ID_RFID;EPC;TID;TUDU;OBJEKT;POZICE;POLOHA;RO_ID_1;RO_ID_2;KM_EXT;LAT;LON;ACCURACY_M;GPS DATE</code></p>
+<h3 id="build-a-dokumentace">Build a dokumentace</h3>
+<pre><code>./gradlew assembleRelease
+python3 docs/generate_prirucka_vyvojare.py        # PDF
+python3 docs/generate_prirucka_vyvojare_html.py   # HTML + Mermaid</code></pre>
+<h3 id="související-docs">Související docs</h3>
+<table>
+<tr><th>Dokument</th><th>Účel</th></tr>
+<tr><td><code>prirucka-teren.md</code></td><td>terénní operátor</td></tr>
+<tr><td><code>prirucka-uzivatele.md</code></td><td>uživatelská příručka</td></tr>
+<tr><td><code>prirucka-vyvojare.html</code></td><td><strong>tato</strong> příručka s vykresleným Mermaid</td></tr>
+<tr><td><code>INDEXACE_DZS.md</code></td><td>DZS detail (část zastaralá)</td></tr>
+<tr><td><code>AGENTS.md</code></td><td>build v Cursor Cloud</td></tr>
+</table>
+<hr>
+<p class="footer-note">RFID Go GPS 3.155 – technická příručka pro vývojáře</p>
+</main>
+</div>
+</body>
+</html>
