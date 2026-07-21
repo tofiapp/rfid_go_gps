@@ -9,11 +9,20 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer
 
-from generate_manual import MUTED, build_styles, extract_meta, parse_markdown, register_fonts
+from generate_manual import (
+    MUTED,
+    IMAGE_ICON_MAX,
+    build_styles,
+    extract_meta,
+    make_image,
+    parse_markdown,
+    register_fonts,
+)
 
 ROOT = Path(__file__).resolve().parent
 MD_PATH = ROOT / "prirucka-teren.md"
 OUT_PATH = ROOT / "RFID_Go_GPS_prirucka_teren.pdf"
+ICON_PATH = ROOT.parent / "fotky_pro_prirucku" / "ikona.png"
 
 
 def add_page_number(canvas, doc) -> None:
@@ -43,21 +52,24 @@ def main() -> None:
     )
 
     story: list = []
-    story.append(Spacer(1, 3.5 * cm))
+    story.append(Spacer(1, 2.2 * cm))
+    if ICON_PATH.is_file():
+        story.append(make_image(ICON_PATH, max_width=IMAGE_ICON_MAX, max_height=IMAGE_ICON_MAX))
+        story.append(Spacer(1, 0.8 * cm))
     story.append(Paragraph("RFID Go GPS", styles["title"]))
     story.append(Paragraph("Příručka pro terén", styles["subtitle"]))
     if version:
         story.append(Paragraph(f"Verze aplikace {version}", styles["subtitle"]))
-    story.append(Spacer(1, 1.5 * cm))
+    story.append(Spacer(1, 1.2 * cm))
     story.append(
         Paragraph(
             "Každodenní práce v terénu – obrazovka, zápis jednoho tagu, "
-            "barvy, výhybky a hranice TUDU. Hlavní postup je kapitola 3.",
+            "výhybky, hranice TUDU a kontrola. Hlavní postup je kapitola 3.",
             styles["body"],
         )
     )
     story.append(PageBreak())
-    story.extend(parse_markdown(md, styles))
+    story.extend(parse_markdown(md, styles, md_path=MD_PATH))
 
     doc.build(story, onFirstPage=add_page_number, onLaterPages=add_page_number)
     print(f"Generated: {OUT_PATH}")

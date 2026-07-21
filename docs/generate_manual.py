@@ -16,6 +16,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     CondPageBreak,
     HRFlowable,
+    Image,
     KeepTogether,
     PageBreak,
     Paragraph,
@@ -29,11 +30,15 @@ from reportlab.platypus import (
 FRAME_WIDTH = A4[0] - 4 * cm
 FRAME_HEIGHT = A4[1] - 2 * cm - 2.2 * cm
 SUBSECTION_START_MIN = 3 * cm
+IMAGE_MAX_WIDTH = 11 * cm
+IMAGE_MAX_HEIGHT = 13 * cm
+IMAGE_ICON_MAX = 4.5 * cm
 
 ROOT = Path(__file__).resolve().parent
 MD_PATH = ROOT / "prirucka-uzivatele.md"
 OUT_PATH = ROOT / "RFID_Go_GPS_prirucka.pdf"
 FONT_DIR = Path("/usr/share/fonts/truetype/dejavu")
+IMG_RE = re.compile(r"^!\[([^\]]*)\]\(([^)]+)\)\s*$")
 
 PRIMARY = colors.HexColor("#1565C0")
 PRIMARY_DARK = colors.HexColor("#0D47A1")
@@ -193,6 +198,30 @@ def inline_format(text: str, mono: str) -> str:
     return text
 
 
+def make_image(path: Path, *, max_width: float = IMAGE_MAX_WIDTH, max_height: float = IMAGE_MAX_HEIGHT) -> Image:
+    img = Image(str(path))
+    width = float(img.imageWidth)
+    height = float(img.imageHeight)
+    scale = min(max_width / width, max_height / height, 1.0)
+    img.drawWidth = width * scale
+    img.drawHeight = height * scale
+    img.hAlign = "CENTER"
+    return img
+
+
+def resolve_md_image(path_str: str, md_dir: Path) -> Path | None:
+    raw = path_str.strip()
+    if raw.startswith(("http://", "https://")):
+        return None
+    candidate = (md_dir / raw).resolve()
+    if candidate.is_file():
+        return candidate
+    alt = (ROOT.parent / raw.lstrip("./")).resolve()
+    if alt.is_file():
+        return alt
+    return None
+
+
 def parse_table(lines: list[str], styles: dict[str, ParagraphStyle]) -> Table:
     rows_raw = [line.strip().strip("|") for line in lines if line.strip()]
     parsed: list[list[str]] = []
@@ -327,7 +356,7 @@ def _flush_subsection(flow: list, subsection: list | None, *, pull_intro: bool =
     _append_atomic(flow, subsection)
 
 
-def parse_markdown(md: str, styles: dict[str, ParagraphStyle]) -> list:
+def parse_markdown(md: str, styles: dict[str, ParagraphStyle], *, md_path: Path | None = None) -> list:
     flow: list = []
     lines = md.splitlines()
     i = 0
@@ -336,6 +365,7 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle]) -> list:
     first_chapter = True
     first_subsection_in_chapter = True
     subsection: list | None = None
+    md_dir = (md_path or MD_PATH).resolve().parent
 
     def append_item(item) -> None:
         if subsection is not None:
@@ -354,11 +384,55 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle]) -> list:
         if skip_preamble:
             if line.startswith("## "):
                 skip_preamble = False
-            elif line.strip() == "" or line.startswith("---") or line.strip().startswith("**"):
+            elif (
+                line.strip() == ""
+                or line.startswith("---")
+                or line.strip().startswith("**")
+                or IMG_RE.match(line.strip())
+                or (
+                    line.strip().startswith("*")
+                    and line.strip().endswith("*")
+                    and not line.strip().startswith("**")
+                )
+            ):
                 i += 1
                 continue
             else:
                 skip_preamble = False
+
+        img_match = IMG_RE.match(line.strip())
+        if img_match:
+            alt, src = img_match.group(1), img_match.group(2)
+            resolved = resolve_md_image(src, md_dir)
+            if resolved is not None:
+                name_lower = resolved.name.lower()
+                if "ikona" in name_lower:
+                    max_w = max_h = IMAGE_ICON_MAX
+                else:
+                    max_w, max_h = IMAGE_MAX_WIDTH, IMAGE_MAX_HEIGHT
+                figure = [Spacer(1, 6), make_image(resolved, max_width=max_w, max_height=max_h)]
+                # Keep optional italic caption on the same page as the figure.
+                j = i + 1
+                while j < len(lines) and lines[j].strip() == "":
+                    j += 1
+                if j < len(lines):
+                    cap = lines[j].strip()
+                    if cap.startswith("*") and cap.endswith("*") and not cap.startswith("**"):
+                        figure.append(
+                            Paragraph(inline_format(cap.strip("*"), "DejaVuMono"), styles["footer"])
+                        )
+                        i = j
+                figure.append(Spacer(1, 8))
+                append_item(KeepTogether(figure))
+            else:
+                append_item(
+                    Paragraph(
+                        f"<i>[Obrázek nenalezen: {escape_xml(src)}]</i>",
+                        styles["quote"],
+                    )
+                )
+            i += 1
+            continue
 
         if line.startswith("---"):
             next_line = _peek_next_content_line(lines, i + 1)
@@ -403,7 +477,6 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle]) -> list:
             else:
                 flow.append(table)
                 flow.append(Spacer(1, 8))
-            i += 1
             continue
 
         if re.match(r"^\d+\.\s", line.strip()):
@@ -471,14 +544,14 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle]) -> list:
             i += 1
             continue
 
-        if line.strip().startswith("*") and line.strip().endswith("*"):
+        if line.strip().startswith("*") and line.strip().endswith("*") and not line.strip().startswith("**"):
             append_item(Paragraph(inline_format(line.strip().strip("*"), "DejaVuMono"), styles["footer"]))
             i += 1
             continue
 
         para_lines = [line.strip()]
         i += 1
-        while i < len(lines) and lines[i].strip() and not lines[i].startswith(("#", "|", "-", ">", "---")) and not re.match(r"^\d+\.\s", lines[i].strip()):
+        while i < len(lines) and lines[i].strip() and not lines[i].startswith(("#", "|", "-", ">", "---", "![")) and not re.match(r"^\d+\.\s", lines[i].strip()):
             para_lines.append(lines[i].strip())
             i += 1
         append_item(Paragraph(inline_format(" ".join(para_lines), "DejaVuMono"), styles["body"]))
