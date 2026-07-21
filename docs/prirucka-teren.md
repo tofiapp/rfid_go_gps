@@ -26,22 +26,16 @@ Technické detaily: `RFID_Go_GPS_prirucka.pdf`.
 
 1. Zapněte aplikaci → zelené GPS nahoře.
 2. V kartě zkontrolujte **UDU**, **výhybku**, **čip**. Špatně → kap. 2.
-3. **Daleko** (tag v koleji) nebo **Blízko** (u antény). Bez toho spoušť nefunguje.
+3. **Daleko** (tag v koleji) nebo **Blízko** (u antény). Bez toho spoušť nefunguje (Načtení oranžové).
 4. U 3částové výhybky: **Jazyk** / **Rovně** / **Odbočka**.
 5. Spoušť.
 6. Dialog **„Načetli jste“** → **Pokračovat** / **Opakovat**.
 
 ![Hlavní obrazovka](../fotky_pro_prirucku/hlavni_strana.png)
 
-| → | Prvek |
-|---|--------|
-| **Daleko** / **Blízko** | výkon – povinné před spouští |
-| GPS | zelené = fix |
-| Tři kroky | **UDU** → **Načtení** → **Hotovo** (šedá / modrá / zelená / oranžová / červená) |
-| Karta | UDU, výhybka, čip |
-| Uprostřed | nápověda čipu; **Jazyk** / **Rovně** / **Odbočka** |
-| **Kontrola** | ověření bez zápisu → kap. 4 |
-| **Hranice TUDU** | → kap. 3 |
+*Nahoře Daleko/Blízko a GPS · tři kroky UDU → Načtení → Hotovo · karta s výběrem · uprostřed nápověda čipu.*
+
+**Barvy kroků:** šedá = ne · modrá = běží · zelená ✓ = hotovo · oranžová = chybí Daleko/Blízko · červená = chyba
 
 ### Úspěch
 
@@ -49,20 +43,11 @@ Zápis platí jen s dialogem **„Načetli jste“**.
 
 ![Úspěšné načtení](../fotky_pro_prirucku/uspesne_nacteni.png)
 
-| → | Prvek |
-|---|--------|
-| Zelené fajfky | hotovo |
-| **Pokračovat** | další čip |
-| **Opakovat** | stejný čip znovu |
-
 ### Neúspěch
 
 ![Neúspěšné načtení](../fotky_pro_prirucku/neuspesne_nacteni.png)
 
-| → | Prvek |
-|---|--------|
-| **Načtěte znovu** + červené **Načtení** | selhalo |
-| Co dělat | znovu přiložit, Daleko ↔ Blízko, jiná strana tagu |
+*Červené Načtení + „Načtěte znovu“ = selhalo → znovu přiložit, Daleko ↔ Blízko, jiná strana tagu.*
 
 ---
 
@@ -73,20 +58,9 @@ Po ruční změně GPS nepřepíná, dokud neklepnete **Načíst polohu**.
 
 ![Výběr UDU](../fotky_pro_prirucku/vyber_udu.png)
 
-| → | Prvek |
-|---|--------|
-| Seznam | 10 nejbližších UDU (podle vzdálenosti) |
-| Oranžové kolečko | výběr |
-| **Zrušit** | zavřít |
-
 ![Výběr výhybky](../fotky_pro_prirucku/vyber_vyhybky.png)
 
-| → | Prvek |
-|---|--------|
-| Hledat… | filtr |
-| Vzdálenost | u položky |
-| **Chybí N čipů** | nedokončená |
-| Zašedlé | hotové – nejdou vybrat |
+*U výhybky: **Chybí N čipů** = nedokončená · zašedlé = hotové (nejdou vybrat).*
 
 3částová = Jazyk/Rovně/Odbočka · 4částová = části z DB. Aplikace nastaví první chybějící čip.
 
@@ -97,19 +71,11 @@ Po ruční změně GPS nepřepíná, dokud neklepnete **Načíst polohu**.
 Zápis na hranici dvou úseků (ne výhybka 1–4).
 
 1. **Hranice TUDU** v kartě.
-2. Vyplnit → **Použít**.
+2. Vyplnit TUDU, Objekt (KM_EXT volitelné) → **Použít**.
 3. Daleko/Blízko → spoušť.
 4. Po zápisu režim skončí.
 
 ![Hranice TUDU](../fotky_pro_prirucku/hranice_tudu.png)
-
-| → | Prvek |
-|---|--------|
-| **Vybrat TUDU z okolí** | podle GPS |
-| **TUDU (ručně)** | ruční kód |
-| **Objekt** | kolej / výhybka |
-| **KM_EXT** | volitelné |
-| **Použít** | potvrdit |
 
 Ukončení dřív: změna UDU/výhybky, nebo **Načíst polohu**.
 
@@ -120,15 +86,9 @@ Ukončení dřív: změna UDU/výhybky, nebo **Načíst polohu**.
 Ověření už zapsaného tagu – **nic se nezapisuje**.
 
 1. Daleko nebo Blízko.
-2. Spoušť.
+2. Spoušť → údaje z tagu (+ z CSV, pokud tam je).
 
 ![Kontrola](../fotky_pro_prirucku/kontrola.png)
-
-| → | Prvek |
-|---|--------|
-| **EPC** / **TID** | z tagu |
-| **TUDU**, **OBJEKT**, … | z CSV |
-| ✕ | zavřít |
 
 Mimo CSV → **„Tag není v CSV“**. Více shod → šipky.
 
