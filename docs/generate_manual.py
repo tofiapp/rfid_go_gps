@@ -30,9 +30,13 @@ from reportlab.platypus import (
 FRAME_WIDTH = A4[0] - 4 * cm
 FRAME_HEIGHT = A4[1] - 2 * cm - 2.2 * cm
 SUBSECTION_START_MIN = 3 * cm
-IMAGE_MAX_WIDTH = 11 * cm
-IMAGE_MAX_HEIGHT = 13 * cm
+IMAGE_MAX_WIDTH = 12 * cm
+IMAGE_MAX_HEIGHT = 14 * cm
 IMAGE_ICON_MAX = 4.5 * cm
+# Wide crops (e.g. error banner) stay readable without dominating the page.
+IMAGE_WIDE_MAX_HEIGHT = 6.5 * cm
+# Modal/dialog screenshots are shorter than full phone frames.
+IMAGE_DIALOG_MAX_HEIGHT = 11 * cm
 
 ROOT = Path(__file__).resolve().parent
 MD_PATH = ROOT / "prirucka-uzivatele.md"
@@ -144,6 +148,19 @@ def build_styles(regular: str, bold: str, mono: str) -> dict[str, ParagraphStyle
             textColor=MUTED,
             alignment=TA_CENTER,
         ),
+        "caption": ParagraphStyle(
+            "caption",
+            parent=base["Normal"],
+            fontName=regular,
+            fontSize=9,
+            leading=12.5,
+            textColor=MUTED,
+            alignment=TA_LEFT,
+            leftIndent=8,
+            rightIndent=8,
+            spaceBefore=4,
+            spaceAfter=2,
+        ),
         "toc": ParagraphStyle(
             "toc",
             parent=base["Normal"],
@@ -195,7 +212,32 @@ def inline_format(text: str, mono: str) -> str:
     text = escape_xml(text)
     text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
     text = re.sub(r"`([^`]+)`", rf'<font name="{mono}">\1</font>', text)
+    # Markdown links → visible label only (PDF has no in-doc anchors).
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
     return text
+
+
+def image_limits_for(path: Path) -> tuple[float, float]:
+    """Pick max width/height from filename and aspect ratio."""
+    name = path.name.lower()
+    if "ikona" in name:
+        return IMAGE_ICON_MAX, IMAGE_ICON_MAX
+
+    # Probe intrinsic size without building a flowable yet.
+    probe = Image(str(path))
+    w, h = float(probe.imageWidth), float(probe.imageHeight)
+    aspect = w / h if h else 1.0
+
+    if aspect >= 1.6:
+        # Banner / cropped status strip (e.g. neuspesne_nacteni).
+        return IMAGE_MAX_WIDTH, IMAGE_WIDE_MAX_HEIGHT
+    if aspect >= 0.85 or any(
+        key in name for key in ("vyber_", "hranice_", "dialog")
+    ):
+        # Near-square or modal dialogs.
+        return IMAGE_MAX_WIDTH, IMAGE_DIALOG_MAX_HEIGHT
+    # Tall full-screen phone shots.
+    return 10.5 * cm, IMAGE_MAX_HEIGHT
 
 
 def make_image(path: Path, *, max_width: float = IMAGE_MAX_WIDTH, max_height: float = IMAGE_MAX_HEIGHT) -> Image:
@@ -405,11 +447,7 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle], *, md_path: Path 
             alt, src = img_match.group(1), img_match.group(2)
             resolved = resolve_md_image(src, md_dir)
             if resolved is not None:
-                name_lower = resolved.name.lower()
-                if "ikona" in name_lower:
-                    max_w = max_h = IMAGE_ICON_MAX
-                else:
-                    max_w, max_h = IMAGE_MAX_WIDTH, IMAGE_MAX_HEIGHT
+                max_w, max_h = image_limits_for(resolved)
                 figure = [Spacer(1, 6), make_image(resolved, max_width=max_w, max_height=max_h)]
                 # Keep optional italic caption on the same page as the figure.
                 j = i + 1
@@ -418,8 +456,9 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle], *, md_path: Path 
                 if j < len(lines):
                     cap = lines[j].strip()
                     if cap.startswith("*") and cap.endswith("*") and not cap.startswith("**"):
+                        caption_style = styles.get("caption", styles["footer"])
                         figure.append(
-                            Paragraph(inline_format(cap.strip("*"), "DejaVuMono"), styles["footer"])
+                            Paragraph(inline_format(cap.strip("*"), "DejaVuMono"), caption_style)
                         )
                         i = j
                 figure.append(Spacer(1, 8))
