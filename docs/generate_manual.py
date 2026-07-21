@@ -16,6 +16,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     CondPageBreak,
     HRFlowable,
+    Image as RLImage,
     KeepTogether,
     PageBreak,
     Paragraph,
@@ -138,6 +139,17 @@ def build_styles(regular: str, bold: str, mono: str) -> dict[str, ParagraphStyle
             fontSize=8,
             textColor=MUTED,
             alignment=TA_CENTER,
+        ),
+        "caption": ParagraphStyle(
+            "caption",
+            parent=base["Normal"],
+            fontName=regular,
+            fontSize=9,
+            leading=12,
+            textColor=MUTED,
+            alignment=TA_CENTER,
+            spaceBefore=2,
+            spaceAfter=10,
         ),
         "toc": ParagraphStyle(
             "toc",
@@ -467,6 +479,35 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle]) -> list:
                 )
             continue
 
+        img_match = re.match(r"^!\[([^\]]*)\]\(([^)]+)\)\s*$", line.strip())
+        if img_match:
+            alt, rel = img_match.group(1), img_match.group(2)
+            img_path = (ROOT / rel).resolve() if not Path(rel).is_absolute() else Path(rel)
+            if not img_path.exists():
+                # also try relative to docs/
+                img_path = (ROOT / Path(rel).name).resolve()
+            if img_path.exists():
+                max_w = FRAME_WIDTH * 0.78
+                rl_img = RLImage(str(img_path))
+                iw, ih = float(rl_img.imageWidth), float(rl_img.imageHeight)
+                scale = min(max_w / iw, 1.0, (FRAME_HEIGHT * 0.55) / ih)
+                rl_img.drawWidth = iw * scale
+                rl_img.drawHeight = ih * scale
+                caption = Paragraph(inline_format(alt, "DejaVuMono"), styles["caption"]) if alt else None
+                block = [rl_img, Spacer(1, 4)]
+                if caption:
+                    block.append(caption)
+                append_item(KeepTogether(block))
+            else:
+                append_item(
+                    Paragraph(
+                        f"<i>[Obrázek nenalezen: {rel}]</i>",
+                        styles["quote"],
+                    )
+                )
+            i += 1
+            continue
+
         if line.strip() == "":
             i += 1
             continue
@@ -478,7 +519,12 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle]) -> list:
 
         para_lines = [line.strip()]
         i += 1
-        while i < len(lines) and lines[i].strip() and not lines[i].startswith(("#", "|", "-", ">", "---")) and not re.match(r"^\d+\.\s", lines[i].strip()):
+        while (
+            i < len(lines)
+            and lines[i].strip()
+            and not lines[i].startswith(("#", "|", "-", ">", "---", "!["))
+            and not re.match(r"^\d+\.\s", lines[i].strip())
+        ):
             para_lines.append(lines[i].strip())
             i += 1
         append_item(Paragraph(inline_format(" ".join(para_lines), "DejaVuMono"), styles["body"]))
@@ -507,16 +553,15 @@ def build_toc(styles: dict[str, ParagraphStyle]) -> list:
         "3. První spuštění",
         "4. Přehled obrazovky",
         "5. Příručka pro terén",
-        "6. Rychlý start v terénu",
-        "7. Zápis tagu",
-        "8. Výběr UDU, výhybky a čipu",
-        "9. GPS poloha",
-        "10. Kontrola načteného tagu",
-        "11. Hranice TUDU",
-        "12. Práce s CSV souborem",
-        "13. Časté situace a řešení",
-        "14. Panel Pokročilé",
-        "15. Slovníček",
+        "6. Zápis tagu",
+        "7. Výběr UDU, výhybky a čipu",
+        "8. GPS poloha",
+        "9. Kontrola načteného tagu",
+        "10. Hranice TUDU",
+        "11. Práce s CSV souborem",
+        "12. Časté situace a řešení",
+        "13. Panel Pokročilé",
+        "14. Slovníček",
     ]
     flow = [Paragraph("Obsah", styles["h1"]), Spacer(1, 6)]
     for entry in entries:

@@ -53,7 +53,7 @@ Aplikace má **jednu hlavní obrazovku** (`MainActivity`) a vyjížděcí panel 
 1. Uložte databázi **`DZS_PASPORT_TPI.sqlite`** do složky **Stažené soubory** (Download) na čtečce – aplikace ji při startu najde automaticky.
 2. Povolte **polohu** (GPS) a případně **přístup ke všem souborům**, aby byl CSV viditelný z PC přes USB.
 3. Po načtení databáze vyčkejte na GPS fix – aplikace doplní **UDU**, **výhybku** a **první chybějící čip** podle existujícího CSV.
-4. Zvolte výkon **v koleji** (16 dBm) nebo **v ruce** (1 dBm).
+4. Zvolte výkon **Daleko** (16 dBm) nebo **Blízko** (1 dBm).
 5. U každého čipu 3částové výhybky zvolte **Jazyk**, **Rovně** nebo **Odbočka**.
 6. Stiskněte **spouště čtečky** – proběhne TID→EPC, zápis CSV, heslo a zamčení.
 7. V dialogu **„Načetli jste“** zvolte **Pokračovat** (další čip) nebo **Opakovat**. **Pokračovat** lze potvrdit i spouštěm.
@@ -160,8 +160,8 @@ Stejný fallback na preset hesla jako u zápisu EPC.
 ### 6. Výkon čtečky
 
 Před zápisem je nutné zvolit preset:
-- **v koleji** – 16 dBm
-- **v ruce** – 1 dBm
+- **Daleko** – 16 dBm
+- **Blízko** – 1 dBm
 
 Ruční nastavení výkonu v dBm je k dispozici v panelu Pokročilé (viz níže). Stejné presety má i režim **Kontrola**.
 
@@ -169,7 +169,7 @@ Ruční nastavení výkonu v dBm je k dispozici v panelu Pokročilé (viz níže
 
 Tlačítko **Kontrola** na hlavní obrazovce otevře celoobrazovkový režim pro **ověření již zapsaného tagu** proti tabulce CSV:
 
-1. Zvolte výkon (v koleji / v ruce).
+1. Zvolte výkon (**Daleko** / **Blízko**).
 2. Načtěte tag spouštěm – aplikace přečte **EPC** a **TID**.
 3. Pokud tag existuje v CSV, zobrazí se uložené údaje: EPC, TID, TUDU, OBJEKT, POZICE, POLOHA, RO_ID, KM_EXT.
 4. Pokud stejný tag odpovídá **více řádkům** CSV, lze mezi nimi přepínat šipkami (např. `2 / 5`).
@@ -227,7 +227,7 @@ V terénu se používá spouště (celý řetězec), ale ruční tlačítka jsou
 
 ### Ruční výkon čtečky (dBm)
 
-Kromě presetů **v koleji / v ruce** lze v Pokročilých zadat konkrétní hodnotu v dBm a tlačítkem **Nastavit** ji aplikovat na čtečku.
+Kromě presetů **Daleko / Blízko** lze v Pokročilých zadat konkrétní hodnotu v dBm a tlačítkem **Nastavit** ji aplikovat na čtečku.
 
 ### Preset access hesla
 
