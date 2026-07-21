@@ -72,13 +72,13 @@ Kompletní průvodce načítáním tagů (indikátory kroků, barvy, výběr vý
 - **PDF:** `RFID_Go_GPS_prirucka_teren.pdf`
 - **Zdroj:** `docs/prirucka-teren.md` → `python3 docs/generate_prirucka_teren.py`
 
-Tato hlavní příručka doplňuje technické detaily (CSV, GPS, Kontrola, Pokročilé). Pro každodenní práci v terénu použijte příručku pro terén (začněte kapitolou 2 – zápis tagu).
+Tato hlavní příručka doplňuje technické detaily (CSV, GPS, Kontrola, Pokročilé). Pro každodenní práci v terénu použijte příručku pro terén (začněte kapitolou 1 – běžný zápis).
 
 ---
 
 ## 6. Rychlý start v terénu
 
-Zkrácený postup pro běžný zápis jednoho tagu (podrobnosti viz **příručka pro terén**, kapitola 2):
+Zkrácený postup pro běžný zápis jednoho tagu (podrobnosti viz **příručka pro terén**, kapitola 1):
 
 1. Ověřte, že je načtena databáze a máte GPS fix.
 2. Zkontrolujte **UDU**, **výhybku** a **čip** v náhledovém panelu.
@@ -167,7 +167,7 @@ Tlačítko **Kontrola** slouží k **ověření již zapsaného tagu** – nic s
 
 ## 11. Hranice TUDU
 
-Postup zápisu tagu na hranici dvou úseků tratě je v **příručce pro terén** – kapitola 4 (`RFID_Go_GPS_prirucka_teren.pdf`).
+Postup zápisu tagu na hranici dvou úseků tratě je v **příručce pro terén** – kapitola 3 (`RFID_Go_GPS_prirucka_teren.pdf`).
 
 ---
 

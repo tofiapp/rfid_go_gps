@@ -63,8 +63,8 @@ def main() -> None:
     story.append(Spacer(1, 1.2 * cm))
     story.append(
         Paragraph(
-            "Terénní postup: obrazovka → zápis tagu → výběr / hranice TUDU / kontrola. "
-            "Hlavní postup je kapitola 2.",
+            "Postup práce: běžný zápis → oprava výběru → hranice TUDU / kontrola. "
+            "Začněte kapitolou 1.",
             styles["body"],
         )
     )

@@ -179,7 +179,7 @@ Režim Kontrola **nezapisuje** do tagu ani do CSV – slouží jen ke kontrole v
 
 ### 8. Hranice TUDU
 
-Zápis tagu na hranici dvou úseků tratě – viz **příručka pro terén** ([`docs/RFID_Go_GPS_prirucka_teren.pdf`](docs/RFID_Go_GPS_prirucka_teren.pdf)), kapitola 4.
+Zápis tagu na hranici dvou úseků tratě – viz **příručka pro terén** ([`docs/RFID_Go_GPS_prirucka_teren.pdf`](docs/RFID_Go_GPS_prirucka_teren.pdf)), kapitola 3.
 
 ---
 
