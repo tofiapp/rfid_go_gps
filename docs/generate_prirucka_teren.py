@@ -21,7 +21,7 @@ def add_page_number(canvas, doc) -> None:
     canvas.setFont("DejaVu", 8)
     canvas.setFillColor(MUTED)
     canvas.drawRightString(A4[0] - 2 * cm, 1.2 * cm, f"Strana {doc.page}")
-    canvas.drawString(2 * cm, 1.2 * cm, "RFID Go GPS – Jednoduchá příručka pro terén")
+    canvas.drawString(2 * cm, 1.2 * cm, "RFID Go GPS – Příručka pro terén")
     canvas.restoreState()
 
 
@@ -38,21 +38,22 @@ def main() -> None:
         rightMargin=2 * cm,
         topMargin=2 * cm,
         bottomMargin=2.2 * cm,
-        title="RFID Go GPS – Jednoduchá příručka pro terén",
+        title="RFID Go GPS – Příručka pro terén",
         author="RFID Go GPS",
     )
 
     story: list = []
     story.append(Spacer(1, 3.5 * cm))
     story.append(Paragraph("RFID Go GPS", styles["title"]))
-    story.append(Paragraph("Jednoduchá příručka pro terén", styles["subtitle"]))
+    story.append(Paragraph("Příručka pro terén", styles["subtitle"]))
     if version:
         story.append(Paragraph(f"Verze aplikace {version}", styles["subtitle"]))
     story.append(Spacer(1, 1.5 * cm))
     story.append(
         Paragraph(
-            "Návod pro každodenní práci – načítání tagů, barvy na obrazovce "
-            "a zápis na hranici úseku. Bez technických detailů.",
+            "Každodenní práce v terénu – obrazovka, standardní zápis tagu, "
+            "barvy indikátorů a hranice TUDU. Začněte kapitolou 0 (jak číst) "
+            "a kapitolou 4 (jeden tag).",
             styles["body"],
         )
     )

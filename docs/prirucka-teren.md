@@ -1,19 +1,68 @@
-# RFID Go GPS – Jednoduchá příručka pro terén
+# RFID Go GPS – Příručka pro terén
 
-**Verze aplikace:** 3.147  
+**Verze aplikace:** 3.155  
 **Zařízení:** Chainway C5 (čtečka s GPS)
+
+---
+
+## Obsah
+
+| # | Kapitola | Kdy číst |
+|---|----------|----------|
+| 0 | [Jak číst tuto příručku](#0-jak-číst-tuto-příručku) | vždy jako první |
+| 1 | [Co aplikace dělá](#1-co-aplikace-dělá) | orientace |
+| 2 | [Co uvidíte na obrazovce](#2-co-uvidíte-na-obrazovce) | před první směnou |
+| 3 | [Příprava před načítáním](#3-příprava-před-načítáním) | každý start |
+| 4 | [Standardní postup – jeden tag](#4-standardní-postup--jeden-tag) | hlavní práce v terénu |
+| 5 | [Barvy a indikátory](#5-barvy-a-indikátory) | když něco bliká nebo blokuje |
+| 6 | [Výhybky a čipy](#6-výhybky-a-čipy) | výběr, přepínání, typy |
+| 7 | [Hranice TUDU](#7-hranice-tudu) | zápis na hranici úseku |
+| 8 | [Když něco nejde](#8-když-něco-nejde) | problém v terénu |
+| 9 | [Slovníček](#9-slovníček) | rychlá reference |
+
+> Tato příručka popisuje **každodenní práci v terénu**. Technické detaily (CSV, Kontrola, Pokročilé) jsou v `RFID_Go_GPS_prirucka.pdf`.
+
+---
+
+## 0. Jak číst tuto příručku
+
+### 0.1 Dvě úrovně
+
+```
+ÚROVEŇ 1 – Běžná směna
+  └─ kapitoly 2 + 3 + 4
+
+ÚROVEŇ 2 – Speciální situace a problémy
+  └─ kapitoly 5–8 (podle potřeby) + slovníček
+```
+
+Nejdřív si projděte **obrazovku** a **standardní postup**. Barvy, výběr výhybky a hranice TUDU si nechte jako návratové body, až je budete potřebovat.
+
+### 0.2 Kam jít podle otázky
+
+| Ptám se… | Kapitola |
+|----------|----------|
+| Jak zapsat jeden tag od začátku do konce? | [4](#4-standardní-postup--jeden-tag) |
+| Co znamenají barvy nahoře / tečky pod stavem? | [5](#5-barvy-a-indikátory) |
+| Spouště nic nedělá? | [5](#5-barvy-a-indikátory) + [8](#8-když-něco-nejde) |
+| Aplikace ukazuje špatnou výhybku? | [6.1](#61-výběr-výhybky) |
+| Kolik čipů má výhybka a v jakém pořadí? | [6.2](#62-kolik-čipů-a-jaké-části) |
+| Stojím na hranici dvou úseků? | [7](#7-hranice-tudu) |
+| Tag se nenačte / zápis selhal? | [8](#8-když-něco-nejde) |
 
 ---
 
 ## 1. Co aplikace dělá
 
-RFID Go GPS slouží k **zápisu tagů na výhybkách** v terénu. Aplikace:
+### 1.1 Jedna věta
 
-- podle GPS najde **úsek tratě** a **výhybku**, na které stojíte,
-- zapíše tag a uloží záznam do tabulky,
-- u každého zápisu si pamatuje polohu čtečky.
+Aplikace podle GPS najde **úsek tratě** a **výhybku**, na které stojíte, **zapíše UHF tag** a uloží záznam včetně polohy čtečky.
 
-Tato příručka popisuje **každodenní práci v terénu** – načítání tagů, barvy na obrazovce a zápis na hranici úseku. Technické detaily jsou v hlavní příručce `RFID_Go_GPS_prirucka.pdf`.
+### 1.2 Co od ní čekat
+
+- podle GPS doplní **UDU** a **výhybku**,
+- u každého zápisu si pamatuje polohu čtečky,
+- vede vás třemi kroky nahoře: **UDU → Načtení → Hotovo**.
 
 ---
 
@@ -38,31 +87,15 @@ Tato příručka popisuje **každodenní práci v terénu** – načítání tag
 
 > **Bez GPS?** Vyjděte na volné místo, nebo v kartě UDU zapněte **Testovací režim GPS** a vyberte polohu ze seznamu.
 
+Až sedí GPS i výhybka, pokračujte kapitolou [4](#4-standardní-postup--jeden-tag).
+
 ---
 
-## 4. Načítání tagů – krok za krokem
+## 4. Standardní postup – jeden tag
 
-### 4.1 Barvy indikátorů
+Toto je **hlavní pracovní postup**. Detaily k barvám a výběru výhybky jsou v kapitolách 5 a 6.
 
-Sledujte tři kroky nahoře (**UDU → Načtení → Hotovo**):
-
-| Barva | Co znamená |
-|-------|-------------|
-| Šedá | Krok ještě neproběhl |
-| Modrá | Právě probíhá |
-| Zelená ✓ | Hotovo |
-| Oranžová | Něco chybí – např. nevybrali jste **V koleji** nebo **V ruce** |
-| Červená | Chyba – zkuste znovu |
-
-Pod stavem čtečky jsou **čtyři tečky** (zápis tagu → uložení → heslo → zamčení). Stejné barvy: šedá, modrá, zelená, červená.
-
-**Typické situace:**
-
-- Krok **Načtení oranžový** → nejdřív zvolte **V koleji** nebo **V ruce**.
-- Krok **Načtení červený** → zápis selhal, přiložte tag znovu.
-- Krok **Hotovo zelený** ✓ → objevil se dialog **„Načetli jste“** – zápis proběhl.
-
-### 4.2 V koleji nebo v ruce (povinné)
+### 4.1 Před stiskem spouště (povinné)
 
 Před načtením tagu **vždy zvolte**:
 
@@ -71,17 +104,74 @@ Před načtením tagu **vždy zvolte**:
 | **V koleji** | Tag je v koleji na výhybce, čtečka je dál |
 | **V ruce** | Tag držíte v ruce u antény |
 
-Bez tohoto výběru spouště nefunguje.
+Bez tohoto výběru spouště nefunguje. Krok **Načtení** zůstane oranžový – viz [5.2](#52-typické-situace).
 
-### 4.3 Výběr výhybky
+U každého čipu **3částové** výhybky ještě zvolte **Jazyk**, **Rovně** nebo **Odbočka** (nápověda uprostřed obrazovky).
+
+### 4.2 Postup krok za krokem
+
+1. Počkejte na GPS a zkontrolujte výhybku v náhledu.
+2. Zvolte **V koleji** nebo **V ruce**.
+3. U každého čipu 3částové výhybky zvolte **Jazyk**, **Rovně** nebo **Odbočka**.
+4. Přiložte tag a stiskněte **spouště**.
+5. Po dialogu **„Načetli jste“** klepněte **Pokračovat** (nebo **Opakovat**).
+
+### 4.3 Jak poznat, že je hotovo
+
+Zápis proběhl **jen tehdy, když se objeví dialog „Načetli jste“**.
+
+| Tlačítko v dialogu | Co udělá |
+|--------------------|----------|
+| **Pokračovat** | další čip (lze potvrdit i spouštěm) |
+| **Opakovat** | stejný čip znovu |
+
+Dialog se neobjevil? Podívejte se na červené tečky pod stavem čtečky a zkuste znovu. Pomůže přepnout **V koleji** ↔ **V ruce** nebo přiložit tag z jiné strany.
+
+### 4.4 Poslední záznam
+
+V kartě **Poslední záznam** uvidíte, co jste naposledy zapsali. Tlačítko **Smazat** zruší poslední zápis a vrátí vás na předchozí stav.
+
+---
+
+## 5. Barvy a indikátory
+
+Sledujte tři kroky nahoře (**UDU → Načtení → Hotovo**) a čtyři tečky pod stavem čtečky. Barvy mají stejný význam.
+
+### 5.1 Význam barev
+
+| Barva | Co znamená |
+|-------|------------|
+| Šedá | Krok ještě neproběhl |
+| Modrá | Právě probíhá |
+| Zelená ✓ | Hotovo |
+| Oranžová | Něco chybí – např. nevybrali jste **V koleji** nebo **V ruce** |
+| Červená | Chyba – zkuste znovu |
+
+Čtyři tečky = zápis tagu → uložení → heslo → zamčení.
+
+### 5.2 Typické situace
+
+| Co vidíte | Co to znamená | Co udělat |
+|-----------|---------------|-----------|
+| Krok **Načtení** oranžový | Chybí výkon | Zvolte **V koleji** nebo **V ruce** |
+| Krok **Načtení** červený | Zápis selhal | Přiložte tag znovu |
+| Krok **Hotovo** zelený ✓ | Úspěch | Objeví se dialog **„Načetli jste“** |
+
+---
+
+## 6. Výhybky a čipy
+
+### 6.1 Výběr výhybky
 
 **Automaticky:** Aplikace podle GPS najde nejbližší výhybku a zobrazí ji v náhledu.
 
-**Ručně:** Klepněte na náhled výhybky a vyberte správnou ze seznamu. U každé uvidíte vzdálenost a kolik čipů ještě chybí. Po ruční změně se GPS sám nepřepíná – dokud nekliknete **Načíst polohu**.
+**Ručně:** Klepněte na náhled výhybky a vyberte správnou ze seznamu. U každé uvidíte vzdálenost a kolik čipů ještě chybí.
+
+> Po ruční změně se GPS sám nepřepíná – dokud nekliknete **Načíst polohu**.
 
 Výhybky, které už máte kompletní, jsou v seznamu **zašedlé**.
 
-### 4.4 Kolik čipů a jaké části
+### 6.2 Kolik čipů a jaké části
 
 | Typ výhybky | Kolik čipů | Části |
 |-------------|------------|-------|
@@ -90,36 +180,15 @@ Výhybky, které už máte kompletní, jsou v seznamu **zašedlé**.
 
 Aplikace sama nastaví **první chybějící čip**. Nad tlačítkem Kontrola uvidíte nápovědu, co právě načítáte.
 
-### 4.5 Přepínání mezi výhybkami
+### 6.3 Přepínání mezi výhybkami
 
 Kdykoli můžete klepnout na výhybku v náhledu a vybrat jinou nedokončenou. Aplikace si pamatuje, co už je zapsané.
 
-### 4.6 Jak poznat, že je hotovo
-
-Zápis proběhl **jen tehdy, když se objeví dialog „Načetli jste“**.
-
-- **Pokračovat** – další čip (lze potvrdit i spouštěm),
-- **Opakovat** – stejný čip znovu.
-
-Dialog se neobjevil? Podívejte se na červené tečky pod stavem čtečky a zkuste znovu. Pomůže přepnout **V koleji** ↔ **V ruce** nebo přiložit tag z jiné strany.
-
-### 4.7 Poslední záznam
-
-V kartě **Poslední záznam** uvidíte, co jste naposledy zapsali. Tlačítko **Smazat** zruší poslední zápis a vrátí vás na předchozí stav.
-
-### 4.8 Shrnutí – jeden tag
-
-1. Počkejte na GPS a zkontrolujte výhybku v náhledu.
-2. Zvolte **V koleji** nebo **V ruce**.
-3. U každého čipu 3částové výhybky zvolte **Jazyk**, **Rovně** nebo **Odbočka**.
-4. Přiložte tag a stiskněte **spouště**.
-5. Po dialogu **„Načetli jste“** klepněte **Pokračovat**.
-
 ---
 
-## 5. Hranice TUDU
+## 7. Hranice TUDU
 
-### K čemu to slouží
+### 7.1 K čemu to slouží
 
 Někdy potřebujete zapsat tag **na hranici dvou úseků tratě** – tam, kde končí jeden úsek a začíná druhý. To není běžná výhybka s čipy 1–4, ale **speciální místo** označené jako **hranice TUDU**.
 
@@ -128,7 +197,7 @@ Použijte to, když:
 - stojíte na hranici úseku a potřebujete tam zapsat tag,
 - nechcete ručně přepínat běžný zápis výhybky.
 
-### Jak na to
+### 7.2 Jak na to
 
 **1. Otevřete formulář** – v kartě UDU · výhybka klepněte na **Hranice TUDU**.
 
@@ -149,19 +218,19 @@ Potvrďte **Použít**.
 
 **4. Po zápisu** aplikace sama skončí režim hranice, načte GPS a najde **další výhybku**, na které můžete pokračovat.
 
-### Jak poznáte režim hranice
+### 7.3 Jak poznáte režim hranice
 
 - Na obrazovce je **Režim hranice TUDU**.
 - V náhledu se místo výhybky zobrazuje **objekt**.
 
-### Jak režim ukončit dřív
+### 7.4 Jak režim ukončit dřív
 
 - Ručně změňte úsek nebo výhybku v náhledu,
 - nebo klepněte **Načíst polohu**.
 
 ---
 
-## 6. Když něco nejde
+## 8. Když něco nejde
 
 | Problém | Co zkusit |
 |---------|-----------|
@@ -173,7 +242,7 @@ Potvrďte **Použít**.
 
 ---
 
-## 7. Krátký slovníček
+## 9. Slovníček
 
 | Pojem | Význam |
 |-------|--------|
@@ -185,4 +254,4 @@ Potvrďte **Použít**.
 
 ---
 
-*Jednoduchá příručka pro terén – RFID Go GPS verze 3.147. Kompletní dokumentace: `RFID_Go_GPS_prirucka.pdf`.*
+*Příručka pro terén – RFID Go GPS verze 3.155. Kompletní dokumentace: `RFID_Go_GPS_prirucka.pdf`.*
