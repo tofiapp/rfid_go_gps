@@ -63,8 +63,9 @@ def main() -> None:
     story.append(Spacer(1, 1.2 * cm))
     story.append(
         Paragraph(
-            "Každodenní práce v terénu – obrazovka, zápis jednoho tagu, "
-            "výhybky, hranice TUDU a kontrola. Hlavní postup je kapitola 3.",
+            "Každodenní práce v terénu. Fotky z čtečky ukazují přesně to, "
+            "co uvidíte při zápisu tagu, výběru výhybky, hranici TUDU a kontrole. "
+            "Hlavní postup je kapitola 3.",
             styles["body"],
         )
     )
