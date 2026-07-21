@@ -194,6 +194,7 @@ def escape_xml(text: str) -> str:
 
 def inline_format(text: str, mono: str) -> str:
     text = escape_xml(text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
     text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
     text = re.sub(r"`([^`]+)`", rf'<font name="{mono}">\1</font>', text)
     return text
@@ -357,7 +358,13 @@ def _flush_subsection(flow: list, subsection: list | None, *, pull_intro: bool =
     _append_atomic(flow, subsection)
 
 
-def parse_markdown(md: str, styles: dict[str, ParagraphStyle], *, md_path: Path | None = None) -> list:
+def parse_markdown(
+    md: str,
+    styles: dict[str, ParagraphStyle],
+    *,
+    md_path: Path | None = None,
+    compact: bool = False,
+) -> list:
     flow: list = []
     lines = md.splitlines()
     i = 0
@@ -367,12 +374,47 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle], *, md_path: Path 
     first_subsection_in_chapter = True
     subsection: list | None = None
     md_dir = (md_path or MD_PATH).resolve().parent
+    skip_until_next_h1 = False
+    chapter_buf: list | None = None
 
     def append_item(item) -> None:
         if subsection is not None:
             subsection.append(item)
+        elif chapter_buf is not None:
+            chapter_buf.append(item)
         else:
             flow.append(item)
+
+    def flush_chapter_buf() -> None:
+        nonlocal chapter_buf
+        if not chapter_buf:
+            chapter_buf = None
+            return
+        block = _flatten_flowables(chapter_buf)
+        chapter_buf = None
+        height = _estimate_height(block)
+        if compact and height <= FRAME_HEIGHT:
+            flow.append(KeepTogether(block))
+        else:
+            # Keep heading with the first figure/table when possible.
+            if compact and len(block) >= 2:
+                head = [block[0]]
+                rest = block[1:]
+                # Attach following body lines until first image/table-ish KeepTogether.
+                attached = list(head)
+                k = 0
+                while k < len(rest) and not isinstance(rest[k], KeepTogether):
+                    attached.append(rest[k])
+                    k += 1
+                if k < len(rest) and isinstance(rest[k], KeepTogether):
+                    attached.append(rest[k])
+                    k += 1
+                if _estimate_height(attached) <= FRAME_HEIGHT:
+                    flow.append(KeepTogether(attached))
+                    for item in rest[k:]:
+                        flow.append(item)
+                    return
+            flow.extend(block)
 
     while i < len(lines):
         line = lines[i]
@@ -389,6 +431,45 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle], *, md_path: Path 
                 i += 1
                 continue
 
+        if line.startswith("## "):
+            heading = line[3:].strip()
+            if compact and heading.lower().startswith("obsah"):
+                skip_until_next_h1 = True
+                i += 1
+                continue
+            skip_until_next_h1 = False
+            _flush_subsection(flow if chapter_buf is None else chapter_buf, subsection)
+            subsection = None
+            first_subsection_in_chapter = True
+            flush_chapter_buf()
+            if not first_chapter:
+                if compact:
+                    flow.append(Spacer(1, 8))
+                    flow.append(
+                        HRFlowable(
+                            width="100%",
+                            thickness=0.6,
+                            color=BORDER,
+                            spaceBefore=2,
+                            spaceAfter=6,
+                        )
+                    )
+                else:
+                    flow.append(PageBreak())
+            else:
+                first_chapter = False
+            chapter_buf = [
+                Paragraph(inline_format(heading, "DejaVuMono"), styles["h1"]),
+            ] if compact else None
+            if chapter_buf is None:
+                flow.append(Paragraph(inline_format(heading, "DejaVuMono"), styles["h1"]))
+            i += 1
+            continue
+
+        if skip_until_next_h1:
+            i += 1
+            continue
+
         img_match = IMG_RE.match(line.strip())
         if img_match:
             alt, src = img_match.group(1), img_match.group(2)
@@ -398,7 +479,7 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle], *, md_path: Path 
                 j = i + 1
                 while j < len(lines) and lines[j].strip() == "":
                     j += 1
-                has_legend = j < len(lines) and (
+                has_caption = j < len(lines) and (
                     lines[j].strip().startswith("|")
                     or (
                         lines[j].strip().startswith("*")
@@ -408,11 +489,14 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle], *, md_path: Path 
                 )
                 if "ikona" in name_lower:
                     max_w = max_h = IMAGE_ICON_MAX
-                elif has_legend:
+                elif compact:
+                    max_w = 7.2 * cm
+                    max_h = 7.6 * cm if has_caption else 8.0 * cm
+                elif has_caption:
                     max_w, max_h = IMAGE_MAX_WIDTH, IMAGE_WITH_LEGEND_MAX_HEIGHT
                 else:
                     max_w, max_h = IMAGE_MAX_WIDTH, IMAGE_MAX_HEIGHT
-                figure = [Spacer(1, 6), make_image(resolved, max_width=max_w, max_height=max_h)]
+                figure = [Spacer(1, 3), make_image(resolved, max_width=max_w, max_height=max_h)]
                 if j < len(lines):
                     cap = lines[j].strip()
                     if cap.startswith("*") and cap.endswith("*") and not cap.startswith("**"):
@@ -425,10 +509,10 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle], *, md_path: Path 
                         while j < len(lines) and lines[j].strip().startswith("|"):
                             table_lines.append(lines[j])
                             j += 1
-                        figure.append(Spacer(1, 4))
+                        figure.append(Spacer(1, 3))
                         figure.append(parse_table(table_lines, styles))
                         i = j - 1
-                figure.append(Spacer(1, 8))
+                figure.append(Spacer(1, 4))
                 if _estimate_height(figure) <= FRAME_HEIGHT:
                     append_item(KeepTogether(figure))
                 else:
@@ -449,25 +533,14 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle], *, md_path: Path 
             if next_line and next_line.startswith("## "):
                 i += 1
                 continue
-            append_item(Spacer(1, 4))
-            append_item(HRFlowable(width="100%", thickness=0.5, color=BORDER, spaceBefore=4, spaceAfter=8))
-            i += 1
-            continue
-
-        if line.startswith("## "):
-            _flush_subsection(flow, subsection)
-            subsection = None
-            first_subsection_in_chapter = True
-            if not first_chapter:
-                flow.append(PageBreak())
-            else:
-                first_chapter = False
-            flow.append(Paragraph(inline_format(line[3:].strip(), "DejaVuMono"), styles["h1"]))
+            append_item(Spacer(1, 3))
+            append_item(HRFlowable(width="100%", thickness=0.5, color=BORDER, spaceBefore=2, spaceAfter=6))
             i += 1
             continue
 
         if line.startswith("### "):
-            _flush_subsection(flow, subsection, pull_intro=first_subsection_in_chapter)
+            target = chapter_buf if chapter_buf is not None else flow
+            _flush_subsection(target, subsection, pull_intro=first_subsection_in_chapter)
             first_subsection_in_chapter = False
             subsection = [
                 Paragraph(inline_format(line[4:].strip(), "DejaVuMono"), styles["h2"]),
@@ -483,10 +556,10 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle], *, md_path: Path 
             table = KeepTogether([parse_table(table_lines, styles)])
             if subsection is not None:
                 subsection.append(table)
-                subsection.append(Spacer(1, 8))
+                subsection.append(Spacer(1, 6))
             else:
-                flow.append(table)
-                flow.append(Spacer(1, 8))
+                append_item(table)
+                append_item(Spacer(1, 6))
             continue
 
         if re.match(r"^\d+\.\s", line.strip()):
@@ -494,7 +567,7 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle], *, md_path: Path 
             while i < len(lines) and re.match(r"^\d+\.\s", lines[i].strip()):
                 items.append(re.sub(r"^\d+\.\s*", "", lines[i].strip()))
                 i += 1
-            target = subsection if subsection is not None else flow
+            target = subsection if subsection is not None else (chapter_buf if chapter_buf is not None else flow)
             _append_bullet_list(
                 target,
                 items,
@@ -508,7 +581,7 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle], *, md_path: Path 
             while i < len(lines) and lines[i].strip().startswith("- "):
                 items.append(lines[i].strip()[2:].strip())
                 i += 1
-            target = subsection if subsection is not None else flow
+            target = subsection if subsection is not None else (chapter_buf if chapter_buf is not None else flow)
             _append_bullet_list(
                 target,
                 items,
@@ -566,7 +639,9 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle], *, md_path: Path 
             i += 1
         append_item(Paragraph(inline_format(" ".join(para_lines), "DejaVuMono"), styles["body"]))
 
-    _flush_subsection(flow, subsection)
+    target = chapter_buf if chapter_buf is not None else flow
+    _flush_subsection(target, subsection)
+    flush_chapter_buf()
     return flow
 
 
