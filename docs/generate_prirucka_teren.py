@@ -51,9 +51,8 @@ def main() -> None:
     story.append(Spacer(1, 1.5 * cm))
     story.append(
         Paragraph(
-            "Každodenní práce v terénu – obrazovka, standardní zápis tagu, "
-            "barvy indikátorů a hranice TUDU. Začněte kapitolou 0 (jak číst) "
-            "a kapitolou 4 (jeden tag).",
+            "Každodenní práce v terénu – obrazovka, zápis jednoho tagu, "
+            "barvy, výhybky a hranice TUDU. Hlavní postup je kapitola 3.",
             styles["body"],
         )
     )
