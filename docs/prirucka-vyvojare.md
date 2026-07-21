@@ -1,6 +1,6 @@
 # RFID Go GPS – Technická příručka pro vývojáře
 
-**Verze aplikace:** 3.154  
+**Verze aplikace:** 3.155  
 **Package:** `com.rfidw.app` · `applicationId` `com.rfidw.app.gps`  
 **Zařízení:** Chainway C5 (UHF UART, RSCJA SDK)
 
@@ -715,4 +715,4 @@ python3 docs/generate_prirucka_vyvojare_html.py   # HTML + Mermaid
 
 ---
 
-*RFID Go GPS 3.154 – technická příručka pro vývojáře*
+*RFID Go GPS 3.155 – technická příručka pro vývojáře*
