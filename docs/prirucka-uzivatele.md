@@ -167,7 +167,7 @@ Tlačítko **Kontrola** slouží k **ověření již zapsaného tagu** – nic s
 
 ## 11. Hranice TUDU
 
-Postup zápisu tagu na hranici dvou úseků tratě je v **příručce pro terén** – kapitola 6 (`RFID_Go_GPS_prirucka_teren.pdf`).
+Postup zápisu tagu na hranici dvou úseků tratě je v **příručce pro terén** – kapitola 5 (`RFID_Go_GPS_prirucka_teren.pdf`).
 
 ---
 
