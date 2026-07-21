@@ -46,33 +46,49 @@
                     android:checked="true"
                     android:text="Po zápisu EPC automaticky uložit řádek do CSV"/>
 
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
                     android:paddingTop="4dp">
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnImportCsv"
-                        style="@style/Widget.Material3.Button.TonalButton"
-                        android:layout_width="0dp"
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:layout_marginEnd="4dp"
-                        android:text="@string/btn_import_csv"/>
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnExportCsv"
-                        style="@style/Widget.Material3.Button.TonalButton"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:layout_marginStart="4dp"
-                        android:layout_marginEnd="4dp"
-                        android:text="Sdílet / Export"/>
+                        android:orientation="horizontal">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnImportCsv"
+                            style="@style/Widget.Material3.Button.TonalButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="4dp"
+                            android:layout_weight="1"
+                            android:minHeight="40dp"
+                            android:text="@string/btn_import_csv"
+                            android:textSize="12sp"/>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnExportCsv"
+                            style="@style/Widget.Material3.Button.TonalButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="4dp"
+                            android:layout_weight="1"
+                            android:minHeight="40dp"
+                            android:text="Sdílet / Export"
+                            android:textSize="12sp"/>
+                    </LinearLayout>
+
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnClearCsv"
                         style="@style/Widget.Material3.Button.OutlinedButton"
-                        android:layout_width="0dp"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:layout_marginStart="4dp"
-                        android:text="@string/btn_delete_last_csv"/>
+                        android:layout_marginTop="6dp"
+                        android:minHeight="40dp"
+                        android:text="@string/btn_delete_last_csv"
+                        android:textSize="12sp"/>
                 </LinearLayout>
 
                 <TextView
