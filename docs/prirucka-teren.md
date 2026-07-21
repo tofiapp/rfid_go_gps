@@ -3,11 +3,11 @@
 **Verze aplikace:** 3.159  
 **Zařízení:** Chainway C5 (čtečka s GPS)
 
-Každodenní práce v terénu. Technické detaily (CSV, Pokročilé): `RFID_Go_GPS_prirucka.pdf`.
+Každodenní práce v terénu – od spuštění po zápis tagu. Technické detaily (CSV, Pokročilé): `RFID_Go_GPS_prirucka.pdf`.
 
 ![Ikona aplikace RFID Go GPS](../fotky_pro_prirucku/ikona.png)
 
-*Ikona aplikace **RFID Go GPS** na čtečce.*
+*Aplikaci spustíte ikonou **RFID Go GPS** na ploše čtečky.*
 
 ---
 
@@ -17,8 +17,8 @@ Každodenní práce v terénu. Technické detaily (CSV, Pokročilé): `RFID_Go_G
 |---|----------|----------|
 | 1 | [Obrazovka](#1-obrazovka) | před první směnou |
 | 2 | [Příprava](#2-příprava) | každý start |
-| 3 | [Jeden tag](#3-jeden-tag) | hlavní práce |
-| 4 | [Výhybky a čipy](#4-výhybky-a-čipy) | špatný / jiný výběr |
+| 3 | [Zápis tagu](#3-zápis-tagu) | hlavní práce |
+| 4 | [Výběr UDU a výhybky](#4-výběr-udu-a-výhybky) | špatný / jiný výběr |
 | 5 | [Hranice TUDU](#5-hranice-tudu) | zápis na hranici úseku |
 | 6 | [Kontrola](#6-kontrola) | ověření už zapsaného tagu |
 | 7 | [Když něco nejde](#7-když-něco-nejde) | problém |
@@ -28,124 +28,140 @@ Každodenní práce v terénu. Technické detaily (CSV, Pokročilé): `RFID_Go_G
 
 ## 1. Obrazovka
 
-Aplikace podle GPS najde **úsek** a **výhybku**, zapíše tag a uloží záznam včetně polohy čtečky.
-
-![Hlavní obrazovka](../fotky_pro_prirucku/hlavni_strana.png)
-
-*Hlavní obrazovka – GPS, tři kroky, karta UDU · výhybka, nápověda čipu a tlačítko Kontrola.*
+Jedna hlavní obrazovka: GPS najde **úsek** a **výhybku**, vy zapíšete tag, aplikace uloží záznam včetně polohy čtečky.
 
 | Oblast | Co tam je |
 |--------|-----------|
-| Horní lišta | Logo, přepínač **Daleko** / **Blízko**, GPS souřadnice, čtyři tečky průběhu zápisu |
-| Tři kroky | **UDU** → **Načtení** → **Hotovo** (šedá / modrá / zelená ✓ / oranžová / červená) |
+| Horní lišta | Logo, **Daleko** / **Blízko**, GPS, čtyři tečky průběhu zápisu |
+| Tři kroky | **UDU** → **Načtení** → **Hotovo** |
+| Barvy kroků | šedá = ještě ne · modrá = probíhá · zelená ✓ = hotovo · oranžová = chybí režim · červená = chyba |
 | Karta UDU · výhybka | úsek, výhybka, čip; **Hranice TUDU**, **Načíst polohu** |
-| Střed | nápověda (*Načtěte Čip …*), u 3částové výhybky **Jazyk** / **Rovně** / **Odbočka** |
-| **Kontrola** | ověření už zapsaného tagu (nic se nezapisuje) |
+| Střed | nápověda čipu; u 3částové výhybky **Jazyk** / **Rovně** / **Odbočka** |
+| **Kontrola** | ověření už zapsaného tagu (bez zápisu) |
 | Poslední záznam | naposledy zapsané; **Smazat** vrátí předchozí stav |
+
+![Hlavní obrazovka](../fotky_pro_prirucku/hlavni_strana.png)
+
+*Ukázka před zápisem: GPS je zelená, doplněné jsou UDU **1302F**, výhybka **45** a čip **1/3**. Oranžový krok **Načtení** a nápis **Vyberte režim** znamenají, že ještě není zvoleno **Daleko** / **Blízko**. Uprostřed je nápověda „Načtěte Čip 1“ a volba **Jazyk** / **Rovně** / **Odbočka**.*
 
 ---
 
 ## 2. Příprava
 
-1. Zapněte aplikaci a počkejte na **GPS** (zelené souřadnice v horní liště).
-2. Aplikace načte databázi a doplní **UDU** a **výhybku**.
-3. Zkontrolujte, že náhled sedí s tím, kde stojíte.
+1. Zapněte aplikaci a počkejte na **GPS** (zelené souřadnice nahoře).
+2. Počkejte, až se načte databáze a doplní **UDU** s **výhybkou**.
+3. Ověřte, že náhled sedí s místem, kde stojíte.
 
-> **Bez GPS?** Volné místo, nebo v kartě UDU **Testovací režim GPS** a poloha ze seznamu.
+> **Bez GPS?** Vyjděte na volné místo, nebo v kartě UDU zapněte **Testovací režim GPS** a vyberte polohu ze seznamu.
 
 ---
 
-## 3. Jeden tag
+## 3. Zápis tagu
 
-Před spouští **vždy** zvolte výkon v horní liště (**Vyberte režim**):
+### Výkon čtečky
 
-| Tlačítko | Kdy |
-|----------|-----|
-| **Daleko** | Tag v koleji, čtečka dál |
-| **Blízko** | Tag u antény v ruce |
+Před každou spouští zvolte v horní liště režim (**Vyberte režim**):
 
-Bez výběru spouště nefunguje (krok **Načtení** je oranžový).
+| Tlačítko | Kdy použít |
+|----------|------------|
+| **Daleko** | Tag je v koleji, čtečka dál |
+| **Blízko** | Tag držíte u antény |
 
-1. Zkontrolujte výhybku v náhledu.
+Bez výběru spouště nefunguje – krok **Načtení** zůstane oranžový.
+
+### Postup
+
+1. Zkontrolujte výhybku a čip v náhledu.
 2. Zvolte **Daleko** nebo **Blízko**.
 3. U 3částové výhybky zvolte **Jazyk**, **Rovně** nebo **Odbočka**.
-4. Přiložte tag a stiskněte **spouště**.
-5. Po dialogu **„Načetli jste“** → **Pokračovat** (další čip) nebo **Opakovat** (stejný čip).
+4. Přiložte tag a stiskněte **spoušť**.
+5. V dialogu **„Načetli jste“** zvolte **Pokračovat** (další čip) nebo **Opakovat** (stejný čip).
+
+### Úspěch
+
+Zápis platí **jen** když se objeví dialog „Načetli jste“.
 
 ![Úspěšné načtení](../fotky_pro_prirucku/uspesne_nacteni.png)
 
-*Úspěch: všechny tři kroky zelené, dialog „Načetli jste“ s výhybkou a čipem.*
+*Úspěšný zápis: všechny tři kroky mají zelenou fajfku, nahoře čtyři zelené tečky. Dialog ukazuje výhybku a čip – **Pokračovat** jde dál, **Opakovat** znovu zapíše stejný čip.*
 
-Zápis je hotový **jen** když se objeví tento dialog. Červený krok **Načtení** a hláška **Načtěte znovu** znamenají neúspěch – přiložte tag znovu, případně přepněte Daleko ↔ Blízko.
+### Neúspěch
 
 ![Neúspěšné načtení](../fotky_pro_prirucku/neuspesne_nacteni.png)
 
-*Neúspěch: krok Načtení červený, nahoře „Načtěte znovu“.*
+*Načtení selhalo: krok **Načtení** je červený a nahoře svítí **Načtěte znovu**. Tag znovu přiložte, případně přepněte **Daleko** ↔ **Blízko** nebo otočte tag.*
 
 ---
 
-## 4. Výhybky a čipy
+## 4. Výběr UDU a výhybky
 
 - **GPS** sám nabídne nejbližší výhybku.
-- **Ručně:** klepněte na náhled UDU nebo výhybky a vyberte ze seznamu.
-- Po ruční změně se GPS nepřepíná, dokud nekliknete **Načíst polohu**.
-- Mezi nedokončenými výhybkami můžete přepínat kdykoli – zapsané čipy si aplikace pamatuje.
+- **Ručně:** klepněte v náhledu na UDU nebo na výhybku.
+- Po ruční změně se GPS nepřepíná, dokud neklepnete **Načíst polohu**.
+- Mezi nedokončenými výhybkami můžete přepínat kdykoli – zapsané čipy zůstanou.
+
+### Ruční výběr UDU
 
 ![Výběr UDU](../fotky_pro_prirucku/vyber_udu.png)
 
-*Seznam **Nejbližší UDU (10)** – řazeno podle vzdálenosti, výběr oranžovým kolečkem.*
+*Seznam **Nejbližší UDU (10)** po klepnutí na kód úseku. Úseky jsou seřazené podle vzdálenosti; vybraný má oranžové kolečko. Zrušit zavře seznam beze změny.*
+
+### Ruční výběr výhybky
 
 ![Výběr výhybky](../fotky_pro_prirucku/vyber_vyhybky.png)
 
-*Seznam výhybek v UDU – vzdálenost a kolik čipů chybí; kompletní jsou zašedlé.*
+*Seznam výhybek v aktuálním UDU (hledání nahoře). U každé je vzdálenost; u nedokončených oranžově kolik čipů chybí (např. **Chybí 2 čipy**). Kompletní výhybky jsou zašedlé a nejdou vybrat.*
 
-| Typ | Čipy | Části |
-|-----|------|-------|
-| 3částová | 3 | Jazyk, Rovně, Odbočka (volba u každého) |
-| 4částová | 4 | Podle databáze (CA/CB, CG/CH, …) |
+### Typy výhybek
 
-Aplikace nastaví **první chybějící čip**; nápověda je uprostřed obrazovky.
+| Typ | Čipy | Co volíte |
+|-----|------|-----------|
+| 3částová | 3 | **Jazyk**, **Rovně**, **Odbočka** u každého čipu |
+| 4částová | 4 | Části podle databáze (CA/CB, CG/CH, …) |
+
+Aplikace vždy nastaví **první chybějící čip**; nápověda je uprostřed obrazovky.
 
 ---
 
 ## 5. Hranice TUDU
 
-Speciální zápis **na hranici dvou úseků** (ne běžná výhybka s čipy 1–4).
+Zápis **na hranici dvou úseků** – ne běžná výhybka s čipy 1–4.
 
-1. V kartě UDU · výhybka → **Hranice TUDU**.
-2. Vyplňte dialog a potvrďte **Použít**:
+1. V kartě UDU · výhybka klepněte na **Hranice TUDU**.
+2. Vyplňte dialog a potvrďte **Použít**.
 
 ![Dialog Hranice TUDU](../fotky_pro_prirucku/hranice_tudu.png)
 
-*Dialog Hranice TUDU – TUDU z okolí nebo ručně, Objekt, volitelně KM_EXT.*
+*Dialog hranice: **Vybrat TUDU z okolí** nabídne nejbližší úseky, nebo kód napíšete ručně. Do **Objekt** patří číslo koleje či výhybky. **KM_EXT** je volitelné a lze doplnit později.*
 
-| Pole | Co napsat |
-|------|-----------|
-| **TUDU** | Kód úseku – **Vybrat TUDU z okolí**, nebo ručně |
+| Pole | Co vyplnit |
+|------|------------|
+| **TUDU** | Kód úseku – z okolí, nebo ručně |
 | **Objekt** | Číslo koleje nebo výhybky (např. `12`, `5A`) |
-| **KM_EXT** | Volitelné – lze doplnit později |
+| **KM_EXT** | Volitelné |
 
-3. Dál stejně jako u běžného tagu: **Daleko** / **Blízko** → spouště.
+3. Dál jako u běžného tagu: **Daleko** / **Blízko** → spoušť.
 4. Po zápisu režim sám skončí.
 
-**Režim poznáte** podle nápisu **Režim hranice TUDU**.  
-**Ukončení dřív:** ruční změna úseku/výhybky, nebo **Načíst polohu**.
+Režim poznáte podle nápisu **Režim hranice TUDU**.  
+Ukončení dřív: ruční změna úseku/výhybky, nebo **Načíst polohu**.
 
 ---
 
 ## 6. Kontrola
 
-Tlačítko **Kontrola** na hlavní obrazovce **ověří už zapsaný tag** – nic se nezapisuje.
+Tlačítko **Kontrola** ověří **už zapsaný** tag – **nic se nezapisuje**.
 
 1. Zvolte **Daleko** nebo **Blízko**.
-2. Přiložte tag a stiskněte spouště.
+2. Přiložte tag a stiskněte spoušť.
 3. Zobrazí se údaje z tagu a z CSV (pokud tag v tabulce je).
 
 ![Obrazovka Kontrola](../fotky_pro_prirucku/kontrola.png)
 
-*Kontrola – EPC, TID, TUDU, objekt, pozice čipu, poloha, RO_ID a KM_EXT.*
+*Po načtení tagu vidíte **EPC** a **TID** z čipu a uložené údaje z CSV (**TUDU**, **OBJEKT**, pozice čipu, poloha, RO_ID, KM_EXT). Nahoře lze přepnout **Daleko** / **Blízko**. Zavřete křížkem.*
 
-Tag mimo CSV → hláška **„Tag není v CSV“**. Více shod v CSV → listování šipkami.
+- Tag mimo CSV → **„Tag není v CSV“**.
+- Více shod v CSV → listování šipkami.
 
 ---
 
@@ -153,10 +169,10 @@ Tag mimo CSV → hláška **„Tag není v CSV“**. Více shod v CSV → listov
 
 | Problém | Co zkusit |
 |---------|-----------|
-| Spouště nic nedělá / Načtení oranžové | **Daleko** nebo **Blízko** |
-| Načtení červené / „Načtěte znovu“ | Přiložit znovu, přepnout Daleko ↔ Blízko, jiná strana tagu |
+| Spoušť nic nedělá / Načtení oranžové | Zvolte **Daleko** nebo **Blízko** |
+| Načtení červené / **Načtěte znovu** | Přiložit znovu, přepnout Daleko ↔ Blízko, jiná strana tagu |
 | GPS nefunguje | Volné místo, nebo **Testovací režim GPS** |
-| Špatná výhybka | Náhled → ruční výběr |
+| Špatná výhybka | Klepněte na náhled → ruční výběr |
 | Chyba po zápisu | **Smazat** u posledního záznamu → znovu |
 
 ---
@@ -167,11 +183,11 @@ Tag mimo CSV → hláška **„Tag není v CSV“**. Více shod v CSV → listov
 |-------|--------|
 | **UDU / TUDU** | Kód úseku tratě |
 | **Výhybka** | Číslo výhybky (např. 45) |
-| **Čip** | Část výhybky – jazyk, rovně nebo odbočka |
-| **Daleko / Blízko** | Výkon čtečky (tag v koleji / u antény) |
+| **Čip** | Část výhybky (jazyk, rovně, odbočka, …) |
+| **Daleko / Blízko** | Výkon čtečky – tag v koleji / u antény |
 | **Hranice TUDU** | Zápis na hranici dvou úseků |
 | **Kontrola** | Ověření tagu bez zápisu |
-| **CSV** | Tabulka záznamů (Stažené soubory) |
+| **CSV** | Tabulka záznamů ve Stažených souborech |
 
 ---
 

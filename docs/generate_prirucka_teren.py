@@ -63,8 +63,8 @@ def main() -> None:
     story.append(Spacer(1, 1.2 * cm))
     story.append(
         Paragraph(
-            "Každodenní práce v terénu – obrazovka, zápis jednoho tagu, "
-            "výhybky, hranice TUDU a kontrola. Hlavní postup je kapitola 3.",
+            "Každodenní práce v terénu – od spuštění po zápis tagu. "
+            "Hlavní postup je kapitola 3. Technické detaily: RFID_Go_GPS_prirucka.pdf.",
             styles["body"],
         )
     )

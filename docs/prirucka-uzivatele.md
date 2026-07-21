@@ -72,7 +72,7 @@ Kompletní průvodce načítáním tagů (indikátory kroků, barvy, výběr vý
 - **PDF:** `RFID_Go_GPS_prirucka_teren.pdf`
 - **Zdroj:** `docs/prirucka-teren.md` → `python3 docs/generate_prirucka_teren.py`
 
-Tato hlavní příručka doplňuje technické detaily (CSV, GPS, Kontrola, Pokročilé). Pro každodenní práci v terénu použijte příručku pro terén (začněte kapitolou 3 – jeden tag).
+Tato hlavní příručka doplňuje technické detaily (CSV, GPS, Kontrola, Pokročilé). Pro každodenní práci v terénu použijte příručku pro terén (začněte kapitolou 3 – zápis tagu).
 
 ---
 
