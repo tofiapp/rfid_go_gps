@@ -61,24 +61,24 @@ Aplikace má **jednu hlavní obrazovku** a panel **Pokročilé** (vyjíždí zdo
 | Poslední záznam | náhled posledního řádku CSV (s možností smazat) |
 | Panel **Pokročilé** | tabulka CSV (5 posledních záznamů), ruční kroky, volitelná šablona EPC |
 
-> Podrobný popis načítání tagů, barev indikátorů a hranice TUDU je v **jednoduché příručce pro terén**: `RFID_Go_GPS_prirucka_teren.pdf`
+> Podrobný popis načítání tagů, barev indikátorů a hranice TUDU je v **příručce pro terén**: `RFID_Go_GPS_prirucka_teren.pdf`
 
 ---
 
-## 5. Jednoduchá příručka pro terén
+## 5. Příručka pro terén
 
 Kompletní průvodce načítáním tagů (indikátory kroků, barvy, výběr výhybky, přepínání mezi výhybkami) a zápisem na **hranici TUDU** je v samostatném dokumentu určeném pro terén:
 
 - **PDF:** `RFID_Go_GPS_prirucka_teren.pdf`
 - **Zdroj:** `docs/prirucka-teren.md` → `python3 docs/generate_prirucka_teren.py`
 
-Tato hlavní příručka doplňuje technické detaily (CSV, GPS, Kontrola, Pokročilé). Pro každodenní práci v terénu použijte jednoduchou příručku.
+Tato hlavní příručka doplňuje technické detaily (CSV, GPS, Kontrola, Pokročilé). Pro každodenní práci v terénu použijte příručku pro terén (začněte kapitolou 3 – jeden tag).
 
 ---
 
 ## 6. Rychlý start v terénu
 
-Zkrácený postup pro běžný zápis jednoho tagu (podrobnosti viz **jednoduchá příručka pro terén**):
+Zkrácený postup pro běžný zápis jednoho tagu (podrobnosti viz **příručka pro terén**, kapitola 3):
 
 1. Ověřte, že je načtena databáze a máte GPS fix.
 2. Zkontrolujte **UDU**, **výhybku** a **čip** v náhledovém panelu.
@@ -107,7 +107,7 @@ Indikátor pod-kroků na obrazovce ukazuje průběh. Po úspěchu se automaticky
 
 ## 8. Výběr UDU, výhybky a čipu
 
-> Kompletní průvodce načítáním je v **jednoduché příručce pro terén** (`RFID_Go_GPS_prirucka_teren.pdf`). Níže stručný technický přehled.
+> Kompletní průvodce načítáním je v **příručce pro terén** (`RFID_Go_GPS_prirucka_teren.pdf`). Níže stručný technický přehled.
 
 ### Režim GPS (výchozí)
 
@@ -167,7 +167,7 @@ Tlačítko **Kontrola** slouží k **ověření již zapsaného tagu** – nic s
 
 ## 11. Hranice TUDU
 
-Postup zápisu tagu na hranici dvou úseků tratě je v **jednoduché příručce pro terén** – kapitola 5 (`RFID_Go_GPS_prirucka_teren.pdf`).
+Postup zápisu tagu na hranici dvou úseků tratě je v **příručce pro terén** – kapitola 6 (`RFID_Go_GPS_prirucka_teren.pdf`).
 
 ---
 

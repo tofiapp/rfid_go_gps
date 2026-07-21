@@ -506,7 +506,7 @@ def build_toc(styles: dict[str, ParagraphStyle]) -> list:
         "2. Co budete potřebovat",
         "3. První spuštění",
         "4. Přehled obrazovky",
-        "5. Jednoduchá příručka pro terén",
+        "5. Příručka pro terén",
         "6. Rychlý start v terénu",
         "7. Zápis tagu",
         "8. Výběr UDU, výhybky a čipu",

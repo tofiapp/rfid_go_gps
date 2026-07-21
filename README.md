@@ -179,7 +179,7 @@ Režim Kontrola **nezapisuje** do tagu ani do CSV – slouží jen ke kontrole v
 
 ### 8. Hranice TUDU
 
-Zápis tagu na hranici dvou úseků tratě – viz **jednoduchá příručka pro terén** ([`docs/RFID_Go_GPS_prirucka_teren.pdf`](docs/RFID_Go_GPS_prirucka_teren.pdf)), kapitola 5.
+Zápis tagu na hranici dvou úseků tratě – viz **příručka pro terén** ([`docs/RFID_Go_GPS_prirucka_teren.pdf`](docs/RFID_Go_GPS_prirucka_teren.pdf)), kapitola 6.
 
 ---
 
@@ -349,11 +349,11 @@ docs/
 
 | Dokument | Obsah |
 |----------|-------|
-| [`docs/RFID_Go_GPS_prirucka_teren.pdf`](docs/RFID_Go_GPS_prirucka_teren.pdf) | **Jednoduchá příručka pro terén** – načítání tagů, indikátory, hranice TUDU |
+| [`docs/RFID_Go_GPS_prirucka_teren.pdf`](docs/RFID_Go_GPS_prirucka_teren.pdf) | **Příručka pro terén** – načítání tagů, indikátory, hranice TUDU |
 | [`docs/RFID_Go_GPS_prirucka.pdf`](docs/RFID_Go_GPS_prirucka.pdf) | **Kompletní příručka** – technické detaily, CSV, GPS, Pokročilé |
 | [`docs/RFID_Go_GPS_prirucka_vyvojare.pdf`](docs/RFID_Go_GPS_prirucka_vyvojare.pdf) | **Technická příručka pro vývojáře** – architektura, anatomie zápisu, třídy, toky |
 | [`docs/prirucka-vyvojare.html`](docs/prirucka-vyvojare.html) | Stejná příručka jako **interaktivní HTML** s vykresleným Mermaid |
-| [`docs/prirucka-teren.md`](docs/prirucka-teren.md) | Zdroj jednoduché příručky; PDF: `python3 docs/generate_prirucka_teren.py` |
+| [`docs/prirucka-teren.md`](docs/prirucka-teren.md) | Zdroj příručky pro terén; PDF: `python3 docs/generate_prirucka_teren.py` |
 | [`docs/prirucka-uzivatele.md`](docs/prirucka-uzivatele.md) | Zdroj kompletní příručky; PDF: `python3 docs/generate_manual.py` |
 | [`docs/prirucka-vyvojare.md`](docs/prirucka-vyvojare.md) | Zdroj technické příručky; PDF/HTML: `generate_prirucka_vyvojare*.py` |
 | [`README.md`](README.md) | Uživatelská dokumentace a přehled projektu (tento soubor) |
