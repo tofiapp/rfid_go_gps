@@ -384,21 +384,9 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle], *, md_path: Path 
         if skip_preamble:
             if line.startswith("## "):
                 skip_preamble = False
-            elif (
-                line.strip() == ""
-                or line.startswith("---")
-                or line.strip().startswith("**")
-                or IMG_RE.match(line.strip())
-                or (
-                    line.strip().startswith("*")
-                    and line.strip().endswith("*")
-                    and not line.strip().startswith("**")
-                )
-            ):
+            else:
                 i += 1
                 continue
-            else:
-                skip_preamble = False
 
         img_match = IMG_RE.match(line.strip())
         if img_match:
