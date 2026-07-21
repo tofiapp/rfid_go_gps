@@ -31,8 +31,9 @@ FRAME_WIDTH = A4[0] - 4 * cm
 FRAME_HEIGHT = A4[1] - 2 * cm - 2.2 * cm
 SUBSECTION_START_MIN = 3 * cm
 IMAGE_MAX_WIDTH = 11 * cm
-IMAGE_MAX_HEIGHT = 13 * cm
+IMAGE_MAX_HEIGHT = 10 * cm
 IMAGE_ICON_MAX = 4.5 * cm
+IMAGE_WITH_LEGEND_MAX_HEIGHT = 8.5 * cm
 
 ROOT = Path(__file__).resolve().parent
 MD_PATH = ROOT / "prirucka-uzivatele.md"
@@ -394,15 +395,24 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle], *, md_path: Path 
             resolved = resolve_md_image(src, md_dir)
             if resolved is not None:
                 name_lower = resolved.name.lower()
-                if "ikona" in name_lower:
-                    max_w = max_h = IMAGE_ICON_MAX
-                else:
-                    max_w, max_h = IMAGE_MAX_WIDTH, IMAGE_MAX_HEIGHT
-                figure = [Spacer(1, 6), make_image(resolved, max_width=max_w, max_height=max_h)]
-                # Keep optional italic caption on the same page as the figure.
                 j = i + 1
                 while j < len(lines) and lines[j].strip() == "":
                     j += 1
+                has_legend = j < len(lines) and (
+                    lines[j].strip().startswith("|")
+                    or (
+                        lines[j].strip().startswith("*")
+                        and lines[j].strip().endswith("*")
+                        and not lines[j].strip().startswith("**")
+                    )
+                )
+                if "ikona" in name_lower:
+                    max_w = max_h = IMAGE_ICON_MAX
+                elif has_legend:
+                    max_w, max_h = IMAGE_MAX_WIDTH, IMAGE_WITH_LEGEND_MAX_HEIGHT
+                else:
+                    max_w, max_h = IMAGE_MAX_WIDTH, IMAGE_MAX_HEIGHT
+                figure = [Spacer(1, 6), make_image(resolved, max_width=max_w, max_height=max_h)]
                 if j < len(lines):
                     cap = lines[j].strip()
                     if cap.startswith("*") and cap.endswith("*") and not cap.startswith("**"):
@@ -410,8 +420,20 @@ def parse_markdown(md: str, styles: dict[str, ParagraphStyle], *, md_path: Path 
                             Paragraph(inline_format(cap.strip("*"), "DejaVuMono"), styles["footer"])
                         )
                         i = j
+                    elif cap.startswith("|"):
+                        table_lines: list[str] = []
+                        while j < len(lines) and lines[j].strip().startswith("|"):
+                            table_lines.append(lines[j])
+                            j += 1
+                        figure.append(Spacer(1, 4))
+                        figure.append(parse_table(table_lines, styles))
+                        i = j - 1
                 figure.append(Spacer(1, 8))
-                append_item(KeepTogether(figure))
+                if _estimate_height(figure) <= FRAME_HEIGHT:
+                    append_item(KeepTogether(figure))
+                else:
+                    for item in figure:
+                        append_item(item)
             else:
                 append_item(
                     Paragraph(
