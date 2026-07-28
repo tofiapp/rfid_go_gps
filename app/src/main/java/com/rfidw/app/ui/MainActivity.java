@@ -1935,7 +1935,12 @@ public class MainActivity extends AppCompatActivity {
                     int fromCsv = maxWrittenCastForVyhybka(epc.tudu, epc.vyhybka);
                     total = Math.max(total, Math.max(epc.cast, fromCsv));
                 }
-                String current = String.valueOf(epc.cast);
+                // Nikdy nezobrazovat např. 4/3 – cast mimo rozsah výhybky.
+                int castShown = epc.cast;
+                if (total > 0 && castShown > total) {
+                    castShown = total;
+                }
+                String current = String.valueOf(castShown);
                 String rest = "/" + total;
                 SpannableString span = new SpannableString(current + rest);
                 applyCastAccent(span, 0, current.length());
@@ -2860,10 +2865,7 @@ public class MainActivity extends AppCompatActivity {
         }
         if (currentTudu != null && currentVyhybka != null && !tuduBoundaryMode
                 && isCastWrittenInCsv(currentTudu.code, currentVyhybka, epc.cast)) {
-            int nextCast = firstMissingCast(currentTudu.code, currentVyhybka);
-            if (nextCast <= currentVyhybka.resolvedCastMax()) {
-                epc.cast = nextCast;
-            }
+            applyFirstMissingCastOrAdvance(currentTudu, currentVyhybka);
         }
         updateSummary1();
         updateLastRecordPreview();
@@ -4039,6 +4041,13 @@ public class MainActivity extends AppCompatActivity {
                 gpsLookupInFlight = false;
                 updatePowerPresetUi();
                 if (loadId != dbLoadGeneration || !gpsAutoSelection || dzsDatabase == null) return;
+                // Lookup mohl odstartovat ještě před workflowRunning (refreshGpsAtWorkflowStart).
+                // Během zápisu / dialogu „Načetli jste“ nesmí přepsat čip – jinak Continue
+                // udělá další +1 a přeskočí např. 2/3.
+                if (workflowRunning || scanDoneAwaitingConfirm
+                        || gpsTuduLocked || gpsVyhybkaLocked || tuduBoundaryMode) {
+                    return;
+                }
                 if (result == null) {
                     gpsLookupNoMatch = locationCache != null && locationCache.hasFix();
                     if (!workflowRunning) {
@@ -4092,9 +4101,27 @@ public class MainActivity extends AppCompatActivity {
         }
         ensureVyhybkaRoBranches(tudu.code, v);
         if (gpsAutoSelection && isVyhybkaCompleteInCsv(tudu.code, v)) {
-            Tudu.Vyhybka nearestIncomplete = nearestIncompleteVyhybkaByGps(tudu);
+            VyhybkaPickerItem nearestIncomplete = nearestIncompleteVyhybkaItemByGps(tudu.uduCode());
             if (nearestIncomplete != null) {
-                v = nearestIncomplete;
+                Tudu owner = findTuduByCode(nearestIncomplete.tuduCode);
+                if (owner == null) {
+                    owner = resolveTuduForUdu(Tudu.uduCode(nearestIncomplete.tuduCode));
+                }
+                if (owner != null) {
+                    tudu = owner;
+                    currentTudu = owner;
+                    epc.tudu = owner.code;
+                    v = nearestIncomplete.vyhybka;
+                    for (Tudu.Vyhybka candidate : owner.vyhybky) {
+                        if (candidate.cislo == nearestIncomplete.vyhybka.cislo
+                                && (nearestIncomplete.vyhybka.iob.isEmpty()
+                                || candidate.iob.equals(nearestIncomplete.vyhybka.iob))) {
+                            v = candidate;
+                            break;
+                        }
+                    }
+                    ensureVyhybkaRoBranches(tudu.code, v);
+                }
             }
         }
         boolean vyhybkaChanged = epc.vyhybka != v.cislo;
@@ -4106,7 +4133,7 @@ public class MainActivity extends AppCompatActivity {
         if (uduChanged || vyhybkaChanged || epc.cast <= 0
                 || epc.cast < v.resolvedCastMin() || epc.cast > v.resolvedCastMax()
                 || advanceFromCsv || isCastWrittenInCsv(tudu.code, v, epc.cast)) {
-            epc.cast = firstMissingCast(tudu.code, v);
+            applyFirstMissingCastOrAdvance(tudu, v);
         }
         refreshTemplate();
         updateStep1();
@@ -4291,11 +4318,22 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void selectFirstAvailableVyhybka(Tudu t) {
-        Tudu.Vyhybka first = gpsAutoSelection
-                ? nearestIncompleteVyhybkaByGps(t)
-                : null;
+        if (gpsAutoSelection) {
+            VyhybkaPickerItem nearest = nearestIncompleteVyhybkaItemByGps(t.uduCode());
+            if (nearest != null) {
+                selectVyhybkaPickerItem(nearest, true);
+                return;
+            }
+        }
+        Tudu.Vyhybka first = firstAvailableVyhybka(t);
         if (first == null) {
-            first = firstAvailableVyhybka(t);
+            // V tomto TUDU nic nezbývá – zkusit další podtyp stejného UDU.
+            for (VyhybkaPickerItem item : collectVyhybkaItemsForUdu(t.uduCode())) {
+                if (!isVyhybkaCompleteInCsv(item.tuduCode, item.vyhybka)) {
+                    selectVyhybkaPickerItem(item, true);
+                    return;
+                }
+            }
         }
         if (first != null) {
             selectVyhybka(first, true);
@@ -4338,9 +4376,16 @@ public class MainActivity extends AppCompatActivity {
             resetCastBranchSelection();
         }
         if (resetCast) {
-            epc.cast = currentTudu != null
-                    ? firstMissingCast(currentTudu.code, v)
-                    : v.castMin;
+            if (currentTudu != null) {
+                ensureVyhybkaRoBranches(currentTudu.code, v);
+                int nextCast = firstMissingCast(currentTudu.code, v);
+                // Nevolat advanceToNextVyhybka – volající (posun po zápisu) už výhybku vybral.
+                epc.cast = nextCast > v.resolvedCastMax()
+                        ? v.resolvedCastMax()
+                        : nextCast;
+            } else {
+                epc.cast = v.castMin;
+            }
         }
         refreshTemplate();
         updateStep1();
@@ -4368,12 +4413,7 @@ public class MainActivity extends AppCompatActivity {
         } else if (currentVyhybka != null && currentTudu != null) {
             lastCastHintCast = -1;
             resetCastBranchSelection();
-            int nextCast = firstMissingCast(currentTudu.code, currentVyhybka);
-            if (nextCast > currentVyhybka.resolvedCastMax()) {
-                advanceToNextVyhybka();
-            } else {
-                epc.cast = nextCast;
-            }
+            applyFirstMissingCastOrAdvance(currentTudu, currentVyhybka);
         } else {
             pendingAdvanceFromCsv = true;
         }
@@ -4982,16 +5022,13 @@ public class MainActivity extends AppCompatActivity {
     private void advanceCastAndVyhybka() {
         if (tuduBoundaryMode) return;
         syncCurrentVyhybka();
-        if (currentVyhybka != null) {
-            int next = epc.cast + 1;
-            if (next > currentVyhybka.resolvedCastMax()) {
-                advanceToNextVyhybka();
-            } else {
-                epc.cast = next;
-            }
-        } else {
+        if (currentTudu == null || currentVyhybka == null) {
             epc.cast += 1;
+            return;
         }
+        // Podle CSV (ne slepé +1): když GPS mezitím už nastavilo další chybějící čip,
+        // nepřeskočí se další (např. 1→2 přes GPS a pak Continue by udělalo 2→3).
+        applyFirstMissingCastOrAdvance(currentTudu, currentVyhybka);
     }
 
     /** Po obnově z CSV nastaví další čip k zápisu podle chybějících záznamů. */
@@ -5005,8 +5042,25 @@ public class MainActivity extends AppCompatActivity {
         pendingAdvanceFromCsv = false;
         lastCastHintCast = -1;
         resetCastBranchSelection();
-        int nextCast = firstMissingCast(currentTudu.code, currentVyhybka);
-        if (nextCast > currentVyhybka.resolvedCastMax()) {
+        applyFirstMissingCastOrAdvance(currentTudu, currentVyhybka);
+    }
+
+    /**
+     * Nastaví {@link #epc}.cast na první chybějící čip výhybky.
+     * Když už nic nechybí, přejde na další nedokončenou výhybku v rámci UDU
+     * (ne jen aktuálního podtypu TUDU) – nikdy nenechá cast = castMax+1 (např. 4/3).
+     */
+    private void applyFirstMissingCastOrAdvance(Tudu tudu, Tudu.Vyhybka v) {
+        if (tudu == null || v == null) return;
+        ensureVyhybkaRoBranches(tudu.code, v);
+        int nextCast = firstMissingCast(tudu.code, v);
+        if (nextCast > v.resolvedCastMax()) {
+            if (currentTudu != tudu) {
+                currentTudu = tudu;
+                epc.tudu = tudu.code;
+            }
+            currentVyhybka = v;
+            epc.vyhybka = v.cislo;
             advanceToNextVyhybka();
         } else {
             epc.cast = nextCast;
@@ -5034,37 +5088,166 @@ public class MainActivity extends AppCompatActivity {
     private void advanceToNextVyhybka() {
         if (currentTudu == null) return;
         syncCurrentVyhybka();
+        String udu = currentUduCode();
+        if (udu.isEmpty()) return;
+        // Doplnit všechny podtypy TUDU stanice – dřív se hledalo jen v currentTudu.
+        if (dzsDatabase != null) {
+            try {
+                for (Tudu t : dzsDatabase.loadTuduForUdu(udu)) {
+                    mergeTuduIntoList(t);
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Načtení výhybek UDU při posunu selhalo", e);
+            }
+        }
+        String currentTuduCode = currentTudu.code;
         int currentCislo = currentVyhybka != null ? currentVyhybka.cislo : epc.vyhybka;
+        String currentIob = currentVyhybka != null ? currentVyhybka.iob : "";
 
         if (gpsAutoSelection) {
-            Tudu.Vyhybka next = nearestIncompleteVyhybkaByGps(currentTudu);
-            if (next != null && next.cislo != currentCislo) {
-                selectVyhybka(next, true);
+            VyhybkaPickerItem next = nearestIncompleteVyhybkaItemByGps(udu);
+            if (next != null && !sameVyhybkaItem(next, currentTuduCode, currentCislo, currentIob)) {
+                selectVyhybkaPickerItem(next, true);
                 gpsVyhybkaLocked = true;
                 return;
             }
             if (next == null) {
+                clampCastAfterCompletedVyhybka();
                 toast("Poslední výhybka v UDU – cyklus dokončen.");
                 return;
             }
         }
 
-        if (currentTudu.vyhybky.isEmpty()) return;
-        int idx = currentVyhybka != null
-                ? findVyhybkaIndex(currentVyhybka.cislo)
-                : findVyhybkaIndex(epc.vyhybka);
+        List<VyhybkaPickerItem> items = collectVyhybkaItemsForUdu(udu);
+        if (items.isEmpty()) {
+            clampCastAfterCompletedVyhybka();
+            return;
+        }
+        int idx = indexOfVyhybkaItem(items, currentTuduCode, currentCislo, currentIob);
         if (idx < 0) return;
-        for (int i = idx + 1; i < currentTudu.vyhybky.size(); i++) {
-            Tudu.Vyhybka next = currentTudu.vyhybky.get(i);
-            if (!isVyhybkaCompleteInCsv(currentTudu.code, next)) {
-                selectVyhybka(next, true);
+        for (int i = idx + 1; i < items.size(); i++) {
+            VyhybkaPickerItem next = items.get(i);
+            if (!isVyhybkaCompleteInCsv(next.tuduCode, next.vyhybka)) {
+                selectVyhybkaPickerItem(next, true);
                 return;
             }
         }
+        clampCastAfterCompletedVyhybka();
         toast("Poslední výhybka v UDU – cyklus dokončen.");
     }
 
-    /** V GPS režimu vrátí nejbližší nedokončenou výhybku v rámci TUDU (podle vzdálenosti). */
+    /** Po dokončení poslední výhybky v UDU nenechat epc.cast = castMax+1 (např. 4/3). */
+    private void clampCastAfterCompletedVyhybka() {
+        if (currentVyhybka == null) return;
+        int max = currentVyhybka.resolvedCastMax();
+        if (epc.cast > max) {
+            epc.cast = max;
+        }
+    }
+
+    private static boolean sameVyhybkaItem(VyhybkaPickerItem item, String tuduCode,
+                                           int cislo, String iob) {
+        if (item == null) return false;
+        if (!item.tuduCode.equals(tuduCode) || item.vyhybka.cislo != cislo) return false;
+        return iob == null || iob.isEmpty() || item.vyhybka.iob.equals(iob);
+    }
+
+    private static int indexOfVyhybkaItem(List<VyhybkaPickerItem> items, String tuduCode,
+                                          int cislo, String iob) {
+        if (items == null || cislo <= 0) return -1;
+        for (int i = 0; i < items.size(); i++) {
+            if (sameVyhybkaItem(items.get(i), tuduCode, cislo, iob)) return i;
+        }
+        for (int i = 0; i < items.size(); i++) {
+            VyhybkaPickerItem item = items.get(i);
+            if (item.tuduCode.equals(tuduCode) && item.vyhybka.cislo == cislo) return i;
+        }
+        for (int i = 0; i < items.size(); i++) {
+            if (items.get(i).vyhybka.cislo == cislo) return i;
+        }
+        return -1;
+    }
+
+    private void selectVyhybkaPickerItem(VyhybkaPickerItem item, boolean resetCast) {
+        if (item == null) return;
+        Tudu owner = findTuduByCode(item.tuduCode);
+        if (owner == null) {
+            owner = resolveTuduForUdu(Tudu.uduCode(item.tuduCode));
+        }
+        if (owner != null) {
+            currentTudu = owner;
+            epc.tudu = owner.code;
+            Tudu.Vyhybka fromOwner = null;
+            for (Tudu.Vyhybka v : owner.vyhybky) {
+                if (v.cislo == item.vyhybka.cislo
+                        && (item.vyhybka.iob.isEmpty() || v.iob.equals(item.vyhybka.iob))) {
+                    fromOwner = v;
+                    break;
+                }
+            }
+            selectVyhybka(fromOwner != null ? fromOwner : item.vyhybka, resetCast);
+        } else {
+            currentTudu = new Tudu(item.tuduCode);
+            currentTudu.vyhybky.add(item.vyhybka);
+            tuduList.add(currentTudu);
+            epc.tudu = item.tuduCode;
+            selectVyhybka(item.vyhybka, resetCast);
+        }
+    }
+
+    /** V GPS režimu vrátí nejbližší nedokončenou výhybku v rámci celého UDU. */
+    private VyhybkaPickerItem nearestIncompleteVyhybkaItemByGps(String uduCode) {
+        if (uduCode == null || uduCode.isEmpty() || !gpsAutoSelection || locationCache == null
+                || !locationCache.getSnapshot().valid || dzsDatabase == null) {
+            return null;
+        }
+        LocationCache.Snapshot snap = locationCache.getSnapshot();
+        List<VyhybkaPickerItem> items = collectVyhybkaItemsForUdu(uduCode);
+        if (items.isEmpty()) {
+            List<Tudu> loaded = dzsDatabase.loadTuduForUdu(uduCode);
+            for (Tudu t : loaded) {
+                mergeTuduIntoList(t);
+            }
+            items = collectVyhybkaItemsForUdu(uduCode);
+        }
+        if (items.isEmpty()) return null;
+
+        Map<String, Double> distances;
+        try {
+            List<Tudu> tudusForUdu = new ArrayList<>();
+            for (Tudu t : tuduList) {
+                if (t.uduCode().equals(uduCode)) tudusForUdu.add(t);
+            }
+            distances = dzsDatabase.findVyhybkaDistancesForUdu(
+                    tudusForUdu, snap.latitude, snap.longitude);
+        } catch (Exception e) {
+            Log.w(TAG, "Vzdálenosti výhybek v UDU selhaly", e);
+            return null;
+        }
+        if (distances == null || distances.isEmpty()) return null;
+
+        List<VyhybkaPickerItem> sorted = new ArrayList<>(items);
+        sorted.sort((a, b) -> {
+            Double da = distances.get(vyhybkaPickerKey(a.tuduCode, a.vyhybka));
+            Double db = distances.get(vyhybkaPickerKey(b.tuduCode, b.vyhybka));
+            if (da == null && db == null) {
+                int tuduCmp = a.tuduCode.compareTo(b.tuduCode);
+                return tuduCmp != 0 ? tuduCmp : Integer.compare(a.vyhybka.cislo, b.vyhybka.cislo);
+            }
+            if (da == null) return 1;
+            if (db == null) return -1;
+            int cmp = Double.compare(da, db);
+            return cmp != 0 ? cmp : Integer.compare(a.vyhybka.cislo, b.vyhybka.cislo);
+        });
+        for (VyhybkaPickerItem item : sorted) {
+            if (!isVyhybkaCompleteInCsv(item.tuduCode, item.vyhybka)) {
+                return item;
+            }
+        }
+        return null;
+    }
+
+    /** V GPS režimu vrátí nejbližší nedokončenou výhybku v rámci daného TUDU. */
     private Tudu.Vyhybka nearestIncompleteVyhybkaByGps(Tudu tudu) {
         if (tudu == null || !gpsAutoSelection || locationCache == null
                 || !locationCache.getSnapshot().valid || dzsDatabase == null) {
