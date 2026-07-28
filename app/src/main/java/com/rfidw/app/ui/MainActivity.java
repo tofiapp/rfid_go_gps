@@ -1318,7 +1318,8 @@ public class MainActivity extends AppCompatActivity {
     /**
      * Po úspěšném zápisu tagu hranice TUDU ukončí režim čipu 5 a v GPS režimu
      * automaticky najde nejbližší další výhybku. Mazání hranice z CSV zůstává
-     * v {@link #restoreStateAfterCsvRemoval()} – tam se režim obnoví podle posledního řádku.
+     * v {@link #restoreStateAfterCsvRemoval(CsvStore.Row)} – tam se režim obnoví
+     * podle zbývajícího CSV (nebo ukončí režim hranice).
      */
     private void finishTuduBoundaryWriteCycle() {
         exitTuduBoundaryMode();
@@ -2798,13 +2799,16 @@ public class MainActivity extends AppCompatActivity {
 
     /** Obnoví stav šablony a náhled posledního záznamu z již načteného CSV. */
     private void restoreStateFromLoadedCsv() {
-        if (csvStore == null || csvStore.size() == 0) return;
+        if (csvStore == null || csvStore.size() == 0) {
+            // Prázdné CSV (např. po smazání souboru na čtečce) – ID_RFID z prefs ponechat.
+            syncNextIdRfidFromCsv(null);
+            return;
+        }
         CsvStore.Row last = csvStore.getLastRow();
         if (last == null) return;
 
         applyRowToEpc(last);
-        epc.idRfid = Math.max(DEFAULT_ID_RFID, csvStore.getMaxIdRfid() + 1);
-        prefs.edit().putLong("idRfid", epc.idRfid).apply();
+        syncNextIdRfidFromCsv(null);
         syncCurrentVyhybka();
         if (tuduBoundaryMode) {
             lastCastHintCast = -1;
@@ -2822,6 +2826,31 @@ public class MainActivity extends AppCompatActivity {
             ensureGpsForTuduLookup();
         }
         resyncCastRangeFromPersistedState();
+    }
+
+    /**
+     * Další ID_RFID podle obsahu CSV, s pamětí v prefs přes smazání celého souboru.
+     * <ul>
+     *   <li>CSV má řádky → {@code max(ID_RFID) + 1} (po smazání záznamu lze ID znovu použít)</li>
+     *   <li>CSV prázdné po smazání posledního řádku → vrátit ID smazaného záznamu</li>
+     *   <li>CSV prázdné bez konkrétního smazání (soubor pryč) → ponechat prefs</li>
+     * </ul>
+     */
+    private void syncNextIdRfidFromCsv(CsvStore.Row removed) {
+        long csvMax = csvStore != null ? csvStore.getMaxIdRfid() : 0;
+        if (csvMax > 0) {
+            epc.idRfid = Math.max(DEFAULT_ID_RFID, csvMax + 1);
+        } else if (removed != null) {
+            long removedId = parseLong(removed.idRfid, 0);
+            if (removedId >= DEFAULT_ID_RFID) {
+                epc.idRfid = removedId;
+            } else {
+                epc.idRfid = Math.max(DEFAULT_ID_RFID, prefs.getLong("idRfid", DEFAULT_ID_RFID));
+            }
+        } else {
+            epc.idRfid = Math.max(DEFAULT_ID_RFID, prefs.getLong("idRfid", DEFAULT_ID_RFID));
+        }
+        prefs.edit().putLong("idRfid", epc.idRfid).apply();
     }
 
     /** Po načtení CSV/DB doplní rozsah částí výhybky a obnoví ukazatele čipů. */
@@ -2898,6 +2927,11 @@ public class MainActivity extends AppCompatActivity {
         refreshCsvTable();
         if (csvStore.size() > 0) {
             restoreStateFromLoadedCsv();
+        } else {
+            // Soubor smazán / prázdný – ID_RFID z prefs (poslední známé pokračování).
+            syncNextIdRfidFromCsv(null);
+            refreshTemplate();
+            updateSummary1();
         }
         if (showToast) {
             toast(getString(R.string.csv_reloaded_toast));
@@ -4392,31 +4426,51 @@ public class MainActivity extends AppCompatActivity {
         updateSummary1();
     }
 
-    /** Po smazání posledního řádku nastaví další čip k zápisu podle zbývajícího CSV. */
-    private void restoreStateAfterCsvRemoval() {
-        if (csvStore == null || csvStore.size() == 0) {
+    /**
+     * Po smazání posledního řádku obnoví kontext zápisu na smazanou výhybku
+     * (první chybějící čip + volné typy částí) a srovná ID_RFID.
+     */
+    private void restoreStateAfterCsvRemoval(CsvStore.Row removed) {
+        syncNextIdRfidFromCsv(removed);
+
+        if (removed != null && isTuduBoundaryCast(parseInt(removed.cast, 0))) {
             exitTuduBoundaryMode();
             resetCastBranchSelection();
-            updateStep1();
-            updateSummary1();
-            resetTagWorkflow();
-            return;
-        }
-        CsvStore.Row last = csvStore.getLastRow();
-        if (last == null) return;
-        applyRowToEpc(last);
-        epc.idRfid = Math.max(DEFAULT_ID_RFID, csvStore.getMaxIdRfid() + 1);
-        prefs.edit().putLong("idRfid", epc.idRfid).apply();
-        syncCurrentVyhybka();
-        if (tuduBoundaryMode) {
-            lastCastHintCast = -1;
-        } else if (currentVyhybka != null && currentTudu != null) {
-            lastCastHintCast = -1;
-            resetCastBranchSelection();
-            applyFirstMissingCastOrAdvance(currentTudu, currentVyhybka);
+            if (csvStore != null && csvStore.size() > 0) {
+                CsvStore.Row last = csvStore.getLastRow();
+                if (last != null) {
+                    applyRowToEpc(last);
+                    syncCurrentVyhybka();
+                    if (!tuduBoundaryMode && currentTudu != null && currentVyhybka != null) {
+                        applyFirstMissingCastOrAdvance(currentTudu, currentVyhybka);
+                    }
+                }
+            }
+        } else if (removed != null) {
+            exitTuduBoundaryMode();
+            restoreWriteContextAfterRemoval(removed);
+        } else if (csvStore != null && csvStore.size() > 0) {
+            CsvStore.Row last = csvStore.getLastRow();
+            if (last != null) {
+                applyRowToEpc(last);
+                syncCurrentVyhybka();
+                if (tuduBoundaryMode) {
+                    lastCastHintCast = -1;
+                } else if (currentVyhybka != null && currentTudu != null) {
+                    resetCastBranchSelection();
+                    applyFirstMissingCastOrAdvance(currentTudu, currentVyhybka);
+                } else {
+                    pendingAdvanceFromCsv = true;
+                }
+            }
         } else {
-            pendingAdvanceFromCsv = true;
+            exitTuduBoundaryMode();
+            resetCastBranchSelection();
+            if (currentTudu != null && currentVyhybka != null) {
+                applyFirstMissingCastOrAdvance(currentTudu, currentVyhybka);
+            }
         }
+
         refreshTemplate();
         updateStep1();
         updateSummary1();
@@ -4429,6 +4483,49 @@ public class MainActivity extends AppCompatActivity {
             lastGpsLookupLon = null;
             lastGpsLookupTimeMs = 0;
             ensureGpsForTuduLookup();
+        }
+    }
+
+    /**
+     * Po smazání záznamu výhybky zůstane uživatel na stejné TUDU/výhybce
+     * a dostane první chybějící čip (typicky ten právě smazaný).
+     */
+    private void restoreWriteContextAfterRemoval(CsvStore.Row removed) {
+        if (removed == null) return;
+        resetCastBranchSelection();
+
+        String tuduCode = removed.tudu;
+        int vyhybkaCislo = parseInt(removed.vyhybka, -1);
+        if (tuduCode == null || tuduCode.isEmpty() || vyhybkaCislo < 0) {
+            pendingAdvanceFromCsv = true;
+            return;
+        }
+
+        currentTudu = resolveTuduForUdu(Tudu.uduCode(tuduCode));
+        epc.tudu = tuduCode;
+        currentVyhybka = null;
+        if (currentTudu != null) {
+            for (Tudu.Vyhybka v : currentTudu.vyhybky) {
+                if (v.cislo == vyhybkaCislo) {
+                    currentVyhybka = v;
+                    break;
+                }
+            }
+        }
+        epc.vyhybka = vyhybkaCislo;
+
+        if (currentTudu != null && currentVyhybka != null) {
+            int castInRow = parseInt(removed.cast, 0);
+            if (castInRow > 0) {
+                currentVyhybka.ensureCastAtLeast(castInRow);
+            }
+            currentVyhybka.applyCastRangeFromPoloha(removed.poloha);
+            ensureVyhybkaRoBranches(currentTudu.code, currentVyhybka);
+            applyFirstMissingCastOrAdvance(currentTudu, currentVyhybka);
+        } else {
+            int castInRow = parseInt(removed.cast, 0);
+            epc.cast = castInRow > 0 ? castInRow : 1;
+            pendingAdvanceFromCsv = true;
         }
     }
 
@@ -4497,7 +4594,7 @@ public class MainActivity extends AppCompatActivity {
             }
             ui.post(() -> {
                 refreshCsvTable();
-                restoreStateAfterCsvRemoval();
+                restoreStateAfterCsvRemoval(removed);
                 updateLastRecordPreview();
                 toast("Poslední záznam vymazán");
             });
